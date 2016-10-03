@@ -1,21 +1,26 @@
-#!/usr/bin/env Rscript
-args = commandArgs(trailingOnly=TRUE)
-args = c('PR1/HIN/044')
-
-if (length(args) == 0) {
-  stop("Patient name required as argument")
-}
-
+library(copynumber)
 source("lib/fastPCF.R")
 
-#source("/lustre/scratch110/sanger/dw9/haplotype_pipeline/fastPCF.R")
-library(copynumber)
+#!/usr/bin/env Rscript
+args = commandArgs(trailingOnly=TRUE)
 
-#load(file="MultisampleCopynumberBinnedFittedAndStandardised.RData")
-load(file="MultisampleCopynumberBinnedAndFitted2.RData")
+
+
+if (length(args) == 0) {
+  stop("Data directory and patient name required as arguments")
+}
+
+data = args[1]
+patient.name = args[2]
+
+data = '~/Data/Ellie/QDNAseq'
+patient.name = 'PR1/HIN/042' #'PR1/HIN/044'
+
+
+load(file=paste(data, "MultisampleCopynumberBinnedAndFitted2.RData", sep='/'))
 
 #200216 filter dodgy regions
-blacklisted.regions = read.table("data/qDNAseq_blacklistedRegions.txt",sep="\t",header=T,stringsAsFactors=F)
+blacklisted.regions = read.table(paste(data, "qDNAseq_blacklistedRegions.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
 fit.data$in.blacklist = F
 
 for(r in 1:nrow(blacklisted.regions)) {
@@ -31,15 +36,15 @@ names(window.depths.standardised) = samplenames
 fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
 
 #just use samples from one patient
-patient.info = read.table("data/All_patient_info.txt",sep="\t",header=T,stringsAsFactors=F)
+patient.info = read.table(paste(data, "All_patient_info.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
 head(patient.info)
-patient.info$SLX_ID[patient.info$SLX_ID=="SLX-10729"] = "SLX-10725_10729"
-patient.info$SLX_ID[patient.info$SLX_ID=="SLX-10725"] = "SLX-10725_10729"
-patient.info$samplename = paste(patient.info$Index,gsub("SLX-","",patient.info$SLX_ID),sep="_")
+#patient.info$SLX_ID[patient.info$SLX_ID=="SLX-10729"] = "SLX-10725_10729"
+#patient.info$SLX_ID[patient.info$SLX_ID=="SLX-10725"] = "SLX-10725_10729"
+patient.info$samplename = gsub('-', '_', paste(patient.info$Index,trimws(patient.info$SLX),sep="_"))
 
 # I think this is collating the necessary information for a single patient
 #patient.index = 2 #as.numeric(commandArgs(T)[1])
-patient.name = as.character(args[1])   #unique(patient.info$Patient)[patient.index]
+
 print(patient.name)
 patient.info = subset(patient.info, Patient == patient.name)
 if (nrow(patient.info) <= 0)
@@ -70,8 +75,8 @@ good.bins = which(!is.na(rowSums(window.depths.standardised[,!is.na(sdevs)])))
 
 patient.name = gsub("/","_",patient.name)
 
-if (!dir.exists('multipcf_plots_fitted_perPatient/'))
-  dir.create('multipcf_plots_fitted_perPatient/')
+plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
+dir.create(plot.dir, showWarnings=F)
 
 for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but not really necessary right now I suppose
   message(paste("gamma2:",gamma2))
@@ -79,7 +84,7 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but 
   # ?? gamma is the important parameter here, is the loop to help find an appropriate gamma? 
   ## Note that the pre processing of the data was to provide Windsorized values
 	res = multipcf( cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)]), gamma=gamma2*sdev, fast=F)
-	write.table(res,paste("multipcf_plots_fitted_perPatient/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F)
+	write.table(res,paste(plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F)
 	print(dim(res))
 	chrs=unique(res$chrom)
 	chr.lengths = vector(mode="integer",length=length(chrs))
@@ -94,13 +99,13 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but 
 	res$chrpos.end = res$end.pos + cum.lengths[match(res$chrom,chrs)]
 }
 
+patient.plot.dir = paste(plot.dir, "multipcf_plots_fitted_perPatient",patient.name, sep='/')
 #reload and plot segmented vals
 #do 250 first
 for(gamma2 in c(250,5,10,25,50,100,500,1000)){
-	segvals = read.table(paste("multipcf_plots_fitted_perPatient/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
-	plotdir = paste("multipcf_plots_fitted_perPatient",patient.name, paste("gamma2", gamma2, sep="_"), sep="/")
-	if (!dir.exists(plotdir))
-	  dir.create(plotdir, recursive=T)
+	segvals = read.table(paste(plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
+	gamma.plot = paste(plot.dir, "multipcf_plots_fitted_perPatient",patient.name, paste("gamma2", gamma2, sep="_"), sep="/")
+	dir.create(patient.plot.dir, recursive=T, showWarnings=T)
 	
 	for(chr in 1:22){
 		print(chr)
@@ -117,8 +122,8 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 			ht = 5000 * n.rows / 12
 		}
 		
-		paste(plotdir, "/", patient.name,"_segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep="")
-		png(paste(plotdir, "/", patient.name,"_segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""),width=wid,height=ht)
+		paste(gamma.plot, "/", patient.name,"_segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep="")
+		png(paste(gamma.plot, "/", patient.name,"_segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""),width=wid,height=ht)
 		par(mfrow=c(n.rows,min(no.samples,10)))
 		for(col in which(!is.na(sdevs))){
 			plot(fit.data$end[indices],window.depths.standardised[indices,col],col="red",pch=20,cex=1,cex.axis=2,cex.lab=2,cex.main=2,xlab="pos",ylab="segmented coverage",main=paste("chr",chr,", ",samplenames[col],sep=""),ylim=c(0,3))
@@ -144,20 +149,23 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 	out = cbind(segvals[,1:5],sds,shapiro.wilk)
 	names(out)[6:7] = c("st_dev","ShapiroWilk")
 	
-	write.table(out,paste("multipcf_plots_fitted_perPatient/",patient.name,"_allSamples_fitted_multipcf_variability_gamma",gamma2,".txt",sep=""),sep="\t",row.names=F,quote=F)
+	paste(gamma.plot, "allSamples_fitted_multipcf_variability_gamma.txt",sep="/")
 	
-	png(paste(plotdir, "/", patient.name,"_multipcf_variability_clean_gamma",gamma2,".png",sep=""))
+	write.table(out,paste(gamma.plot, "allSamples_fitted_multipcf_variability_gamma.txt",sep="/"),sep="\t",row.names=F,quote=F)
+	
+	png(paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""))
 	plot(out[,6],out[,7],cex=log(segvals$n.probes)+1,bg=rgb(1,0,0,0.5),pch=21,xlab="standard deviation",ylab="Shapiro-Wilk statistic",xlim=c(0,1))
 	dev.off()
 	#DENS=density(CofV[!is.na(CofV) & !is.infinite(CofV)])
 	#use SDs rather than CofV
 	DENS=density(sds[!is.na(sds) & !is.infinite(sds)],from=0,to=1)
-	#png(paste("multipcf_plots_fitted_perPatient/",patient.name,"_multipcf_CoeffOfVar_density_gamma",gamma2,".png",sep=""))
-	png(paste(plotdir, "/",patient.name,"_multipcf_StDev_density_gamma",gamma2,".png",sep=""))
+	
+	png(paste(gamma.plot, "/multipcf_StDev_density_gamma",gamma2,".png",sep=""))
 	plot(DENS,xlab="standard deviation",main="")
 	dev.off()
+	
 	DENS=density(shapiro.wilk[!is.na(shapiro.wilk) & !is.infinite(shapiro.wilk)])
-	png(paste(plotdir, "/",patient.name,"_multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
+	png(paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
 	plot(DENS,xlab="Shapiro-Wilk statistic",main="")
 	dev.off()
 
@@ -167,7 +175,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 	#plot density just for segments with at least 50 probes
 	if(length(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes>=n.threshold])>=2) {
 		DENS=density(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes>=n.threshold],from=0,to=1)
-		png(paste(plotdir, "/",patient.name,"_multipcf_StDev_density_gamma",gamma2,"_50probes.png",sep=""))
+		png(paste(gamma.plot, "/multipcf_StDev_density_gamma",gamma2,".png",sep=""))
 		plot(DENS,xlab="standard deviation",main="")
 		dev.off()
 	}
@@ -177,14 +185,16 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 	variable.region.indices = which(sds>=sd.threshold & segvals$n.probes>=n.threshold)
 	print("variable regions:")
 	print(segvals[variable.region.indices,1:5])
-	write.table(segvals[variable.region.indices,1:5],paste("multipcf_plots_fitted_perPatient/",patient.name,"_variableRegions_gamma",gamma2,"_sd",sd.threshold,"_n",n.threshold,".txt",sep=""),sep="\t",row.names=F,quote=F)
+	write.table(segvals[variable.region.indices,1:5],
+	            paste(gamma.plot, "/variableRegions_gamma",gamma2,"_sd", sd.threshold, "_n", n.threshold, ".txt",sep="")
+	            ,sep="\t",row.names=F,quote=F)
 	
 	no.variable.regions = length(variable.region.indices)
-	if(no.variable.regions>0){
+	if(no.variable.regions>0) {
 		hclust.data = segvals[variable.region.indices,-(1:5)]	
 		colnames(hclust.data) = samplenames
 		HC = hclust(dist(t(hclust.data)))
-		png(paste(plotdir, "/",patient.name,"_hierarchical_clustering_plot_multipcf_gamma",gamma2,"_sd",sd.threshold,"_n",n.threshold,".png",sep=""))
+		png(paste(gamma.plot, "/hierarchical_clustering_plot_multipcf_gamma",gamma2,"_sd",sd.threshold,"_n",n.threshold,".png",sep=""))
 		plot(HC,xlab="",sub="")
 		dev.off()
 	}

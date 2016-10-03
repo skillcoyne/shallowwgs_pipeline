@@ -3,18 +3,21 @@ library(ggplot2)
 library(ggdendro)
 # this version removes qDNAseq 'blacklisted' regions and uses 'fitted' read counts
 
-#setwd("/lustre/scratch112/sanger/cgppipe/PanCancerDownloads/workspace/dw9/Ellie")
+args = commandArgs(trailingOnly=TRUE)
 
-#setwd("~/Documents/MRC-OwnCloud/skillcoyne/Documents/Ellie BE Project/")
+if (length(args) < 2)
+  stop("Missing required arguments: <qdna data dir> <output dir>")
 
-data = "~/Data/Ellie/QDNAseq"
+data = args[1]
+outdir = args[2]
 
-data.dirs = list.dirs(data, full.names=T, recursive=F)
-#data.dirs = paste(data, c("SLX-10725_10729","SLX-9242","SLX-9246"), sep="/")
-
-outdir = "~/tmp/plots_fitted"
+outdir = paste(outdir, "plots_fitted", sep='/')
 if ( !dir.exists(outdir) ) 
   dir.create(outdir)
+
+data.dirs = list.dirs(data, full.names=T, recursive=F)
+if (length(data.dirs) <= 0)
+  stop(paste("No directories in", data))
 
 # Load the data, binding each new data file into single data table
 fit.data = NULL
@@ -26,11 +29,12 @@ for(dir in data.dirs) {
 
 	if (length(files) == 1) {
 	  fit = read.table(paste(dir,"/",files[1],sep=""),sep="\t",header=T,stringsAsFactors=F)  # fitted reads
+	  name = sub('SLX-', '', basename(dir))
 	  cols = grep('D\\d', colnames(fit))
-	  colnames(fit)[cols]= paste(colnames(fit)[cols], '10722_11823', sep="_") # hardcoded...fix this from spreadsheets later
+	  colnames(fit)[cols]= paste(colnames(fit)[cols], name, sep="_") 
 	  
 	  raw = read.table(paste(dir,"/",gsub("fitted|correctedR","r",files[1]),sep=""),sep="\t",header=T,stringsAsFactors=F) # raw reads
-	  colnames(raw)[cols]= paste(colnames(raw)[cols], '10722_11823', sep="_") # hardcoded...fix this from spreadsheets later
+	  colnames(raw)[cols]= paste(colnames(raw)[cols], name, sep="_") # hardcoded...fix this from spreadsheets later
 	  
 	  if (is.null(fit.data)) {
 	    fit.data = fit
@@ -72,7 +76,6 @@ for(dir in data.dirs) {
 }
 save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
 
-
 chrs = ddply(fit.data, .(chrom), summarise, length=max(end))
 chrs$chrom = factor(chrs$chrom, c((1:22),"X","Y","M"), ordered=T)
 chrs = chrs[order(chrs$chrom),]
@@ -86,7 +89,6 @@ fit.data$genome.pos = as.numeric(fit.data$start)
 for (c in 2:nrow(chrs)) {
   fit.data$genome.pos[fit.data$chrom == chrs[c, 'chrom']] = fit.data$genome.pos[fit.data$chrom == chrs[c, 'chrom']] + chrs[c-1, 'cum.lengths']   #cum.lengths[c-1]
 }
-save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted2.RData", sep='/'))
 
 # "count" columns
 depth.cols = grep('^D\\d',colnames(fit.data))
@@ -97,9 +99,16 @@ window.depths = cbind(fit.data[,c('chrom','start','end','genome.pos')], window.d
 
 samplenames = colnames(fit.data)[depth.cols]
 chr.info = colnames(window.depths)[1:depth.cols[1]-1]
+save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted2.RData", sep='/'))
+
+
+
+plot.dir = paste(outdir, 'coverage_binned_fitted', sep='/')
+dir.create(plot.dir, showWarnings=F)
+
 for (s in samplenames) {
   print(paste("plotting ",s,sep=""))
-  png(paste(outdir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
+  png(paste(plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
   gg = ggplot(window.depths[,c(chr.info, s)],aes_string(x="genome.pos", y=s)) + lims(y=c(-0.25,3), x =c(0,max(window.depths$genome.pos))) + 
     geom_point(color='darkred', alpha=0.5) +
     geom_vline(data=chrs, xintercept=c(0,chrs$cum.lengths), color='darkgrey') + 
