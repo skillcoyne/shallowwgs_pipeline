@@ -76,7 +76,8 @@ good.bins = which(!is.na(rowSums(window.depths.standardised[,!is.na(sdevs)])))
 patient.name = gsub("/","_",patient.name)
 
 plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
-dir.create(plot.dir, showWarnings=F)
+if (!dir.exists(plot.dir))  
+  dir.create(plot.dir)
 
 for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but not really necessary right now I suppose
   message(paste("gamma2:",gamma2))
@@ -99,13 +100,14 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but 
 	res$chrpos.end = res$end.pos + cum.lengths[match(res$chrom,chrs)]
 }
 
-patient.plot.dir = paste(plot.dir, "multipcf_plots_fitted_perPatient",patient.name, sep='/')
+patient.plot.dir = paste(plot.dir,patient.name, sep='/')
 #reload and plot segmented vals
 #do 250 first
 for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 	segvals = read.table(paste(plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
-	gamma.plot = paste(plot.dir, "multipcf_plots_fitted_perPatient",patient.name, paste("gamma2", gamma2, sep="_"), sep="/")
-	dir.create(patient.plot.dir, recursive=T, showWarnings=T)
+	gamma.plot = paste(patient.plot.dir, paste("gamma2", gamma2, sep="_"), sep="/")
+	if (!dir.exists(gamma.plot))
+	  dir.create(gamma.plot, recursive=T, showWarnings=F)
 	
 	for(chr in 1:22){
 		print(chr)
@@ -122,8 +124,8 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 			ht = 5000 * n.rows / 12
 		}
 		
-		paste(gamma.plot, "/", patient.name,"_segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep="")
-		png(paste(gamma.plot, "/", patient.name,"_segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""),width=wid,height=ht)
+		paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep="")
+		png(paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""),width=wid,height=ht)
 		par(mfrow=c(n.rows,min(no.samples,10)))
 		for(col in which(!is.na(sdevs))){
 			plot(fit.data$end[indices],window.depths.standardised[indices,col],col="red",pch=20,cex=1,cex.axis=2,cex.lab=2,cex.main=2,xlab="pos",ylab="segmented coverage",main=paste("chr",chr,", ",samplenames[col],sep=""),ylim=c(0,3))
