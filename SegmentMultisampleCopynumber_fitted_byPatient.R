@@ -1,10 +1,9 @@
 #!/usr/bin/env Rscript
+args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 3) {
   stop("Data directory, patient name, and plot output directory required as arguments")
 }
-
-args = commandArgs(trailingOnly=TRUE)
 
 suppressPackageStartupMessages( library(ggplot2) )
 suppressPackageStartupMessages( library(ggdendro) )
@@ -17,9 +16,9 @@ data = args[1]
 patient.name = args[2]
 outdir = args[3]
 
-data = '~/Data/Ellie/QDNAseq'
-patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
-outdir = '~/Data/Ellie'
+#data = '~/Data/Ellie/QDNAseq'
+#patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
+#outdir = '~/Data/Ellie'
 
   
 patient.info = read.table(paste(data, "All_patient_info.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
