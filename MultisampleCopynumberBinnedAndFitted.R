@@ -74,7 +74,8 @@ for(dir in data.dirs) {
 	  }
   }
 }
-save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
+#save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
+save(fit.data, raw.data, file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
 
 chrs = ddply(fit.data, .(chrom), summarise, length=max(end))
 chrs$chrom = factor(chrs$chrom, c((1:22),"X","Y","M"), ordered=T)
@@ -99,8 +100,8 @@ window.depths = cbind(fit.data[,c('chrom','start','end','genome.pos')], window.d
 
 samplenames = colnames(fit.data)[depth.cols]
 chr.info = colnames(window.depths)[1:depth.cols[1]-1]
-save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted2.RData", sep='/'))
-
+#save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted2.RData", sep='/'))
+save(fit.data, raw.data, window.depths, samplenames, chrs, depth.cols, chr.info, file=paste(data,"MultisampleCopynumberBinnedAndFitted2.RData", sep='/'))
 
 
 plot.dir = paste(outdir, 'coverage_binned_fitted', sep='/')

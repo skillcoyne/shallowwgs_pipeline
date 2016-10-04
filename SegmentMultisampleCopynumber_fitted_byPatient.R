@@ -1,4 +1,5 @@
 library(ggplot2)
+library(ggdendro)
 library(copynumber)
 source("lib/fastPCF.R")
 
@@ -11,19 +12,23 @@ if (length(args) < 3) {
 
 data = args[1]
 patient.name = args[2]
+outdir = args[3]
 
-data = '~/Data/Ellie/QDNAseq'
-patient.name = 'PR1/HIN/042' #'PR1/HIN/044'
+#data = '~/Data/Ellie/QDNAseq'
+#patient.name = 'AD0361' # 'PR1/HIN/042' #'PR1/HIN/044'
+#outdir = '~/Data/Ellie'
 
   
 load(file=paste(data, "MultisampleCopynumberBinnedAndFitted2.RData", sep='/'), verbose=T)
 
 #200216 filter dodgy regions
 blacklisted.regions = read.table(paste(data, "qDNAseq_blacklistedRegions.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
+print(paste(nrow(blacklisted.regions), "genomic regions in the exclusion list."))
 fit.data$in.blacklist = F
 
 for(r in 1:nrow(blacklisted.regions)) {
-	print(r)
+  if (r %% 50 ==0) print(r)
+	#print(blacklisted.regions[r,])
 	fit.data$in.blacklist[ fit.data$chrom==blacklisted.regions$chromosome[r] & 
 	                        fit.data$start>=blacklisted.regions$start[r] & 
 	                        fit.data$end<=blacklisted.regions$end[r] ] = T
@@ -31,27 +36,26 @@ for(r in 1:nrow(blacklisted.regions)) {
 
 print(paste("# blacklisted probes = ",sum(fit.data$in.blacklist),sep=""))
 window.depths.standardised = window.depths[!fit.data$in.blacklist,]
-names(window.depths.standardised) = samplenames
 fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
 
 #just use samples from one patient
 patient.info = read.table(paste(data, "All_patient_info.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
 head(patient.info)
-#patient.info$SLX_ID[patient.info$SLX_ID=="SLX-10729"] = "SLX-10725_10729"
-#patient.info$SLX_ID[patient.info$SLX_ID=="SLX-10725"] = "SLX-10725_10729"
 patient.info$samplename = gsub('-', '_', paste(patient.info$Index,trimws(patient.info$SLX),sep="_"))
 
 # I think this is collating the necessary information for a single patient
 #patient.index = 2 #as.numeric(commandArgs(T)[1])
-
 print(patient.name)
 patient.info = subset(patient.info, Patient == patient.name)
 if (nrow(patient.info) <= 0)
   stop(paste("No patient information on patient", patient.name))
 
-sample.indices = match(patient.info$samplename,samplenames)
-samplenames = samplenames[sample.indices]
+missingIndicies = setdiff(patient.info$samplename, samplenames)
+warning(paste("Missing several samples: ", paste(missingIndicies, collapse=', '), sep=''))
+
+sample.indices = na.omit( match(patient.info$samplename,samplenames) )
 window.depths.standardised = window.depths.standardised[,sample.indices]
+samplenames = colnames(window.depths.standardised)
 
 # there are mutiple samples per patient too
 no.samples=length(samplenames)
@@ -84,7 +88,9 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but 
   # ?? gamma is the important parameter here, is the loop to help find an appropriate gamma? 
   ## Note that the pre processing of the data was to provide Windsorized values
 	res = multipcf( cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)]), gamma=gamma2*sdev, fast=F)
+	
 	write.table(res,paste(plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F)
+	
 	print(dim(res))
 	chrs=unique(res$chrom)
 	chr.lengths = vector(mode="integer",length=length(chrs))
@@ -92,7 +98,7 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but 
 		chr.lengths[c] = max(res$end.pos[res$chrom==chrs[c]])+999
 	}
 	cum.lengths = c(0,cumsum(chr.lengths))
-# what is the rest of this loop for?
+  # what is the rest of this loop for?
 	res$chrpos.start = NA
 	res$chrpos.end = NA
 	res$chrpos.start = res$start.pos + cum.lengths[match(res$chrom,chrs)]
@@ -185,8 +191,10 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 	##thresholds selected from density plots
 	#190216 This is done, but we may want to try different thresholds
 	variable.region.indices = which(sds>=sd.threshold & segvals$n.probes>=n.threshold)
+	
 	print("variable regions:")
 	print(segvals[variable.region.indices,1:5])
+
 	write.table(segvals[variable.region.indices,1:5],
 	            paste(gamma.plot, "/variableRegions_gamma",gamma2,"_sd", sd.threshold, "_n", n.threshold, ".txt",sep="")
 	            ,sep="\t",row.names=F,quote=F)
@@ -194,10 +202,10 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 	no.variable.regions = length(variable.region.indices)
 	if(no.variable.regions>0) {
 		hclust.data = segvals[variable.region.indices,-(1:5)]	
-		colnames(hclust.data) = samplenames
+		#colnames(hclust.data) = samplenames
 		HC = hclust(dist(t(hclust.data)))
 		png(paste(gamma.plot, "/hierarchical_clustering_plot_multipcf_gamma",gamma2,"_sd",sd.threshold,"_n",n.threshold,".png",sep=""))
-		plot(HC,xlab="",sub="")
+		print(ggdendrogram(HC, rotate=T) + ggtitle(paste(patient.name, 'gamma2:', gamma2))  )
 		dev.off()
 	}
 }
