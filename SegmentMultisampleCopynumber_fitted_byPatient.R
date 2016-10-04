@@ -1,13 +1,12 @@
+library(ggplot2)
 library(copynumber)
 source("lib/fastPCF.R")
 
 #!/usr/bin/env Rscript
 args = commandArgs(trailingOnly=TRUE)
 
-
-
-if (length(args) == 0) {
-  stop("Data directory and patient name required as arguments")
+if (length(args) < 3) {
+  stop("Data directory, patient name, and plot output directory required as arguments")
 }
 
 data = args[1]
@@ -16,8 +15,8 @@ patient.name = args[2]
 data = '~/Data/Ellie/QDNAseq'
 patient.name = 'PR1/HIN/042' #'PR1/HIN/044'
 
-
-load(file=paste(data, "MultisampleCopynumberBinnedAndFitted2.RData", sep='/'))
+  
+load(file=paste(data, "MultisampleCopynumberBinnedAndFitted2.RData", sep='/'), verbose=T)
 
 #200216 filter dodgy regions
 blacklisted.regions = read.table(paste(data, "qDNAseq_blacklistedRegions.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
@@ -104,6 +103,7 @@ patient.plot.dir = paste(plot.dir,patient.name, sep='/')
 #reload and plot segmented vals
 #do 250 first
 for(gamma2 in c(250,5,10,25,50,100,500,1000)){
+  print(gamma2)
 	segvals = read.table(paste(plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
 	gamma.plot = paste(patient.plot.dir, paste("gamma2", gamma2, sep="_"), sep="/")
 	if (!dir.exists(gamma.plot))
