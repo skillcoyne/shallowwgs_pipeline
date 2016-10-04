@@ -14,9 +14,9 @@ data = args[1]
 patient.name = args[2]
 outdir = args[3]
 
-#data = '~/Data/Ellie/QDNAseq'
-#patient.name = 'AD0361' # 'PR1/HIN/042' #'PR1/HIN/044'
-#outdir = '~/Data/Ellie'
+data = '~/Data/Ellie/QDNAseq'
+patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
+outdir = '~/Data/Ellie'
 
   
 load(file=paste(data, "MultisampleCopynumberBinnedAndFitted2.RData", sep='/'), verbose=T)
@@ -51,7 +51,8 @@ if (nrow(patient.info) <= 0)
   stop(paste("No patient information on patient", patient.name))
 
 missingIndicies = setdiff(patient.info$samplename, samplenames)
-warning(paste("Missing several samples: ", paste(missingIndicies, collapse=', '), sep=''))
+if (length(missingIndicies > 0))
+  warning(paste("Missing several samples: ", paste(missingIndicies, collapse=', '), sep=''))
 
 sample.indices = na.omit( match(patient.info$samplename,samplenames) )
 window.depths.standardised = window.depths.standardised[,sample.indices]
