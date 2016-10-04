@@ -1,14 +1,17 @@
-library(ggplot2)
-library(ggdendro)
-library(copynumber)
-source("lib/fastPCF.R")
-
 #!/usr/bin/env Rscript
-args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 3) {
   stop("Data directory, patient name, and plot output directory required as arguments")
 }
+
+args = commandArgs(trailingOnly=TRUE)
+
+suppressPackageStartupMessages( library(ggplot2) )
+suppressPackageStartupMessages( library(ggdendro) )
+suppressPackageStartupMessages( library(copynumber) )
+
+source("lib/fastPCF.R")
+
 
 data = args[1]
 patient.name = args[2]
@@ -19,6 +22,11 @@ patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
 outdir = '~/Data/Ellie'
 
   
+patient.info = read.table(paste(data, "All_patient_info.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
+head(patient.info)
+patient.info$samplename = gsub('-', '_', paste(patient.info$Index,trimws(patient.info$SLX),sep="_"))
+
+
 load(file=paste(data, "MultisampleCopynumberBinnedAndFitted2.RData", sep='/'), verbose=T)
 
 #200216 filter dodgy regions
@@ -37,12 +45,9 @@ for(r in 1:nrow(blacklisted.regions)) {
 print(paste("# blacklisted probes = ",sum(fit.data$in.blacklist),sep=""))
 window.depths.standardised = window.depths[!fit.data$in.blacklist,]
 fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
+#samplenames = grep('D\\d', colnames(fit.data), value=T)
 
 #just use samples from one patient
-patient.info = read.table(paste(data, "All_patient_info.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
-head(patient.info)
-patient.info$samplename = gsub('-', '_', paste(patient.info$Index,trimws(patient.info$SLX),sep="_"))
-
 # I think this is collating the necessary information for a single patient
 #patient.index = 2 #as.numeric(commandArgs(T)[1])
 print(patient.name)
@@ -50,24 +55,23 @@ patient.info = subset(patient.info, Patient == patient.name)
 if (nrow(patient.info) <= 0)
   stop(paste("No patient information on patient", patient.name))
 
-missingIndicies = setdiff(patient.info$samplename, samplenames)
+missingIndicies = setdiff(patient.info$samplename, colnames(window.depths.standardised))
 if (length(missingIndicies > 0))
   warning(paste("Missing several samples: ", paste(missingIndicies, collapse=', '), sep=''))
 
-sample.indices = na.omit( match(patient.info$samplename,samplenames) )
-window.depths.standardised = window.depths.standardised[,sample.indices]
-samplenames = colnames(window.depths.standardised)
+# Grab just those specific samples
+window.depths.standardised = window.depths.standardised[,na.omit( match(patient.info$samplename, colnames(window.depths.standardised)) )]
+#samplenames = grep('D\\d', colnames(window.depths.standardised), value=T)
 
 # there are mutiple samples per patient too
-no.samples=length(samplenames)
+no.samples=ncol(window.depths.standardised)
 
 # get the median absolution deviation for the observed window depths in each sample
 sdevs = vector(mode="numeric",length=no.samples)
-for(s in 1:no.samples) {
+for(s in 1:no.samples) 
 	sdevs[s] <- getMad( window.depths.standardised[!is.na(window.depths.standardised[,s]),s], k=25)
-}
+
 sdevs[sdevs==0] = NA
-#samples 46 and 47 have no good bins, sdev=NA for these samples
 sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) # geometric mean??
 
 print("sdevs")
