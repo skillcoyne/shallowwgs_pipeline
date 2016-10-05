@@ -19,41 +19,56 @@ outdir = args[3]
 #data = '~/Data/Ellie/QDNAseq'
 #patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
 #outdir = '~/Data/Ellie'
+data.files = list.files(data, full.names=T)
 
-  
-patient.info = read.table(paste(data, "All_patient_info.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
+plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
+print(paste("Plot directory:", plot.dir))
+if (!dir.exists(plot.dir))  
+  dir.create(plot.dir, recursive=T)
+
+## Patient info file
+patient.file = grep('patient_info', data.files, value=T)
+if (length(patient.file) <= 0)
+  stop(paste("Missing patient info file in", data))
+
+patient.info = read.table(patient.file,sep="\t",header=T,stringsAsFactors=F)
 head(patient.info)
 patient.info$samplename = gsub('-', '_', paste(patient.info$Index,trimws(patient.info$SLX),sep="_"))
 
-
-load(file=paste(data, "MultisampleCopynumberBinnedAndFitted2.RData", sep='/'), verbose=T)
-
-#200216 filter dodgy regions
-blacklisted.regions = read.table(paste(data, "qDNAseq_blacklistedRegions.txt", sep='/'),sep="\t",header=T,stringsAsFactors=F)
-print(paste(nrow(blacklisted.regions), "genomic regions in the exclusion list."))
-fit.data$in.blacklist = F
-
-for(r in 1:nrow(blacklisted.regions)) {
-  if (r %% 50 ==0) print(r)
-	#print(blacklisted.regions[r,])
-	fit.data$in.blacklist[ fit.data$chrom==blacklisted.regions$chromosome[r] & 
-	                        fit.data$start>=blacklisted.regions$start[r] & 
-	                        fit.data$end<=blacklisted.regions$end[r] ] = T
-}
-
-print(paste("# blacklisted probes = ",sum(fit.data$in.blacklist),sep=""))
-window.depths.standardised = window.depths[!fit.data$in.blacklist,]
-fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
-#samplenames = grep('D\\d', colnames(fit.data), value=T)
-
-#just use samples from one patient
-# I think this is collating the necessary information for a single patient
-#patient.index = 2 #as.numeric(commandArgs(T)[1])
 print(patient.name)
 patient.info = subset(patient.info, Patient == patient.name)
 if (nrow(patient.info) <= 0)
   stop(paste("No patient information on patient", patient.name))
 
+## Data file
+data.file = grep('MultisampleCopynumberBinnedAndFitted2.RData', data.files, value=T)
+if (length(data.file) <= 0)
+  stop("Missing necessary Rdata file from Multisample script")
+load(file=data.file, verbose=T)
+
+#200216 filter dodgy regions
+exclude.file = grep('qDNAseq_blacklistedRegions.txt', data.files, value=T)
+if (length(data.file) <= 0)
+  stop(paste("Missing necessary exclusion file from 'qDNAseq_blacklistedRegions.txt' in",data))
+
+blacklisted.regions = read.table(exclude.file,sep="\t",header=T,stringsAsFactors=F)
+print(paste(nrow(blacklisted.regions), "genomic regions in the exclusion list."))
+fit.data$in.blacklist = F
+
+for(r in 1:nrow(blacklisted.regions)) {
+  #if (r %% 50 ==0) print(r)
+	#print(blacklisted.regions[r,])
+	fit.data$in.blacklist[ fit.data$chrom==blacklisted.regions$chromosome[r] & 
+	                        fit.data$start>=blacklisted.regions$start[r] & 
+	                        fit.data$end<=blacklisted.regions$end[r] ] = T
+}
+print(paste("# excluded probes = ",sum(fit.data$in.blacklist),sep=""))
+if (sum(fit.data$in.blacklist) <= 0)
+  stop("There's an issue with the excluded list, no probes excluded.")
+window.depths.standardised = window.depths[!fit.data$in.blacklist,]
+fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
+
+# Some of the indicies were not run for various reasons. At the moment the patient file does not include that information
 missingIndicies = setdiff(patient.info$samplename, colnames(window.depths.standardised))
 if (length(missingIndicies > 0))
   warning(paste("Missing several samples: ", paste(missingIndicies, collapse=', '), sep=''))
@@ -78,15 +93,12 @@ print(sdevs)
 print(sdev)
 
 good.bins = which(!is.na(rowSums(window.depths.standardised[,!is.na(sdevs)])))
-#good.bins = which(!is.na(rowSums(window.depths.standardised)))
 
 patient.name = gsub("/","_",patient.name)
 
-plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
-if (!dir.exists(plot.dir))  
-  dir.create(plot.dir)
-
-for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but not really necessary right now I suppose
+#for(gamma2 in c(5,10,25,50,100,250,500,1000)) { 
+{
+  gamma2=250
   message(paste("gamma2:",gamma2))
 	# columns 2 and 3 contain chr and pos, which multipcf requires
   # ?? gamma is the important parameter here, is the loop to help find an appropriate gamma? 
@@ -98,9 +110,9 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but 
 	print(dim(res))
 	chrs=unique(res$chrom)
 	chr.lengths = vector(mode="integer",length=length(chrs))
-	for(c in 1:length(chrs)){
+	for(c in 1:length(chrs))
 		chr.lengths[c] = max(res$end.pos[res$chrom==chrs[c]])+999
-	}
+	
 	cum.lengths = c(0,cumsum(chr.lengths))
   # what is the rest of this loop for?
 	res$chrpos.start = NA
@@ -112,15 +124,17 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)){ # this could be parallelized but 
 patient.plot.dir = paste(plot.dir,patient.name, sep='/')
 #reload and plot segmented vals
 #do 250 first
-for(gamma2 in c(250,5,10,25,50,100,500,1000)){
+#for(gamma2 in c(250,5,10,25,50,100,500,1000)){
+{
   print(gamma2)
 	segvals = read.table(paste(plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
 	gamma.plot = paste(patient.plot.dir, paste("gamma2", gamma2, sep="_"), sep="/")
+	print(paste("Plots in", gamma.plot))
 	if (!dir.exists(gamma.plot))
 	  dir.create(gamma.plot, recursive=T, showWarnings=F)
 	
 	for(chr in 1:22){
-		print(chr)
+		print(paste('chr',chr,sep=''))
 		indices = intersect(which(fit.data$chrom==chr),good.bins)
 		indices2 = which(segvals$chrom==chr)
 		#take out whitespace
@@ -134,7 +148,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 			ht = 5000 * n.rows / 12
 		}
 		
-		paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep="")
+		print(paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""))
 		png(paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""),width=wid,height=ht)
 		par(mfrow=c(n.rows,min(no.samples,10)))
 		for(col in which(!is.na(sdevs))){
@@ -161,8 +175,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 	out = cbind(segvals[,1:5],sds,shapiro.wilk)
 	names(out)[6:7] = c("st_dev","ShapiroWilk")
 	
-	paste(gamma.plot, "allSamples_fitted_multipcf_variability_gamma.txt",sep="/")
-	
+	print(paste(gamma.plot, "allSamples_fitted_multipcf_variability_gamma.txt",sep="/"))
 	write.table(out,paste(gamma.plot, "allSamples_fitted_multipcf_variability_gamma.txt",sep="/"),sep="\t",row.names=F,quote=F)
 	
 	png(paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""))
@@ -213,5 +226,6 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)){
 		dev.off()
 	}
 }
+print("Finished")
 
 q(save="no")
