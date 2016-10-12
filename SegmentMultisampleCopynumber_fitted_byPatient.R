@@ -96,9 +96,8 @@ good.bins = which(!is.na(rowSums(window.depths.standardised[,!is.na(sdevs)])))
 
 patient.name = gsub("/","_",patient.name)
 
-#for(gamma2 in c(5,10,25,50,100,250,500,1000)) { 
-{
-  gamma2=250
+for(gamma2 in c(5,10,25,50,100,250,500,1000)) { 
+  #gamma2=250
   message(paste("gamma2:",gamma2))
 	# columns 2 and 3 contain chr and pos, which multipcf requires
   # ?? gamma is the important parameter here, is the loop to help find an appropriate gamma? 
@@ -124,8 +123,7 @@ patient.name = gsub("/","_",patient.name)
 patient.plot.dir = paste(plot.dir,patient.name, sep='/')
 #reload and plot segmented vals
 #do 250 first
-#for(gamma2 in c(250,5,10,25,50,100,500,1000)){
-{
+for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
   print(gamma2)
 	segvals = read.table(paste(plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
 	gamma.plot = paste(patient.plot.dir, paste("gamma2", gamma2, sep="_"), sep="/")
