@@ -1,18 +1,27 @@
 # Basically just plots per patient
 library(ggplot2)
 library(GGally)
+library(plyr)
 
-#setwd("/lustre/scratch112/sanger/cgppipe/PanCancerDownloads/workspace/dw9/Ellie")
+data = '~/Data/Ellie'
 
-#just use samples from one patient
-patient.info = read.table("data/All_patient_info.txt",sep="\t",header=T,stringsAsFactors=F)
-patient.info$SLX_ID[patient.info$SLX_ID=="SLX-10729"] = "SLX-10725_10729"
-patient.info$SLX_ID[patient.info$SLX_ID=="SLX-10725"] = "SLX-10725_10729"
-patient.info$samplename = paste(patient.info$Index,gsub("SLX-","",patient.info$SLX_ID),sep="_")
+data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
+plot.dir = paste(data, 'Analysis/multipcf_plots_fitted_perPatient', sep='/')
+
+if (length(list.files(plot.dir)) <= 0)
+  stop(paste("No analysis files found in", plot.dir ))
+
+## Patient info file
+patient.file = grep('patient_info', data.files, value=T)
+if (length(patient.file) <= 0)
+  stop(paste("Missing patient info file in", data))
+patient.info = read.table(patient.file,sep="\t",header=T,stringsAsFactors=F)
+patient.info$samplename = gsub('-', '_', paste(patient.info$Index,trimws(patient.info$SLX),sep="_"))
+patient.info = arrange(patient.info, Patient, Endoscopy_Year)
+head(patient.info)
 
 #67 probes is equivalent to 1MB
 min.probes=67
-
 
 my_custom_cor <- function(data, mapping, color = I("grey10"), sizeRange = c(1, 7), ...) {
   # get the x and y data to use the other code
@@ -112,25 +121,21 @@ panel.hist <- function(x, ...) {
   }
 
 patient.info$Patient = gsub("/", "_", patient.info$Patient)
-for (patient.name in c('AD0531','AD0591','AHM0363','PR1_HIN_044') ) { # unique(patient.info$Patient)  ) {
-#for(patient.index in 1:10) {
-#	patient.name = unique(patient.info$Patient)[patient.index]
+for (patient.name in unique(patient.info$Patient)  ) {
 	print(patient.name)
-	#patient.name = gsub("/","_",patient.name)
-	
-	for(gamma2 in c(5,10,25,50,100,250,500,1000)){
+
+	for(gamma2 in c(5,10,25,50,100,250,500,1000)) {
 		print(gamma2)
-	  plotdir = paste("hierarchicalClustering",patient.name, paste("gamma2", gamma2, sep="_"), sep="/")
-	  if (!dir.exists(plotdir)) 
-	    dir.create(plotdir, recursive=T)
-	  
-		segvals = read.table(paste("multipcf_plots_fitted_perPatient/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
+		pt.plot.dir = paste(plot.dir, patient.name, paste('gamma2',gamma2,sep='_'),sep='/')
+		print(pt.plot.dir)
+		
+		segvals = read.table(paste(plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
 		segvals = segvals[segvals$n.probes>=min.probes,]
 		if(nrow(segvals)>0) {
 			HC = hclust(dist(t(segvals[,-(1:5)])))
-			
-			png(paste(plotdir,"/",patient.name,"_hierarchicalClustering_fromFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
-			plot(HC, main="clustering by fitted segment coverage",xlab="",sub="")
+
+			png(paste(pt.plot.dir,"/hierarchicalClustering_fromFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
+			plot(HC, main=paste(patient.name,"clustering by fitted segment coverage"),xlab="",sub="")
 			dev.off()
 
 			normalised.segvals = segvals[,-(1:5)]
@@ -139,47 +144,56 @@ for (patient.name in c('AD0531','AD0591','AHM0363','PR1_HIN_044') ) { # unique(p
 			}
 			
 			HC = hclust(dist(t(normalised.segvals)))
-			png(paste(plotdir,"/",patient.name,"_hierarchicalClustering_fromNormalizedLargeFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
-			plot(HC, main="clustering by fitted segment coverage",xlab="",sub="")
+			png(paste(pt.plot.dir,"/", patient.name,"_hierarchicalClustering_fromNormalizedLargeFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
+			plot(HC, main=paste(patient.name, "clustering by fitted segment coverage"),xlab="",sub="")
 			dev.off()
 			
 			no.samples = ncol(normalised.segvals)
 			no.rows = ceiling(no.samples/3)
-			png(paste(plotdir,"/",patient.name,"_NormalizedLargeFittedSegments_histogram_gamma",gamma2,".png",sep=""),width=1500,height=600*no.rows)
+			
+			png(paste(pt.plot.dir,"/", patient.name,"_NormalizedLargeFittedSegments_histogram_gamma",gamma2,".png",sep=""),width=1500,height=600*no.rows)
 			par(mfrow=c(no.rows,3))
-			for(s in 1:no.samples) {
+			for(s in 1:no.samples) 
 				hist(normalised.segvals[,s],col="blue",main=names(normalised.segvals)[s],xlab="normalised coverage")
-			}
 			dev.off()
+			
 			if(nrow(segvals)>=3) {
 			  patient = subset(patient.info, Patient == patient.name)
-			  patient = patient[order(patient$Endoscopy_Year),]
+			  #patient = patient[order(patient$Endoscopy_Year),]
 			  
 			  # order by date of endoscopy
-			  normalised.segvals = normalised.segvals[, patient$samplename]
+			  normalised.segvals = normalised.segvals[, intersect(colnames(normalised.segvals), patient$samplename)]
         
-			  png(paste(plotdir,"/",patient.name,"_NormalizedLargeFittedSegments_correlationPlots_gamma",gamma2,".png",sep=""),width=600*no.rows,height=600*no.rows)			
+			  png(paste(pt.plot.dir,"/", patient.name,"_NormalizedLargeFittedSegments_correlationPlots_gamma",gamma2,".png",sep=""),width=600*no.rows,height=600*no.rows)			
 			  pairs = ggpairs( normalised.segvals, 
 			           lower=list(continuous=wrap("points", colour='darkblue', shape=20, alpha=0.3, size=3)),
 			           diag=list(continuous=wrap(my_bars, sizeRange=c(1,5))), 
 			           upper=list(continuous=my_custom_cor), 
-			           axisLabels='show', title=patient.name, verbose=T, columnLabels = patient$Endoscopy_Year )
+			           axisLabels='show', title=patient.name)
+			  #         axisLabels='show', title=patient.name, verbose=T, columnLabels = patient$Endoscopy_Year )
 			  
         print(pairs  + theme( # this doesn't work...
           text = element_text(size=20, face='bold')
         )) 
 				dev.off()
-				
- 				png(paste(plotdir,"/",patient.name,"_NormalizedLargeFittedSegments_correlationPlots_gamma",gamma2,"_old.png",sep=""),width=600*no.rows,height=600*no.rows)			
- 				pairs( normalised.segvals,upper.panel=panel.cor, diag.panel=panel.hist, labels=paste(patient$samplename, patient$Endoscopy_Year, sep="\n"))
- 				dev.off()
-			}
+
+# 				png(paste(pt.plot.dir,"/NormalizedLargeFittedSegments_correlationPlots_gamma",gamma2,"_old.png",sep=""),width=600*no.rows,height=600*no.rows)			
+#  				pairs( normalised.segvals,upper.panel=panel.cor, diag.panel=panel.hist, labels=paste(patient$samplename, patient$Endoscopy_Year, sep="\n"))
+#  				dev.off()
+# 			}
 			
 			#get variable regions
-			#segvals$variable = sapply(1:nrow(segvals),function(i){max(normalised.segvals[i,])-median(normalised.segvals[i,])>=1 | median(normalised.segvals[i,])-min(normalised.segvals[i,])>=1})
+			# segvals$variable = apply(normalised.segvals,1,function(i) {
+			#     print(str(i))
+			#     max(i)-median(i)>=1 | median(i)-min(i)>=1
+			#   })
+			# 
+			#   
+			#   sapply(1:nrow(segvals),function(i) {
+			#   print(str(normalised.segvals[i,]))
+			#   max(normalised.segvals[i,])-median(normalised.segvals[i,])>=1 | median(normalised.segvals[i,])-min(normalised.segvals[i,])>=1
+			#   })
 			#write.table(segvals,paste("multipcf_plots_fitted_perPatient/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F,row.names=F)
 		}
 	}
 }
-
-q(save="no")

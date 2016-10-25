@@ -150,7 +150,8 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 		png(paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""),width=wid,height=ht)
 		par(mfrow=c(n.rows,min(no.samples,10)))
 		for(col in which(!is.na(sdevs))){
-			plot(fit.data$end[indices],window.depths.standardised[indices,col],col="red",pch=20,cex=1,cex.axis=2,cex.lab=2,cex.main=2,xlab="pos",ylab="segmented coverage",main=paste("chr",chr,", ",samplenames[col],sep=""),ylim=c(0,3))
+		  print(colnames(window.depths.standardised)[col])
+			plot(fit.data$end[indices],window.depths.standardised[indices,col],col="red",pch=20,cex=1,cex.axis=2,cex.lab=2,cex.main=2,xlab="pos",ylab="segmented coverage",main=paste("chr",chr,", ",colnames(window.depths.standardised)[col],sep=""),ylim=c(0,3))
 			for(ind in indices2){
 				lines(c(segvals$start.pos[ind],segvals$end.pos[ind]),rep(segvals[ind,col+5],2),col="green",lwd=4)
 			}
@@ -226,4 +227,4 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 }
 print("Finished")
 
-q(save="no")
+#q(save="no")
