@@ -10,6 +10,7 @@ suppressPackageStartupMessages( library(ggdendro) )
 suppressPackageStartupMessages( library(copynumber) )
 
 source("lib/fastPCF.R")
+source('lib/load_patient_metadata.R')
 
 
 data = args[1]
@@ -18,7 +19,7 @@ outdir = args[3]
 
 #data = '~/Data/Ellie/QDNAseq'
 #patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
-#outdir = '~/Data/Ellie'
+#outdir = '~/Data/Ellie/Analysis'
 data.files = list.files(data, full.names=T)
 
 plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
@@ -27,16 +28,20 @@ if (!dir.exists(plot.dir))
   dir.create(plot.dir, recursive=T)
 
 ## Patient info file
-patient.file = grep('patient_info', data.files, value=T)
+patient.file = grep('patient_info.xlsx', data.files, value=T)
 if (length(patient.file) <= 0)
   stop(paste("Missing patient info file in", data))
 
-patient.info = read.table(patient.file,sep="\t",header=T,stringsAsFactors=F)
-head(patient.info)
-patient.info$samplename = gsub('-', '_', paste(patient.info$Index,trimws(patient.info$SLX),sep="_"))
+all.patient.info = read.patient.info(patient.file)
+head(all.patient.info)
+all.patient.info$samplename = strip.whitespace(gsub('-', '_', paste(all.patient.info$Plate.Index,trimws(all.patient.info$SLX.ID),sep="_")))
+
+patient.plot.dir = paste(plot.dir,patient.name, sep='/')
+if (!dir.exists(patient.plot.dir))  
+  dir.create(patient.plot.dir, recursive=T)
 
 print(patient.name)
-patient.info = subset(patient.info, Patient == patient.name)
+patient.info = subset(all.patient.info, Patient == patient.name)
 if (nrow(patient.info) <= 0)
   stop(paste("No patient information on patient", patient.name))
 
@@ -62,6 +67,7 @@ for(r in 1:nrow(blacklisted.regions)) {
 	                        fit.data$start>=blacklisted.regions$start[r] & 
 	                        fit.data$end<=blacklisted.regions$end[r] ] = T
 }
+
 print(paste("# excluded probes = ",sum(fit.data$in.blacklist),sep=""))
 if (sum(fit.data$in.blacklist) <= 0)
   stop("There's an issue with the excluded list, no probes excluded.")
@@ -79,6 +85,8 @@ window.depths.standardised = window.depths.standardised[,na.omit( match(patient.
 
 # there are mutiple samples per patient too
 no.samples=ncol(window.depths.standardised)
+if (no.samples <= 0)
+  stop(paste("No samples represented in the data for", patient.name))
 
 # get the median absolution deviation for the observed window depths in each sample
 sdevs = vector(mode="numeric",length=no.samples)
@@ -96,7 +104,7 @@ good.bins = which(!is.na(rowSums(window.depths.standardised[,!is.na(sdevs)])))
 
 patient.name = gsub("/","_",patient.name)
 
-for(gamma2 in c(5,10,25,50,100,250,500,1000)) { 
+for(gamma2 in c(250,5,10,25,50,100,500,1000)) { 
   #gamma2=250
   message(paste("gamma2:",gamma2))
 	# columns 2 and 3 contain chr and pos, which multipcf requires
@@ -104,7 +112,7 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)) {
   ## Note that the pre processing of the data was to provide Windsorized values
 	res = multipcf( cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)]), gamma=gamma2*sdev, fast=F)
 	
-	write.table(res,paste(plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F)
+	write.table(res,paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F)
 	
 	print(dim(res))
 	chrs=unique(res$chrom)
@@ -120,12 +128,11 @@ for(gamma2 in c(5,10,25,50,100,250,500,1000)) {
 	res$chrpos.end = res$end.pos + cum.lengths[match(res$chrom,chrs)]
 }
 
-patient.plot.dir = paste(plot.dir,patient.name, sep='/')
 #reload and plot segmented vals
 #do 250 first
 for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
   print(gamma2)
-	segvals = read.table(paste(plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
+	segvals = read.table(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
 	gamma.plot = paste(patient.plot.dir, paste("gamma2", gamma2, sep="_"), sep="/")
 	print(paste("Plots in", gamma.plot))
 	if (!dir.exists(gamma.plot))

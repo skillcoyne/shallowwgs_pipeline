@@ -2,6 +2,10 @@
 library(ggplot2)
 library(GGally)
 library(plyr)
+library(xlsx)
+library(dplyr)
+
+source('lib/load_patient_metadata.R')
 
 data = '~/Data/Ellie'
 
@@ -12,13 +16,17 @@ if (length(list.files(plot.dir)) <= 0)
   stop(paste("No analysis files found in", plot.dir ))
 
 ## Patient info file
-patient.file = grep('patient_info', data.files, value=T)
+patient.file = grep('patient_info.xls', data.files, value=T)
 if (length(patient.file) <= 0)
   stop(paste("Missing patient info file in", data))
-patient.info = read.table(patient.file,sep="\t",header=T,stringsAsFactors=F)
-patient.info$samplename = gsub('-', '_', paste(patient.info$Index,trimws(patient.info$SLX),sep="_"))
-patient.info = arrange(patient.info, Patient, Endoscopy_Year)
+
+patient.info = read.patient.info(patient.file)
+
+patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
+patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year)
+patient.info$Patient = gsub("/", "_", patient.info$Patient)
 head(patient.info)
+
 
 #67 probes is equivalent to 1MB
 min.probes=67
@@ -45,7 +53,7 @@ my_custom_cor <- function(data, mapping, color = I("grey10"), sizeRange = c(1, 7
   percent_of_range <- function(percent, range) {
     percent * diff(range) + min(range, na.rm = TRUE)
   }
-
+  
   sig_star_color = color
   if (ct$p.value <= 0.05)
     sig_star_color = I('firebrick')
@@ -58,7 +66,7 @@ my_custom_cor <- function(data, mapping, color = I("grey10"), sizeRange = c(1, 7
     size = I(percent_of_range(cex * abs(r), sizeRange)),
     color = color,
     ... ) +
-  
+    
     # add the sig stars
     geom_text(
       aes_string( x = 0.8, y = 0.8 ),
@@ -83,22 +91,22 @@ my_custom_cor <- function(data, mapping, color = I("grey10"), sizeRange = c(1, 7
 }
 
 panel.cor <- function(x, y, digits=2, prefix="", cex.cor) {
-    usr <- par("usr"); on.exit(par(usr))
-    par(usr = c(0, 1, 0, 1))
-    r <- abs(cor(x, y, use= "pairwise.complete.obs"))
-    txt <- format(c(r, 0.123456789), digits=digits)[1]
-    txt <- paste(prefix, txt, sep="")
-    if(missing(cex.cor)) cex <- 0.8/strwidth(txt)
-
-    test <- cor.test(x,y, use= "pairwise.complete.obs")
-    # borrowed from printCoefmat
-    Signif <- symnum(test$p.value, corr = FALSE, na = FALSE,
-                  cutpoints = c(0, 0.001, 0.01, 0.05, 0.1, 1),
-                  symbols = c("***", "**", "*", ".", " "))
-
-    text(0.5, 0.5, txt, cex = cex * r)
-    text(.8, .8, Signif, cex=cex, col=2)
-  }
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y, use= "pairwise.complete.obs"))
+  txt <- format(c(r, 0.123456789), digits=digits)[1]
+  txt <- paste(prefix, txt, sep="")
+  if(missing(cex.cor)) cex <- 0.8/strwidth(txt)
+  
+  test <- cor.test(x,y, use= "pairwise.complete.obs")
+  # borrowed from printCoefmat
+  Signif <- symnum(test$p.value, corr = FALSE, na = FALSE,
+                   cutpoints = c(0, 0.001, 0.01, 0.05, 0.1, 1),
+                   symbols = c("***", "**", "*", ".", " "))
+  
+  text(0.5, 0.5, txt, cex = cex * r)
+  text(.8, .8, Signif, cex=cex, col=2)
+}
 
 my_bars<-function(data, mapping, sizeRange=c(1,7),...) {
   # get the x and y data to use the other code
@@ -110,90 +118,84 @@ my_bars<-function(data, mapping, sizeRange=c(1,7),...) {
     annotate("text",label=name, x=Inf, y=Inf, vjust=1,hjust=1,col=I('grey14'),fontface=2,size=max(sizeRange) )
 }
 
-
 panel.hist <- function(x, ...) {
-    usr <- par("usr"); on.exit(par(usr))
-    par(usr = c(usr[1:2], 0, 1.5) )
-    h <- hist(x, plot = FALSE)
-    breaks <- h$breaks; nB <- length(breaks)
-    y <- h$counts; y <- y/max(y)
-    rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
-  }
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(usr[1:2], 0, 1.5) )
+  h <- hist(x, plot = FALSE)
+  breaks <- h$breaks; nB <- length(breaks)
+  y <- h$counts; y <- y/max(y)
+  rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
+}
 
-patient.info$Patient = gsub("/", "_", patient.info$Patient)
+
 for (patient.name in unique(patient.info$Patient)  ) {
-	print(patient.name)
-
-	for(gamma2 in c(5,10,25,50,100,250,500,1000)) {
-		print(gamma2)
-		pt.plot.dir = paste(plot.dir, patient.name, paste('gamma2',gamma2,sep='_'),sep='/')
-		print(pt.plot.dir)
-		
-		segvals = read.table(paste(plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
-		segvals = segvals[segvals$n.probes>=min.probes,]
-		if(nrow(segvals)>0) {
-			HC = hclust(dist(t(segvals[,-(1:5)])))
-
-			png(paste(pt.plot.dir,"/hierarchicalClustering_fromFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
-			plot(HC, main=paste(patient.name,"clustering by fitted segment coverage"),xlab="",sub="")
-			dev.off()
-
-			normalised.segvals = segvals[,-(1:5)]
-			for(c in 1:nrow(normalised.segvals)) {
-				normalised.segvals[c,] = (normalised.segvals[c,]-mean(unlist(normalised.segvals[c,])))/sd(unlist(normalised.segvals[c,]))
-			}
-			
-			HC = hclust(dist(t(normalised.segvals)))
-			png(paste(pt.plot.dir,"/", patient.name,"_hierarchicalClustering_fromNormalizedLargeFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
-			plot(HC, main=paste(patient.name, "clustering by fitted segment coverage"),xlab="",sub="")
-			dev.off()
-			
-			no.samples = ncol(normalised.segvals)
-			no.rows = ceiling(no.samples/3)
-			
-			png(paste(pt.plot.dir,"/", patient.name,"_NormalizedLargeFittedSegments_histogram_gamma",gamma2,".png",sep=""),width=1500,height=600*no.rows)
-			par(mfrow=c(no.rows,3))
-			for(s in 1:no.samples) 
-				hist(normalised.segvals[,s],col="blue",main=names(normalised.segvals)[s],xlab="normalised coverage")
-			dev.off()
-			
-			if(nrow(segvals)>=3) {
-			  patient = subset(patient.info, Patient == patient.name)
-			  #patient = patient[order(patient$Endoscopy_Year),]
-			  
-			  # order by date of endoscopy
-			  normalised.segvals = normalised.segvals[, intersect(colnames(normalised.segvals), patient$samplename)]
+  patient.plot.dir = paste(plot.dir, patient.name, sep='/')
+  
+  existing.plots = list.files(patient.plot.dir, '*.png', recursive=T )
+  
+  if (length(grep('_NormalizedLargeFittedSegments_correlationPlots_gamma', existing.plots, value=T)) == 7)
+    next
+  print(patient.name)
+  
+  for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
+    print(gamma2)
+    pt.gamma.plot.dir = paste(patient.plot.dir, paste('gamma2',gamma2,sep='_'),sep='/')
+    print(pt.gamma.plot.dir)
+    
+    segvals = read.table(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
+    segvals = segvals[segvals$n.probes>=min.probes,]
+    
+    if(nrow(segvals)>0) {
+      HC = hclust(dist(t(segvals[,-(1:5)])))
+      
+      png(paste(pt.gamma.plot.dir,"/hierarchicalClustering_fromFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
+      plot(HC, main=paste(patient.name,"clustering by fitted segment coverage"),xlab="",sub="")
+      dev.off()
+      
+      normalised.segvals = segvals[,-(1:5)]
+      for(c in 1:nrow(normalised.segvals)) {
+        normalised.segvals[c,] = (normalised.segvals[c,]-mean(unlist(normalised.segvals[c,])))/sd(unlist(normalised.segvals[c,]))
+      }
+      
+      HC = hclust(dist(t(normalised.segvals)))
+      png(paste(pt.gamma.plot.dir,"/", patient.name,"_hierarchicalClustering_fromNormalizedLargeFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
+      plot(HC, main=paste(patient.name, "clustering by fitted segment coverage"),xlab="",sub="")
+      dev.off()
+      
+      no.samples = ncol(normalised.segvals)
+      no.rows = ceiling(no.samples/3)
+      
+      png(paste(pt.gamma.plot.dir,"/", patient.name,"_NormalizedLargeFittedSegments_histogram_gamma",gamma2,".png",sep=""),width=1500,height=600*no.rows)
+      par(mfrow=c(no.rows,3))
+      for(s in 1:no.samples) 
+        hist(normalised.segvals[,s],col="blue",main=names(normalised.segvals)[s],xlab="normalised coverage")
+      dev.off()
+      
+      if(nrow(segvals)>=3) {
+        # order by date of endoscopy
+        patient = subset(patient.info, Patient == patient.name)
+        patient = arrange(patient, Endoscopy.Year, Pathology)
         
-			  png(paste(pt.plot.dir,"/", patient.name,"_NormalizedLargeFittedSegments_correlationPlots_gamma",gamma2,".png",sep=""),width=600*no.rows,height=600*no.rows)			
-			  pairs = ggpairs( normalised.segvals, 
-			           lower=list(continuous=wrap("points", colour='darkblue', shape=20, alpha=0.3, size=3)),
-			           diag=list(continuous=wrap(my_bars, sizeRange=c(1,5))), 
-			           upper=list(continuous=my_custom_cor), 
-			           axisLabels='show', title=patient.name)
-			  #         axisLabels='show', title=patient.name, verbose=T, columnLabels = patient$Endoscopy_Year )
-			  
+        ## TODO Mistake in earlier version of the patient file caused this will be fixed for the next run
+        snames = grep('_1072(5|9)$', patient$Samplename)
+        if ( length(snames > 0) ) {
+          patient$Samplename[snames] =  paste( sub('-','_', patient$Plate.Index[snames]), '10725_10729', sep='_' )
+        }
+        
+        sample.normalised.segvals = normalised.segvals[, intersect(colnames(normalised.segvals), patient$Samplename)]
+        
+        png(paste(pt.gamma.plot.dir,"/", patient.name,"_NormalizedLargeFittedSegments_correlationPlots_gamma",gamma2,".png",sep=""),width=600*no.rows,height=600*no.rows)			
+        pairs = ggpairs( sample.normalised.segvals, 
+                         lower=list(continuous=wrap("points", colour='darkblue', shape=20, alpha=0.3, size=3)),
+                         diag=list(continuous=wrap(my_bars, sizeRange=c(1,5))), 
+                         upper=list(continuous=my_custom_cor), 
+                         axisLabels='show', title=patient.name, columnLabels=paste(paste(patient$Endoscopy.Year, ' (',patient$Pathology, ')', sep=''), patient$Plate.Index, sep='\n') )
+        
         print(pairs  + theme( # this doesn't work...
           text = element_text(size=20, face='bold')
         )) 
-				dev.off()
-
-# 				png(paste(pt.plot.dir,"/NormalizedLargeFittedSegments_correlationPlots_gamma",gamma2,"_old.png",sep=""),width=600*no.rows,height=600*no.rows)			
-#  				pairs( normalised.segvals,upper.panel=panel.cor, diag.panel=panel.hist, labels=paste(patient$samplename, patient$Endoscopy_Year, sep="\n"))
-#  				dev.off()
-# 			}
-			
-			#get variable regions
-			# segvals$variable = apply(normalised.segvals,1,function(i) {
-			#     print(str(i))
-			#     max(i)-median(i)>=1 | median(i)-min(i)>=1
-			#   })
-			# 
-			#   
-			#   sapply(1:nrow(segvals),function(i) {
-			#   print(str(normalised.segvals[i,]))
-			#   max(normalised.segvals[i,])-median(normalised.segvals[i,])>=1 | median(normalised.segvals[i,])-min(normalised.segvals[i,])>=1
-			#   })
-			#write.table(segvals,paste("multipcf_plots_fitted_perPatient/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F,row.names=F)
-		}
-	}
+        dev.off()
+      }
+    }
+  }
 }
