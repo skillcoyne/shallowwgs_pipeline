@@ -219,7 +219,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 	print(segvals[variable.region.indices,1:5])
 
 	write.table(segvals[variable.region.indices,1:5],
-	            paste(gamma.plot, "/variableRegions_gamma",gamma2,"_sd", sd.threshold, "_n", n.threshold, ".txt",sep="")
+	            paste(gamma.plot, "/", patient.name, "_variableRegions_gamma",gamma2,"_sd", sd.threshold, "_n", n.threshold, ".txt",sep="")
 	            ,sep="\t",row.names=F,quote=F)
 	
 	no.variable.regions = length(variable.region.indices)

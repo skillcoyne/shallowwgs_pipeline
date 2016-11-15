@@ -11,9 +11,9 @@ read.patient.info<-function(file) {
   for (i in 1:length(getSheets(loadWorkbook(file)))) {
     print(i)
     ws = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
-    ws = ws[which( ws$Patient.ID != ""), grep('Patient|Endoscopy.Year|Pathology$|Progressor|Plate.Index|SLX', colnames(ws), value=T, ignore.case=T)]
+    ws = ws[which( ws$Patient.ID != ""), grep('Patient|Endoscopy.Year|Pathology$|Progressor|Plate.Index|SLX|cellularity', colnames(ws), value=T, ignore.case=T)]
     head(ws)
-    head(patient.info)
+    #head(patient.info)
     
     slx.cols = grep('SLX', colnames(ws), value=T)
     if (length(slx.cols) > 1) {
@@ -28,8 +28,10 @@ read.patient.info<-function(file) {
                grep('Endoscopy.year',colnames(ws), ignore.case=T),
                grep('Pathology',colnames(ws),ignore.case=T),
                grep('Plate.Index',colnames(ws),ignore.case=T),
-               grep('SLX',colnames(ws),ignore.case=T))]
-    colnames(ws) = c('Patient','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID')
+               grep('SLX',colnames(ws),ignore.case=T),
+               grep('cellularity',colnames(ws),ignore.case=T)) ]
+    
+    colnames(ws) = c('Patient','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity')
     
     if (is.null(patient.info)) {
       patient.info = ws
@@ -43,7 +45,9 @@ read.patient.info<-function(file) {
   patient.info$Pathology = factor(strip.whitespace(patient.info$Pathology))
   patient.info$Endoscopy.Year = as.numeric(patient.info$Endoscopy.Year)
   patient.info$Plate.Index = strip.whitespace(patient.info$Plate.Index)
+  patient.info$Barretts.Cellularity = as.integer(patient.info$Barretts.Cellularity)
+  patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
   patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year)
-  
+
   return(patient.info)
 }
