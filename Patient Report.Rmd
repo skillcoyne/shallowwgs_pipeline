@@ -148,12 +148,13 @@ patient.data = ddply(patient.info, .(Patient, Status), summarise, years=paste(ra
 min.probes=67
 gamma2 = 250
   
-cor.scores = as.data.frame(matrix(nrow=length(patient.data$Patient), ncol=2, dimnames=list(patient.data$Patient, c('similar','different'))))
+cor.scores = as.data.frame(matrix(nrow=length(patient.data$Patient), ncol=3, dimnames=list(patient.data$Patient, c('similar','different','n.probes'))))
 for (patient.name in unique(patient.info$Patient)  )  {
   message(patient.name)
   patient.plot.dir = paste(plot.dir, patient.name, sep='/')
 
   segvals = read.table(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
+
   message( paste(length(which(segvals$n.probes < min.probes)), ' probes below the minimum probe count (',min.probes,')', sep=''))
   
   segvals = segvals[segvals$n.probes>=min.probes,]
@@ -163,8 +164,7 @@ for (patient.name in unique(patient.info$Patient)  )  {
       HC = hclust(dist(t(segvals[,-(1:5)])))
       gg1 = ggdendrogram(HC, rotate=T) + labs(title = paste(patient.name,": fitted segment coverage"),x="")
       #print(gg1)
-      
-      
+
       # Normalize  (value-mean(value))/sd(value)
       normalised.segvals = segvals[,-(1:5)]
       for(c in 1:nrow(normalised.segvals)) {
@@ -208,10 +208,10 @@ for (patient.name in unique(patient.info$Patient)  )  {
         for (i in 1:ncol(rc$r)) {
           len = length(which(rc$P[,i] < 0.05))
           
-          sim = sim + signif( sum(rc$r[which(rc$P[,i] < 0.05 & rc$r[,i] > 0),i ])/len, 2)
-          diff = diff + signif(sum(rc$r[which(rc$P[,i] < 0.05 & rc$r[,i] < 0),i ])/len,2)
+          sim = sim + signif( sum(rc$r[which(rc$P[,i] < 0.05 & rc$r[,i] > 0),i ]), 2)
+          diff = diff + signif(sum(rc$r[which(rc$P[,i] < 0.05 & rc$r[,i] < 0),i ]),2)
         }  
-        cor.scores[patient.name,] = c(sim,diff)
+        cor.scores[patient.name,] = c(sim,diff,nrow(sample.normalised.segvals))
         
         # pairs = ggpairs( sample.normalised.segvals,
         #                  lower=list(continuous=wrap("points", colour='darkblue', shape=20, alpha=0.3, size=3)),
@@ -226,14 +226,20 @@ for (patient.name in unique(patient.info$Patient)  )  {
       }
     }
   }
-pander(cor.scores, justify='left')
-
 cor.scores$Status = patient.data[which(patient.data$Patient %in% rownames(cor.scores)), 'Status']
 
 ```
 \pagebreak
 
-`r pander(cor.scores[order(cor.scores$Status, cor.scores$similar),], justify='left', split.tables=F)`
+```{r scores, echo=F, message=T, warning=F, fig.height=4,fig.width=4,fig.align='left'} 
+pander(cor.scores[order(cor.scores$Status, cor.scores$similar),], justify='left')
+
+ggplot(cor.scores, aes(x=similar,y=different, color=Status)) + geom_point()
+
+ggplot(cor.scores, aes(y=abs(similar+different), x=c(1:nrow(cor.scores)), color=Status)) + geom_point()
+
+
+```
 
 
 

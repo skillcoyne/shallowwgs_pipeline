@@ -128,7 +128,7 @@ panel.hist <- function(x, ...) {
 }
 
 
-for (patient.name in unique(patient.info$Patient)  ) {
+for (patient.name in unique(patient.info$Patient)  )  {
   patient.plot.dir = paste(plot.dir, patient.name, sep='/')
   
   existing.plots = list.files(patient.plot.dir, '*.png', recursive=T )
@@ -137,7 +137,7 @@ for (patient.name in unique(patient.info$Patient)  ) {
     next
   print(patient.name)
   
-  for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
+  for(gamma2 in c(250,5,10,25,50,100,500,1000)) { 
     print(gamma2)
     pt.gamma.plot.dir = paste(patient.plot.dir, paste('gamma2',gamma2,sep='_'),sep='/')
     print(pt.gamma.plot.dir)
@@ -151,7 +151,8 @@ for (patient.name in unique(patient.info$Patient)  ) {
       png(paste(pt.gamma.plot.dir,"/hierarchicalClustering_fromFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
       plot(HC, main=paste(patient.name,"clustering by fitted segment coverage"),xlab="",sub="")
       dev.off()
-      
+
+      # Normalize  (value-mean(value))/sd(value)
       normalised.segvals = segvals[,-(1:5)]
       for(c in 1:nrow(normalised.segvals)) {
         normalised.segvals[c,] = (normalised.segvals[c,]-mean(unlist(normalised.segvals[c,])))/sd(unlist(normalised.segvals[c,]))
@@ -183,7 +184,7 @@ for (patient.name in unique(patient.info$Patient)  ) {
         }
         
         sample.normalised.segvals = normalised.segvals[, intersect(colnames(normalised.segvals), patient$Samplename)]
-        
+
         png(paste(pt.gamma.plot.dir,"/", patient.name,"_NormalizedLargeFittedSegments_correlationPlots_gamma",gamma2,".png",sep=""),width=600*no.rows,height=600*no.rows)			
         pairs = ggpairs( sample.normalised.segvals, 
                          lower=list(continuous=wrap("points", colour='darkblue', shape=20, alpha=0.3, size=3)),
