@@ -29,7 +29,7 @@ if (!dir.exists(plot.dir))
 
 ## Patient info file
 patient.file = grep('patient_info.xlsx', data.files, value=T)
-if (length(patient.file) <= 0)
+if (length(patient.file) != 1)
   stop(paste("Missing patient info file in", data))
 
 all.patient.info = read.patient.info(patient.file)
@@ -110,7 +110,8 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 	# columns 2 and 3 contain chr and pos, which multipcf requires
   # ?? gamma is the important parameter here, is the loop to help find an appropriate gamma? 
   ## Note that the pre processing of the data was to provide Windsorized values
-	res = multipcf( cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)]), gamma=gamma2*sdev, fast=F)
+	res = multipcf( data=cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)]), 
+	                gamma=gamma2*sdev, fast=F, verbose=T)
 	
 	write.table(res,paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F)
 	
@@ -181,8 +182,8 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 	out = cbind(segvals[,1:5],sds,shapiro.wilk)
 	names(out)[6:7] = c("st_dev","ShapiroWilk")
 	
-	print(paste(gamma.plot, "allSamples_fitted_multipcf_variability_gamma.txt",sep="/"))
-	write.table(out,paste(gamma.plot, "allSamples_fitted_multipcf_variability_gamma.txt",sep="/"),sep="\t",row.names=F,quote=F)
+	print(paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"))
+	write.table(out,paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"),sep="\t",row.names=F,quote=F)
 	
 	png(paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""))
 	plot(out[,6],out[,7],cex=log(segvals$n.probes)+1,bg=rgb(1,0,0,0.5),pch=21,xlab="standard deviation",ylab="Shapiro-Wilk statistic",xlim=c(0,1))
@@ -200,12 +201,12 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 	plot(DENS,xlab="Shapiro-Wilk statistic",main="")
 	dev.off()
 
-	sd.threshold=0.08
-	n.threshold=50
+	sd.threshold = 0.08
+	min.probes = 67 #50
 	
 	#plot density just for segments with at least 50 probes
-	if(length(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes>=n.threshold])>=2) {
-		DENS=density(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes>=n.threshold],from=0,to=1)
+	if(length(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes >= min.probes]) >= 2) {
+		DENS = density(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes >= min.probes],from=0,to=1)
 		png(paste(gamma.plot, "/multipcf_StDev_density_gamma",gamma2,".png",sep=""))
 		plot(DENS,xlab="standard deviation",main="")
 		dev.off()
@@ -222,8 +223,8 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 	            paste(gamma.plot, "/", patient.name, "_variableRegions_gamma",gamma2,"_sd", sd.threshold, "_n", n.threshold, ".txt",sep="")
 	            ,sep="\t",row.names=F,quote=F)
 	
-	no.variable.regions = length(variable.region.indices)
-	if(no.variable.regions>0) {
+	
+	if(length(variable.region.indices) > 0) {
 		hclust.data = segvals[variable.region.indices,-(1:5)]	
 		#colnames(hclust.data) = samplenames
 		HC = hclust(dist(t(hclust.data)))

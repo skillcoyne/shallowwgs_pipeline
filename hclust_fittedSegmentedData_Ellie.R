@@ -22,8 +22,7 @@ if (length(patient.file) <= 0)
 
 patient.info = read.patient.info(patient.file)
 
-patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
-patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year)
+
 patient.info$Patient = gsub("/", "_", patient.info$Patient)
 head(patient.info)
 
