@@ -1,0 +1,302 @@
+---
+title: "Sample Clustering"
+author: "Sarah Killcoyne"
+date: "12/6/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(GGally)
+library(plyr)
+library(xlsx)
+library(dplyr)
+library(pander)
+library(Hmisc)
+library(ggdendro)
+library(reshape2)
+library(GenomicRanges)
+
+library(tibble)
+library(mclust)
+
+source('lib/load_patient_metadata.R')
+
+data = '~/Data/Ellie'
+
+data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
+plot.dir = paste(data, 'Analysis/multipcf_plots_fitted_perPatient', sep='/')
+
+if (length(list.files(plot.dir)) <= 0)
+  stop(paste("No analysis files found in", plot.dir ))
+
+## Patient info file
+patient.file = grep('All_patient_info.xls', data.files, value=T)
+if (length(patient.file) != 1)
+  stop(paste("Missing/too many patient info file(s) in", data))
+
+patient.info = read.patient.info(patient.file)
+
+patient.info$Patient = gsub("/", "_", patient.info$Patient)
+head(patient.info)
+
+patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
+
+sum.patient.data = ddply(patient.info, .(Patient, Status), summarise, years=paste(range(Endoscopy.Year), collapse='-'), 
+      n.samples=length(Samplename), med.cellularity=median(Barretts.Cellularity,na.rm=T))
+
+load('patients.Rdata', verbose=T)
+```
+
+## Segmentation Values
+```{r clust, echo=T, message=T, warning=F}
+
+for (pt in subset(sum.patient.data, Status == 'P')$Patient) {
+  if (pt == 'AH0254') next
+  print(pt)
+  print(ncol(patient.data[[pt]]$seg.vals[,-(1:5)]))
+  
+  model = Mclust(patient.data[[pt]]$seg.vals[,-(1:5)], modelNames=c('VEE','VVE'))
+  print(model$loglik)
+  
+  tryCatch({
+    mod1dr = MclustDR(model, lambda = 1)
+    #summary(mod1dr)
+    table(mod1dr$mixcomp)
+  
+    plot(mod1dr, what = "evalues")
+    title(main=pt)
+    plot(mod1dr, what = "density")
+  })
+}
+
+
+```
+
+## Normalized Segmentation Values
+Doesn't work for the normalized values.  I'm not sure that the normalization is useful though...
+```{r clustN, echo=T, message=T, warning=F}
+
+for (pt in subset(sum.patient.data, Status == 'P')$Patient) {
+  if (pt == 'AH0254') next
+  print(pt)
+  print(paste('norm.seg.vals cols:', ncol(patient.data[[pt]]$norm.seg.vals)))
+  
+  model = Mclust(patient.data[[pt]]$norm.seg.vals, modelNames=c('VEE','VVE'))
+  print(paste('loglik', round(model$loglik,2)))
+  
+  tryCatch({
+    mod1dr = MclustDR(model, lambda = 1)
+    #summary(mod1dr)
+    table(mod1dr$mixcomp)
+  
+    if (length(table(mod1dr$mixcomp)) > 1) {
+      plot(mod1dr, what = "evalues")
+      title(main=pt)
+      plot(mod1dr, what = "density")
+    }
+  })
+}
+
+
+```
+
+## Perhaps AP Clustering
+```{r apclust-func, echo=F, message=F, warning=F}
+suppressPackageStartupMessages( library(apcluster) )
+
+apclust.data<-function(segdata, samples) {
+  x1 = segdata[,intersect(colnames(segdata), samples)]
+  rownames(x1) = (segdata[,c(1:4)] %>%
+    rowwise() %>%
+    mutate(location=paste(paste(chrom, arm, sep=''), '.', start.pos, '-', end.pos, sep='')))$location
+  return(x1)  
+}
+
+apclust<-function(segdata) {
+  x1 = apclust.data(segdata)
+  # q=0 minimize off-diagonal similarity
+  ac = apcluster(negDistMat(r=2), x1, details=T, convits=25, q=0)
+  return(list('apres'=ac, 'data'=x1))
+}
+
+net.similarity<-function(ac) {
+  if (is.list(ac))
+    ac = ac$apres
+  ac@netsim
+}
+
+sum.similarity<-function(ac) {
+  if (is.list(ac))
+    ac = ac$apres
+  ac@dpsim
+}
+
+clusters<-function(ac) {
+  if (is.list(ac))
+    ac = ac$apres
+  ac@exemplars
+}
+
+plotAC<-function(aclist) {
+  plot(aclist$apres, aclist$data)
+} 
+
+heatmapAC<-function(aclist) {
+  heatmap(aclist$apres)
+}
+
+# First vs last samples
+#x1 = apclust.data(patient.data[[pt]]$seg.vals[,c(1:4, 6, ncol(patient.data[[pt]]$seg.vals))], patient.data[[pt]]$info$Samplename)
+```
+
+Affinity Propagagion clustering described by Frey & Dueck, 2007
+
+```{r apclust, echo=T, message=T, warning=F, fig.height=5.5, fig.align='left'}
+sum.patient.data = arrange(sum.patient.data, Status)
+
+## Using the segmentation values
+sim = sum.patient.data[,c(2:4)]
+rownames(sim) = sum.patient.data[,1]
+for (pt in sum.patient.data$Patient) {
+  x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
+  ac = apcluster(negDistMat(x1, r=2), details=T, q=0.1, includeSim=T)
+  
+  sim[pt, 'ns'] = net.similarity(ac)
+  sim[pt, 'clusters'] = length(clusters(ac))
+
+  #plot(ac, x1, main=pt)
+  #heatmap(ac, main=pt)
+  heatmap(ac, col=terrain.colors(12), Rowv=F, dendScale=0.5, margins=c(3,3,2), legend="col", sideColors=c('darkgreen','yellowgreen'), main=pt)
+}
+
+summarise(group_by(sim, Status), mean.ns=mean(ns), sd.ns=sd(ns), mean.c=mean(clusters), sd.c=sd(clusters) )
+
+# May be a difference
+t.test( subset(sim, Status == 'NP')$ns, subset(sim, Status == 'P')$ns )
+t.test( subset(sim, Status == 'NP')$clusters, subset(sim, Status == 'P')$clusters )
+
+
+# Should this be performed on the normalized seg values instead?
+sim3 = sum.patient.data[,c(2:4)]
+rownames(sim3) = sum.patient.data[,1]
+for (pt in sum.patient.data$Patient) {
+  x1 = patient.data[[pt]]$norm.seg.vals
+  ac = apcluster(negDistMat(x1, r=2), details=T, q=0.1, includeSim=T)
+  
+  sim3[pt, 'ns'] = net.similarity(ac)
+  sim3[pt, 'clusters'] = length(clusters(ac))
+  
+  #plot(ac, x1, main=paste(pt, 'norm'))
+  heatmap(ac, col=terrain.colors(12), Rowv=F, dendScale=0.5, margins=c(3,3,2), legend="col", sideColors=c('darkgreen','yellowgreen'), main=paste(pt, 'norm'))
+}
+
+summarise(group_by(sim3, Status), mean.ns=mean(ns), sd.ns=sd(ns), mean.c=mean(clusters), sd.c=sd(clusters) )
+
+# Doesn't show up here
+t.test( subset(sim3, Status == 'NP')$ns, subset(sim3, Status == 'P')$ns )
+t.test( subset(sim3, Status == 'NP')$clusters, subset(sim3, Status == 'P')$clusters )
+
+
+```
+
+So using the segmentation values (not the normalized ones) try some leave one out xval to see if the currently weak differences still hold.
+
+```{r xval, echo=T, warning=F, message=T, fig.align='left', fig.height=4}
+
+# Leave out patients
+loo_xval = matrix(ncol=2, nrow=0, dimnames=list(c(), c('net.similarity', 'num.clusters')))
+for (i in 1:nrow(sum.patient.data)) {
+  simL = sum.patient.data[-i,c(2:4)]
+  rownames(simL) = sum.patient.data[-i,1]
+
+  for (pt in sum.patient.data$Patient[-i]) {
+    x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
+    ac = apcluster(negDistMat(x1, r=2), q=0.1)
+  
+    simL[pt, 'ns'] = net.similarity(ac)
+    simL[pt, 'clusters'] = length(clusters(ac))
+  }
+  
+  ttp = t.test( subset(simL, Status == 'NP')$ns, subset(simL, Status == 'P')$ns )$p.value
+  ttc = t.test( subset(simL, Status == 'NP')$clusters, subset(simL, Status == 'P')$clusters )$p.value
+
+  loo_xval = rbind(loo_xval, cbind(ttp,ttc))
+}
+
+ggplot(melt(data.frame(loo_xval)), aes(x=variable, y=value, fill=variable)) +  
+    geom_boxplot() + geom_jitter(shape=16, position=position_jitter(0.2)) +
+    stat_boxplot(geom ='errorbar') + labs(y='p-values', x='', title='Leave one (patient) out clustering')
+
+# Leaving out these patients causes the p-value to be > 0.05
+pander(sum.patient.data[ which(loo_xval >= 0.05), ], caption='In a leave-one out analysis for ap clustering removing these patients causes the p-values to be > 0.05')
+
+# They have a higher mean than average, but may not be significant
+t.test(sum.patient.data[ which(loo_xval >= 0.05), 'n.samples'], subset(sum.patient.data, Status == 'P')$'n.samples')
+
+# Leave out samples?
+looS_xval = matrix(ncol=2, nrow=0, dimnames=list(c(), c('net.similarity', 'num.clusters')))
+for (i in 1:20) { # 10 fold?
+  print(i)
+  simX = sum.patient.data[,c(2:4)]
+  rownames(simX) = sum.patient.data[,1]
+  # Leave one out for every clustering pass, but not first or last?
+  for (pt in sum.patient.data$Patient) {
+      x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename[-sample(2:(length(patient.data[[pt]]$info$Samplename)-1), 1)])
+      ac = apcluster(negDistMat(x1, r=2), q=0.1)
+  
+      simX[pt, 'ns'] = net.similarity(ac)
+      simX[pt, 'clusters'] = length(clusters(ac))
+    }
+  
+  ttp = t.test( subset(simX, Status == 'NP')$ns, subset(simX, Status == 'P')$ns )$p.value
+  ttc = t.test( subset(simX, Status == 'NP')$clusters, subset(simX, Status == 'P')$clusters )$p.value
+
+  looS_xval = rbind(looS_xval, cbind(ttp,ttc))
+}
+
+
+ggplot(melt(data.frame(looS_xval)), aes(x=variable, y=value, fill=variable)) +  
+    geom_boxplot() + geom_jitter(shape=16, position=position_jitter(0.2)) +
+    stat_boxplot(geom ='errorbar') + labs(y='p-values', x='', title='Leave one (sample) out clustering')
+
+
+```
+
+
+## Shared gains/losses
+
+Use ap clustering to identify the shared gains/losses in a single sample
+
+```{r gl, echo=T, message=T, warning=F, fig.align='left', fig.height=10}
+
+pt = 'PR1_ADH_074'
+  
+head(patient.data[[pt]]$variable.regions)
+
+x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
+
+# hold on...perhaps I should compute the 
+ac = apcluster(negDistMat(x1, r=2), details=T, q=0.1, includeSim=T)
+
+heatmap(ac, col=terrain.colors(12), Rowv=F, dendScale=0.5, margins=c(3,3,2), legend="col", sideColors=c('darkgreen','yellowgreen'))
+#plot(ac, x1)
+#plot(ac)
+
+# Merge clusters
+agex = aggExCluster(x=ac)
+plot(agex)
+
+plot(agex, x1, k=3)
+heatmap(agex, col=terrain.colors(12), Rowv=F, dendScale=0.5, margins=c(3,3,2), legend="col", sideColors=c('darkgreen','yellowgreen'))
+
+ac
+```
+
+
+
+
+
+
+
+

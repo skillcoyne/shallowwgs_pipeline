@@ -52,10 +52,13 @@ sum.patient.data = ddply(patient.info, .(Patient, Status), summarise, years=past
 
 ## Gamma = 250
 ```{r cors, echo=F, message=T, warning=F, fig.height=6, fig.width=6, fig.align='left'}
+## Cluster the samples by coverage then pull out regions
+
 ## Thresholds
 min.probes=67 # equiv to 1MB
 gamma2 = 250
-sd.threshold = 0.08
+sd.threshold = 0.08  # cov by numbers of probes
+
 gain.threshold = 1.1
 loss.threshold = 0.9
 

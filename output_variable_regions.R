@@ -55,15 +55,10 @@ all.patient.info = read.patient.info(patient.file)
 all.patient.info = arrange(all.patient.info, Status, Patient, Endoscopy.Year)
 all.patient.info$Patient = gsub("/", "_", all.patient.info$Patient)
 head(all.patient.info)
-## TODO Mistake in earlier version of the patient file caused this will be fixed for the next run
-# snames = grep('_1072(5|9)$', all.patient.info$Samplename)
-# if ( length(snames > 0) ) {
-#   all.patient.info$Samplename[snames] =  paste( sub('-','_', all.patient.info$Plate.Index[snames]), '10725_10729', sep='_' )
-# }
 
 ## Thresholds
 sd.threshold = 0.08
-# this is what's used in the plotting script...
+# this is what's used in the plotting script... = 1mb
 min.probes = 67  
 
 gain.threshold = 1.1
