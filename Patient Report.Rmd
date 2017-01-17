@@ -76,11 +76,10 @@ for (patient.name in unique(patient.info$Patient)  )  {
 
   # ORDER segvals by endoscopy year etc
   cur.pt = subset(patient.info, Patient == patient.name)
-  segvals[, c(colnames(segvals[1:5]), cur.pt$Samplename)]
+  segvals = segvals[, c(colnames(segvals[1:5]), cur.pt$Samplename)]
     
   patient.data[[patient.name]][['seg.vals']] = segvals
   patient.data[[patient.name]][['info']] = cur.pt
-
 
   if(nrow(segvals)>0) {
       HC = hclust(dist(t(segvals[,-(1:5)])))
@@ -128,7 +127,6 @@ for (patient.name in unique(patient.info$Patient)  )  {
         sample.normalised.segvals = normalised.segvals[, intersect(colnames(normalised.segvals), patient$Samplename)]
       }
 }
-  
 
 
 

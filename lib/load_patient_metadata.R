@@ -53,8 +53,18 @@ read.patient.info<-function(file) {
   if ( length(snames > 0) ) {
     patient.info$Samplename[snames] =  paste( sub('-','_', patient.info$Plate.Index[snames]), '10725_10729', sep='_' )
   }
+
+  head(patient.info)
+  patient.info$Pathology
   
-  patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year)
+  # Remove 'normal' samples
+  patient.info = subset(patient.info, Pathology != 'D2')
+  patient.info = subset(patient.info, Pathology != 'Gastriccardia')
+  patient.info$Pathology = droplevels(patient.info$Pathology)
+  patient.info$Pathology = ordered( patient.info$Pathology, 
+                                    levels=c("?","BE","BE(IM)","ID","GM","IM","IMC","LGD","LGD+HGD","HGD/IMC","HGD" ))
+  
+  patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
   return(patient.info)
 }
