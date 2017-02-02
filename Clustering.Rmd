@@ -24,6 +24,18 @@ library(mclust)
 
 source('lib/load_patient_metadata.R')
 
+getPrecision<-function(actual,predicted) {
+  retrieved <- sum(predicted==1)
+  precision <- sum(predicted==1 & actual==1) / retrieved
+  precision
+}
+getRecall<-function(actual,predicted) {
+  retrieved <- sum(predicted==1)
+  recall <- sum(predicted==1 & actual==1) / sum(actual==1)
+  recall
+}
+
+
 data = '~/Data/Ellie'
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
@@ -40,7 +52,7 @@ if (length(patient.file) != 1)
 patient.info = read.patient.info(patient.file)
 
 patient.info$Patient = gsub("/", "_", patient.info$Patient)
-head(patient.info)
+#head(patient.info)
 
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
@@ -50,7 +62,11 @@ sum.patient.data = ddply(patient.info, .(Patient, Status), summarise, years=past
 load('patients.Rdata', verbose=T)
 ```
 
-## How do the samples separate?
+## How do the sample timepoints separate?
+
+It appears that in the progressors that generally the HGD or IMC pathology may suddenly appear and be very different (PR1-HIN-044) from other samples, or those where it may have been a progressive sampling that can be fairly related to previous samples (AHM0952).  In most cases the HGD/IMC samples drive the variance, but it is often there in the LGD samples as well.  In contrast the non-progressor patients, even where they have LGD, don't generally show a sudden jump in the sample (AD0591).  
+
+This would suggest we might have a more difficult time separating out the progressors where the early samples were all highly related and a sudden shift occurred to generate the HGD sample. This could be either sampling bias or a sudden model of progression, but I can't think of a method right now that might separate the two.
 
 ```{r pca, echo=F, warning=F, message=F, fig.width=20, fig.height=20}
 sum.patient.data = arrange(sum.patient.data, Status, n.samples)
@@ -92,32 +108,73 @@ grid.arrange(grobs=npplots, ncol=2, top="Non-Progressors")
 
 ```
 
+## Mixture Models
 
-```{r clust, echo=T, message=T, warning=F, eval=F}
+One of the questions we'd like to answer is how to separate the progressors from the non-progressors before we see the pathological progression (HGD or even LGD).  If there is increasing instability in the genome how do we characterize it?
 
-for (pt in subset(sum.patient.data, Status == 'P')$Patient) {
-  if (pt == 'AH0254') next
+I tried were several mixture models (e.g. EM) but wasn't able to find a pattern that could reliably separate the few mixtures I did see
+
+```{r clust, echo=T, message=T, warning=F, eval=T, fig.height=6, fig.width=6}
+
+llk = vector(mode='numeric', length=nrow(sum.patient.data))
+names(llk) = sum.patient.data$Patient
+for (pt in sum.patient.data$Patient) {
   print(pt)
   print(ncol(patient.data[[pt]]$seg.vals[,-(1:5)]))
   
-  x1 = patient.data[[pt]]$seg.vals[,-(1:5)]
+  x1 = as.matrix(patient.data[[pt]]$seg.vals[,-(1:5)])
+  x1 = x1[,patient.data[[pt]]$info$Samplename]
   
-  model = Mclust(t(x1))
-  print(model$loglik)
+  fit <- Mclust(x1, G=3)
+  plot(fit, what='classification')
+  title(main=paste(pt, ' (',patient.data[[pt]]$info$Status[1], ')', sep=''))
+
+  llk[pt] = fit$loglik
   
-  tryCatch({
-    mod1dr = MclustDR(model, lambda = 0)
-    #summary(mod1dr)
-    table(mod1dr$mixcomp)
   
-    plot(mod1dr, what = "evalues")
-    title(main=pt)
-    plot(mod1dr, what = "density")
-  })
+#   clusterPlots <- data.frame(x1 = clusterData$x1, x2 = clusterData$x2, cluster = factor(model$classification, 
+#     levels = c(1, 2), labels = c("z = 0", "z = 1")), uncertainity = model$uncertainty, 
+#     logUncertainity = log(model$uncertainty))
+# clusterPlots.gg <- ggplot(clusterPlots)
+# clusterPlots.gg + geom_point(aes(x = x1, y = x2, color = cluster))
+  
+  
+  #tryCatch({
+  # model = densityMclust(x1, G=3)
+  # plotDensityMclustd(model, data=x1,  col='blue', lwd=2, hist.col = "lightblue",  breaks=100)
+  #   mod1dr = MclustDR(model, lambda = 0.5)
+  #   #summary(mod1dr)
+  #   table(mod1dr$mixcomp)
+  # 
+  #   #plot(mod1dr, what = "evalues")
+  #   #title(main=pt)
+  #   plot(mod1dr, what = "density")
+  #   title(main=paste(pt, ' (',patient.data[[pt]]$info$Status[1], ')', sep=''))
+  # })
 }
+
+# Log liklihood doesn't separate them
+t.test(llk[subset(sum.patient.data, Status == 'NP')$Patient], llk[subset(sum.patient.data, Status == 'P')$Patient])
+
+```
+
+
+```{r means, echo=F, message=F, warning=F, eval=F} 
+## Kmeans
+#   x1 = as.matrix(patient.data[[pt]]$seg.vals[,-(1:5)])
+# 
+   fit = kmeans(x1, 3)
+#   plot(x1[,c(1,10)], col=km$cluster)
+# title(main=paste(pt, ' (',patient.data[[pt]]$info$Status[1], ')', sep=''))  
+
+
+library(cluster) 
+clusplot(x1, fit$cluster, color=TRUE, shade=TRUE, labels=2, lines=0, main=pt)
 
 
 ```
+
+
 ```{r apclust-func, echo=F, message=F, warning=F}
 suppressPackageStartupMessages( library(apcluster) )
 
@@ -169,10 +226,6 @@ heatmapAC<-function(aclist) {
 
 
 
-```{r em, echo=F, message=F, warning=F, eval=F} 
-## EM
-
-```
 
 
 
@@ -205,14 +258,15 @@ for (pt in subset(sum.patient.data, Status == 'P')$Patient) {
 
 ```
 
-## Perhaps AP Clustering
+## AP Clustering
 
+So tried AP as that doesn't require the pre-definition for number of clusters.  It appears to give good separation, though there's a suggestion of two different types of progressors.
 
-## Affinity Propagagion clustering described by Frey & Dueck, 2007
+### Affinity Propagagion clustering described by Frey & Dueck, 2007
 
 First on the raw segmentation values
 
-```{r apclust, echo=T, message=T, warning=F, fig.height=8, fig.align='left'}
+```{r apclust, echo=T, message=T, warning=F, fig.height=10, fig.width=10, fig.align='left'}
 q=0.2
 
 sum.patient.data = arrange(sum.patient.data, Status)
@@ -229,12 +283,12 @@ for (pt in sum.patient.data$Patient) {
   ac = apcluster(negDistMat(x1, r=2), q=q, details=T, includeSim=T)
   
   last = ncol(x1)
-  if (patient.data[[pt]]$info$Status == 'P')
-    last = sort(grep('HGD', patient.data[[pt]]$info$Pathology), decreasing=T)[1]
+  if (patient.data[[pt]]$info$Status[1] == 'P' & pt != 'AD0252')
+    last = sort(grep('HGD|IMC', patient.data[[pt]]$info$Pathology), decreasing=T)[1]
   if (ncol(x1) <= 15) {
-#    plot(ac, x1[,c(c(1:ncol(x1))[-last], last)], main=pt)
+    plot(ac, x1[,c(c(1:ncol(x1))[-last], last)], main=pt)
   } else {
-#    plot(ac, x1[,c(1, sort(sample(c(1:(ncol(x1)-1))[c(-1,-last)], 8)) ,last) ], main=pt)
+    plot(ac, x1[,c(1, sort(sample(c(1:(ncol(x1)-1))[c(-1,-last)], 8)) ,last) ], main=pt)
   }
 
   sim[pt, 'ns'] = net.similarity(ac)
@@ -263,7 +317,70 @@ g2 = ggplot(sim[,c('Status','clusters')], aes(y=clusters, x=Status, fill=Status)
 
 grid.arrange(g1, g2, top='Raw seg values')
 
+
+fit = glm(Status~clusters, sim, family=binomial(link='logit'))
+pander(fit, justify='left')
+
+sim = sim[, c('Status', 'clusters', 'ns','ss')]
+actualMatrix = matrix(0,1000,2,dimnames=list(c(), c('prec','recall')))
+for (i in 1:nrow(actualMatrix)) {
+  trainingRows = sample(1:nrow(sim), nrow(sim)-5)
+  train = sim[trainingRows,]
+  test = sim[-trainingRows,]
+  
+  fit = glm( (as.integer(Status)-1)~clusters, train, family=binomial(link='logit'))
+  pred = predict(fit, test, se.fit=F) # probabilities -- of which outcome though?
+  
+  actual = test$Status == 'P'
+  predicted = pred>0
+  
+  actualMatrix[i,'prec'] = getPrecision( actual, predicted )
+  actualMatrix[i, 'recall'] = getRecall( actual, predicted )
+}
+
+ggplot(as.data.frame(actualMatrix), aes(x=recall, y=prec)) + geom_point() + 
+  geom_hline(yintercept = 0.5, col='red', alpha=0.5) +
+  labs(title='Precision/Recall for Progressor/NP prediction')
+
 ```
+
+### Are the clusters random?
+
+```{r example_pt}
+pt = 'PR1_HIN_042'
+patient.data[[pt]]$info = arrange(patient.data[[pt]]$info, Endoscopy.Year, desc(Pathology))
+
+x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
+colnames(x1) = paste(patient.data[[pt]]$info$Endoscopy.Year, '(', patient.data[[pt]]$info$Pathology, ')', sep='' )
+
+ac = apcluster(negDistMat(x1, r=2), q=q, details=T, includeSim=T)
+
+cols = c('chr','cluster','P.x', 'x')
+hgmx = matrix(nrow=0,ncol=length(cols),dimnames=list(c(), cols))
+for (chr in c(1:22)) {
+  for (i in 1:length(ac@clusters)) {
+    cl = x1[ac@clusters[[i]],]  
+    
+    x = length(grep(paste('^',chr,'(p|q)',sep=''),  rownames(cl), value=T)) # n in cluster
+    m = length(grep(paste('^',chr,'(p|q)',sep=''),  rownames(x1), value=T)) # total n
+    n = nrow(x1)-m
+    k = length(ac@clusters[[i]])
+
+    hgmx = rbind(hgmx, cbind(chr, i, signif(dhyper(x,m,n,k),3), x))
+  }
+}
+
+hgmx = as.data.frame(hgmx)
+
+ggplot(subset(hgmx, x > 0), aes(x=chr,y=P.x,color=factor(cluster))) + ylim(0,1)+ 
+  geom_point() + geom_line(alpha=0.1)
+
+ggplot(subset(hgmx, x > 0 & cluster == 9), aes(x=factor(chr),y=P.x,fill=factor(cluster))) + ylim(0,0.5 )+ 
+  geom_bar(colour='grey', stat='identity', position=position_dodge())
+
+
+```
+
 
 
 So what about using the normalized segmented values?
@@ -357,7 +474,7 @@ ggplot(melt(data.frame(looS_xval[,c(2,3)])), aes(x=variable, y=value, fill=varia
     stat_boxplot(geom ='errorbar') + labs(y='p-values', x='', title='Leave one (sample) out clustering')
 ```
 
-## (xval) Re run clusters on the Progressors without the final sample
+## (xval) Re run clusters on the Progressors without the HGD sample
 There is still a difference between the progressors and non, though the p-value does increase. Some of the progressors do start looking more like NPs in their similarity measure but not all of them.
 
 ```{r nofinal, echo=F, message=F, warning=F, fig.height=6, fig.width=10}
@@ -367,8 +484,8 @@ rownames(simX) = sum.patient.data[,1]
 
 for (pt in sum.patient.data$Patient) {
   x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
-  if (subset(sum.patient.data, Patient == pt)$Status == 'P' & length(which(grepl('HGD', patient.data[[pt]]$info$Pathology))) > 0) {
-    final = grep('HGD', patient.data[[pt]]$info$Pathology)
+  if (subset(sum.patient.data, Patient == pt)$Status == 'P' & length(which(grepl('HGD|IMC', patient.data[[pt]]$info$Pathology))) > 0) {
+    final = grep('HGD|IMC', patient.data[[pt]]$info$Pathology)
     x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename[-final])
   }
   ac = apcluster(negDistMat(x1, r=2), q=q)
@@ -393,13 +510,85 @@ grid.arrange(gg1, gg2, ncol=2)
 #pander(subset(simX, Status == 'P' & ss <= mean(ss)), caption="These patients are still strongly in the Progressor group")
 
 pander(subset(simX, Status == 'P' & ss >= mean(ss)), caption="These patients are more similar to Non-Progressors without their HGD sample(s)")
+
+
+simX = simX[, c('Status', 'clusters', 'ns','ss')]
+noHGDPR = as.data.frame(matrix(0,1000,2,dimnames=list(c(), c('prec','recall'))))
+for (i in 1:nrow(actualMatrix)) {
+  trainingRows = sample(1:nrow(simX), nrow(simX)-5)
+  train = simX[trainingRows,]
+  test = simX[-trainingRows,]
+  
+  fit = glm( Status~clusters, train, family=binomial(link='logit'))
+  pred = predict(fit, test, se.fit=F) # probabilities -- of which outcome though?
+  
+  actual = test$Status == 'P'
+  predicted = pred>0
+  
+  noHGDPR[i,'prec'] = getPrecision( actual, predicted )
+  noHGDPR[i, 'recall'] = getRecall( actual, predicted )
+}
+
+ggplot(as.data.frame(noHGDPR), aes(x=recall, y=prec)) + geom_point() + 
+  geom_hline(yintercept = 0.5, col='red', alpha=0.5) +
+  labs(title='Precision/Recall for Progressor/NP prediction NO HGD')
+
+
+
+
+```
+
+Currently, without the HGD/IMC samples we can predict progressors `r nrow(subset(noHGDPR, prec > 0.5))/nrow(noHGDPR)*100`% of the time.
+In comparison, including HGD/IMC samples our predictions improve to `r length(which(actualMatrix[,'prec'] > 0.5))/nrow(actualMatrix)*100`%.
+
+ 
+## And why q=0.2
+```{r whyq, echo=F, message=F, warning=F}
+sum.patient.data = arrange(sum.patient.data, Status)
+
+pvals = as.data.frame(matrix(ncol=2,nrow=0,dimnames=list(c(), c('clusters','ss'))))
+for (qv in seq(0.1,0.9,0.1)) {
+  print(qv)
+  
+  ## Using the segmentation values
+  simPC = sum.patient.data[,c(2:4)]
+  rownames(simPC) = sum.patient.data[,1]
+  for (pt in sum.patient.data$Patient) {
+    patient.data[[pt]]$info = arrange(patient.data[[pt]]$info, Endoscopy.Year, desc(Pathology))
+  
+    x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
+    colnames(x1) = paste(patient.data[[pt]]$info$Endoscopy.Year, '(', patient.data[[pt]]$info$Pathology, ')', sep='' )
+  
+    ac = apcluster(negDistMat(x1, r=2), q=qv, convits=75)
+    
+    simPC[pt, 'ns'] = net.similarity(ac)
+    simPC[pt, 'ss'] = sum.similarity(ac)
+    simPC[pt, 'clusters'] = length(clusters(ac))
+  }
+  
+  # May be a difference
+  ttps = t.test( subset(simPC, Status == 'NP')$ss, subset(simPC, Status == 'P')$ss )$p.value
+  ttpn = t.test( subset(simPC, Status == 'NP')$ns, subset(simPC, Status == 'P')$ns )$p.value
+  ttpc = t.test( subset(simPC, Status == 'NP')$clusters, subset(simPC, Status == 'P')$clusters )$p.value
+
+  pvals = rbind(pvals,cbind(ttpc,ttps))
+}
+colnames(pvals) = c('clusters','sum.similarity')
+pvals$qv=seq(0.1,0.9,0.1)
+
+
+ggplot(melt(pvals, id.vars='qv'),aes(x=qv,y=value, color=variable)) + geom_point() +
+  labs(main="qvalus for AP", y='pvalue NP vs P', x='q param')
+  
+
 ```
 
 
+```{r loc_pca, echo=F, warning=F, message=T, fig.height=12, fig.width=20, eval=F}
 ## Can we identify regions in the progressors?
 
-Not really just from the SVDs.  This isn't any different at the moment from simply calling the variable regions directly.
-```{r loc_pca, echo=F, warning=F, message=T, fig.height=12, fig.width=20}
+#Not really just from the SVDs.  This isn't any different at the moment from simply calling the variable regions directly.
+
 count.occurrences<-function(grs) {
   ov = findOverlaps(grs, type="within", ignoreSelf=TRUE,select="arbitrary")
   counts = countOverlaps(grs, type='within', maxgap=0)
@@ -566,4 +755,11 @@ t.test( width(pl.c), width(npl.c) ) # Not for the losses
 ```
 
 
+```{r precrec, echo=F, warning=F, message=F, fig.height=12, fig.width=20}
 
+
+
+
+
+
+```
