@@ -56,10 +56,11 @@ patient.info$Patient = gsub("/", "_", patient.info$Patient)
 
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
+load('patients.Rdata', verbose=T)
+
 sum.patient.data = ddply(patient.info, .(Patient, Status), summarise, years=paste(range(Endoscopy.Year), collapse='-'), 
       n.samples=length(Samplename), med.cellularity=median(Barretts.Cellularity,na.rm=T))
 
-load('patients.Rdata', verbose=T)
 ```
 
 ## How do the sample timepoints separate?
