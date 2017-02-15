@@ -1,4 +1,4 @@
-library(xlsx)
+
 library(plyr)
 
 strip.whitespace <- function (x) gsub("\\s+|\\s+", "", x)
@@ -7,13 +7,17 @@ read.patient.info<-function(file) {
   if (!file.exists(file))
     stop(paste(file, "doesn't exist or is not readable."))
 
+  if (grepl('\\.xlsx$', file)) {
+    library(xlsx)
+  }
+  
   patient.info = NULL
   for (i in 1:length(getSheets(loadWorkbook(file)))) {
     print(i)
     if (names(getSheets(loadWorkbook(file))[i]) == 'Technical Repeats') next
 
     ws = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
-    ws = ws[which( ws$Patient.ID != ""), grep('Patient|Path\\.ID|Endoscopy.Year|Pathology$|Progressor|Plate.Index|SLX|cellularity|p53', colnames(ws), value=T, ignore.case=T)]
+    ws = ws[which( ws$Patient.ID != ""), grep('Patient|Path\\.ID|Endoscopy.Year|Pathology$|Progressor|Plate.Index|SLX|cellularity|p53|Number', colnames(ws), value=T, ignore.case=T)]
     head(ws)
     #head(patient.info)
     
@@ -33,10 +37,14 @@ read.patient.info<-function(file) {
                grep('Plate.Index',colnames(ws),ignore.case=T),
                grep('SLX',colnames(ws),ignore.case=T),
                grep('cellularity',colnames(ws),ignore.case=T),
-               grep('p53', colnames(ws),ignore.case=F)) ]
+               grep('p53', colnames(ws),ignore.case=F),
+               grep('Number.of', colnames(ws), ignore.case=F)) ]
     
     
-    colnames(ws) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status')
+    colnames(ws) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads')
+    
+    ws[ws$p53.Status == "", 'p53.Status'] = NA
+    ws[ws$Barretts.Cellularity == "", 'Barretts.Cellularity'] = NA
     
     if (is.null(patient.info)) {
       patient.info = ws
@@ -45,13 +53,14 @@ read.patient.info<-function(file) {
     }
   }
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
-
-  patient.info$Status = factor(strip.whitespace(patient.info$Status))
-  patient.info$Pathology = factor(strip.whitespace(patient.info$Pathology))
-  patient.info$Endoscopy.Year = as.numeric(patient.info$Endoscopy.Year)
   patient.info$Plate.Index = strip.whitespace(patient.info$Plate.Index)
-  patient.info$Barretts.Cellularity = as.integer(patient.info$Barretts.Cellularity)
-  patient.info$p53.Status = as.integer(patient.info$p53.Status)
+  
+  patient.info[c('Status','Pathology','p53.Status')] = 
+    lapply(patient.info[c('Status','Pathology','p53.Status')], function(x) factor(strip.whitespace(x)))
+  
+  patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads')] = 
+    lapply(patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads')], as.numeric)
+
   
   patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
   ## TODO Mistake in earlier version of the patient file caused this will be fixed for the next run

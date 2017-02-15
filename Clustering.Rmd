@@ -58,10 +58,65 @@ patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
 load('patients.Rdata', verbose=T)
 
-sum.patient.data = ddply(patient.info, .(Patient, Status), summarise, years=paste(range(Endoscopy.Year), collapse='-'), 
-      n.samples=length(Samplename), med.cellularity=median(Barretts.Cellularity,na.rm=T))
+sum.patient.data = as.data.frame(patient.info %>%
+  group_by(Patient, Status) %>%
+  summarise(
+    years=paste(range(Endoscopy.Year), collapse='-'),
+    n.samples=length(Samplename), med.cellularity=median(Barretts.Cellularity,na.rm=T),
+    mean.reads=mean(Total.Reads),
+    sd.reads=sd(Total.Reads)
+  ))
+
+pander(sum.patient.data)
+```
+
+# Global View and Questions
+
+```{r global_pt, echo=F, message=F, warning=F}
+be = subset(patient.info, Pathology == 'BE')
+lgd = subset(patient.info, Pathology <= 'LGD')
+
+p53Status = data.frame(rbind('Non-Progressors'=table(subset(patient.info, Status == 'NP')$p53.Status), 
+           'Progressors'=table(subset(patient.info, Status == 'P')$p53.Status)))
+colnames(p53Status) = c('None', 'Positive')
+
+ttr = t.test(subset(patient.info, Status == 'NP')$Total.Reads, subset(patient.info, Status == 'P')$Total.Reads)
+ttrbe = t.test(subset(be, Status == 'NP')$Total.Reads, subset(be, Status == 'P')$Total.Reads)
+ttrlgd = t.test(subset(lgd, Status == 'NP')$Total.Reads, subset(lgd, Status == 'P')$Total.Reads)
+
+tbclgd = t.test(subset(lgd, Status == 'NP')$Barretts.Cellularity, subset(lgd, Status == 'P')$Barretts.Cellularity)
+tbcbe = t.test(subset(be, Status == 'NP')$Barretts.Cellularity, subset(be, Status == 'P')$Barretts.Cellularity)
+
+t.test(subset(patient.info, Pathology == 'BE')$Barretts.Cellularity, 
+               subset(patient.info, Pathology == 'LGD')$Barretts.Cellularity)
+
+t.test(subset(patient.info, Pathology == 'LGD')$Barretts.Cellularity, 
+               subset(patient.info, Pathology == 'HGD')$Barretts.Cellularity)
+
+
+## No differences between the number of reads by pathology
+t.test(subset(patient.info, Pathology == 'BE')$Total.Reads, subset(patient.info, Pathology == 'LGD')$Total.Reads)
+t.test(subset(patient.info, Pathology == 'BE')$Total.Reads, subset(patient.info, Pathology == 'HGD')$Total.Reads)
+t.test(subset(patient.info, Pathology == 'LGD')$Total.Reads, subset(patient.info, Pathology == 'HGD')$Total.Reads)
+
+t.test(subset(patient.info, Pathology == 'BE')$Barretts.Cellularity, subset(patient.info, Pathology == 'LGD')$Barretts.Cellularity)
+t.test(subset(patient.info, Pathology == 'BE')$Barretts.Cellularity, subset(patient.info, Pathology == 'HGD')$Barretts.Cellularity)
+t.test(subset(patient.info, Pathology == 'LGD')$Barretts.Cellularity, subset(patient.info, Pathology == 'HGD')$Barretts.Cellularity)
 
 ```
+
+There are a few things we need to be careful of and a couple of questions to check here:
+
+1. The total number of reads per sample between NP and P might show a difference, but currently with multi-test correction it's not significant.
+`r  signif(ttr$p.value,2)*11`
+So are those samples with lower numbers of reads showing less complexity overall?  When sequencing NP are we likely to get fewer reads than with P? If we look only at the samples with BE (no LGD or HGD samples) the difference disappears `r signif(ttrbe$p.value, 2)*11`. If we include LGD with the BE samples we again see the difference.  `r signif(ttrlgd$p.value, 2)*11`.  This is suggestive that changes in copy number result in more reads being output. 
+
+
+2. There is a significant difference in the cellularity of the Barretts sample, with progressors having a higher mean cellularity, even when only comparing samples that were either LGD or BE.  `r signif(tbclgd$p.value, 2)` However, even the BE only samples show a higher cellularity overall `r signif(tbcbe$p.value, 2)*11`  That said, currently we have a high rate of missing information, with about `r length(which(is.na(subset(patient.info, Status == 'P')$Barretts.Cellularity)))/length(which(patient.info$Status == 'P'))*100`% of the cellualarities missing for progressors and `r length(which(is.na(subset(patient.info, Status == 'NP')$Barretts.Cellularity)))/length(which(patient.info$Status == 'NP'))*100`% of the NP cellularities missing.
+
+3. With regards to p53 staining, non-progressors have no p53 positive tests, while progressors had `r p53Status[2,2]` overall.
+`r pander(p53Status, justify='left', caption="P53 staining status for progressors vs non")`
+Of these `r table(be$p53.Status)[['1']]` were positive in a BE sample, and `r table(lgd$p53.Status)[['1']]` were positive when LGD samples were included.
 
 ## How do the sample timepoints separate?
 
@@ -75,8 +130,42 @@ sum.patient.data = arrange(sum.patient.data, Status, n.samples)
 plot.pca<-function(pt) {
   
   info = arrange(patient.data[[pt]]$info, Endoscopy.Year)
+
+  plots = list()
+  for (sv in c('seg.vals','norm.seg.vals')) {
+    
+    x1 = patient.data[[pt]][[sv]][, patient.data[[pt]]$info$Samplename]
+    x1 = x1[,patient.data[[pt]]$info$Samplename]
+    colnames(x1) = paste(patient.data[[pt]]$info$Endoscopy.Year, '(', patient.data[[pt]]$info$Pathology, ')', sep='' )
   
-  x1 = patient.data[[pt]]$seg.vals[, patient.data[[pt]]$info$Samplename]
+    pca = prcomp(t(x1), scale=T)
+  
+    eigenvalues = pca$sdev^2
+    screeplot(pca, main=paste(pt, df, 'scree'))
+  
+    #plot(pca$sd^2)
+
+    df = as.data.frame(pca$x)
+    df$year = as.factor(info$Endoscopy.Year)
+    df$label = paste(info$Endoscopy.Year, '(', info$Pathology, ')', sep='' )
+    df$Pathology = info$Pathology
+
+    gg = ggplot(df, aes(PC1, PC2)) + geom_line() +
+        geom_label(aes(label=year),nudge_y=0.04) + 
+        geom_point( aes(color=Pathology, size=Pathology)) +
+        labs(title=paste(pt, sv))
+  plots[[sv]] = gg
+  }  
+  do.call(grid.arrange, c(plots, list(ncol=2))
+  return(gg)
+}
+
+
+plot.pca.norm<-function(pt) {
+  
+  info = arrange(patient.data[[pt]]$info, Endoscopy.Year)
+  
+  x1 = patient.data[[pt]]$norm.seg.vals[, patient.data[[pt]]$info$Samplename]
   x1 = x1[,patient.data[[pt]]$info$Samplename]
   colnames(x1) = paste(patient.data[[pt]]$info$Endoscopy.Year, '(', patient.data[[pt]]$info$Pathology, ')', sep='' )
   
@@ -99,6 +188,7 @@ plot.pca<-function(pt) {
 
   return(gg)
 }
+
 
 
 pplots = lapply(subset(sum.patient.data, Status == 'P')$Patient, plot.pca)
@@ -226,10 +316,6 @@ heatmapAC<-function(aclist) {
 ```
 
 
-
-
-
-
 ```{r clustN, echo=T, message=T, warning=F, eval=F}
 ## Normalized Segmentation Values
 #Doesn't work for the normalized values.  
@@ -251,7 +337,7 @@ for (pt in subset(sum.patient.data, Status == 'P')$Patient) {
     if (length(table(mod1dr$mixcomp)) > 1) {
       plot(mod1dr, what = "evalues")
       title(main=pt)
-      plot(mod1dr, what = "density")
+      #plot(mod1dr, what = "density")
     }
   })
 }
@@ -273,8 +359,8 @@ q=0.2
 sum.patient.data = arrange(sum.patient.data, Status)
 
 ## Using the segmentation values
-sim = sum.patient.data[,c(2:4)]
-rownames(sim) = sum.patient.data[,1]
+sim = sum.patient.data[,c('Status','years')]
+rownames(sim) = sum.patient.data[,'Patient']
 for (pt in sum.patient.data$Patient) {
   patient.data[[pt]]$info = arrange(patient.data[[pt]]$info, Endoscopy.Year, desc(Pathology))
 
@@ -286,16 +372,25 @@ for (pt in sum.patient.data$Patient) {
   last = ncol(x1)
   if (patient.data[[pt]]$info$Status[1] == 'P' & pt != 'AD0252')
     last = sort(grep('HGD|IMC', patient.data[[pt]]$info$Pathology), decreasing=T)[1]
-  if (ncol(x1) <= 15) {
-    plot(ac, x1[,c(c(1:ncol(x1))[-last], last)], main=pt)
-  } else {
-    plot(ac, x1[,c(1, sort(sample(c(1:(ncol(x1)-1))[c(-1,-last)], 8)) ,last) ], main=pt)
-  }
+  # if (ncol(x1) <= 15) {
+  #   plot(ac, x1[,c(c(1:ncol(x1))[-last], last)], main=pt)
+  # } else {
+  #   plot(ac, x1[,c(1, sort(sample(c(1:(ncol(x1)-1))[c(-1,-last)], 8)) ,last) ], main=pt)
+  # }
 
   sim[pt, 'ns'] = net.similarity(ac)
   sim[pt, 'ss'] = sum.similarity(ac)
   sim[pt, 'clusters'] = length(clusters(ac))
-  #heatmap(ac)
+  
+  tmp = patient.data[[pt]]$variable.regions[,-(1:5)]
+  sim[pt, 'n.var'] = nrow(patient.data[[pt]]$variable.regions[,-(1:5)])
+  
+  if (nrow(tmp) <= 0) {
+    sim[pt,c('gains', 'loss')] = c(0,0)
+  } else {
+    sim[pt,'gains'] = length(tmp[tmp>=1.1])
+    sim[pt,'loss'] =  length(tmp[tmp<=0.9])
+  }
 }
 sim$id = rownames(sim)
 
@@ -306,7 +401,12 @@ ttps = t.test( subset(sim, Status == 'NP')$ss, subset(sim, Status == 'P')$ss )$p
 ttpn = t.test( subset(sim, Status == 'NP')$ns, subset(sim, Status == 'P')$ns )$p.value
 ttpc = t.test( subset(sim, Status == 'NP')$clusters, subset(sim, Status == 'P')$clusters )$p.value
 
-#t.test( subset(sim, Status == 'NP')$clusters, subset(sim, Status == 'P')$clusters )$p.value
+
+## Number of variable regions isn't so good, but maybe...
+sim %>%
+  group_by(Status) %>%
+  summarise( mean = mean(n.var), sd = sd(n.var), med = median(n.var))
+t.test( subset(sim, Status == 'NP')$n.var, subset(sim, Status == 'P')$n.var )$p.value
 
 g1 = ggplot(sim[,c('Status','ss')], aes(y=ss, x=Status, fill=Status)) + geom_boxplot() + 
   geom_jitter(width=0.2) + stat_boxplot(geom ='errorbar') +
@@ -317,7 +417,6 @@ g2 = ggplot(sim[,c('Status','clusters')], aes(y=clusters, x=Status, fill=Status)
   labs(title=paste("p-value", signif(ttpc, 3)), y='num. clusters')
 
 grid.arrange(g1, g2, top='Raw seg values')
-
 
 fit = glm(Status~clusters, sim, family=binomial(link='logit'))
 pander(fit, justify='left')
@@ -382,8 +481,6 @@ ggplot(subset(hgmx, x > 0 & cluster == 9), aes(x=factor(chr),y=P.x,fill=factor(c
 
 ```
 
-
-
 So what about using the normalized segmented values?
 
 ```{r apclustN, echo=T, message=T, warning=F, fig.height=8, fig.align='left'}
@@ -415,7 +512,7 @@ So using the raw segmentation values (not the normalized ones) try some leave on
 
 Patients first
 
-```{r xval_pt, echo=T, warning=F, message=T, fig.align='left', fig.height=4, eval=T}
+```{r xval_pt, echo=T, warning=F, message=T, fig.align='left', fig.height=4, eval=F}
 # Leave out patients
 loo_xval = matrix(ncol=3, nrow=0, dimnames=list(c(), c('net.similarity', 'sum.similarity', 'clusters')))
 for (i in 1:nrow(sum.patient.data)) {
@@ -438,21 +535,24 @@ for (i in 1:nrow(sum.patient.data)) {
   loo_xval = rbind(loo_xval, cbind(ttpn, ttps, ttc))
 }
 
-ggplot(melt(data.frame(loo_xval[,c(1,3)])), aes(x=variable, y=value, fill=variable)) +  
+ggplot(melt(data.frame(loo_xval[,c(3)])), aes(x=variable, y=value, fill=variable)) +  
     geom_boxplot() + geom_jitter(shape=16, width=0.2) + geom_hline(yintercept=0.05, color='red', alpha=0.5) +
-    stat_boxplot(geom ='errorbar') + labs(y='p-values', x='', title='Leave one (patient) out clustering')
+    stat_boxplot(geom ='errorbar') + labs(y='p-values', x='Iterations', title='Leave one (patient) out clustering') +
+  scale_fill_manual(values=c('purple'), labels='clusters')
+  
+
 ```
 
 Then randomly leave out samples
 
-```{r xval_smp, echo=F, warning=F, message=T, fig.align='left', fig.height=6, eval=T}
+```{r xval_smp, echo=F, warning=F, message=T, fig.align='left', fig.height=6, eval=F}
 
 # Leave out samples?
 looS_xval = matrix(ncol=3, nrow=0, dimnames=list(c(), c('net.similarity', 'sum.similarity', 'clusters')))
 for (i in 1:20) { 
-  simX = sum.patient.data[,c(2:4)]
-  rownames(simX) = sum.patient.data[,1]
-  
+  simX = sum.patient.data[,c('Status','years')]
+  rownames(simX) = sum.patient.data[,'Patient']
+
   for (pt in sum.patient.data$Patient) {
       x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename[-sample(1:(length(patient.data[[pt]]$info$Samplename)), 1)])
       ac = apcluster(negDistMat(x1, r=2), q=q)
@@ -469,21 +569,28 @@ for (i in 1:20) {
   looS_xval = rbind(looS_xval, cbind(ttpn,ttps, ttc))
 }
 
-ggplot(melt(data.frame(looS_xval[,c(2,3)])), aes(x=variable, y=value, fill=variable)) +  
+ggplot(melt(data.frame(looS_xval[,c(3)])), aes(x=variable, y=value, fill=variable)) +  
     geom_boxplot() + geom_jitter(shape=16, position=position_jitter(0.2)) +
   geom_hline(yintercept=0.05, color='red', alpha=0.5) +
-    stat_boxplot(geom ='errorbar') + labs(y='p-values', x='', title='Leave one (sample) out clustering')
+    stat_boxplot(geom ='errorbar') + labs(y='p-values', x='Iterations', title='Leave one (sample) out clustering') + 
+    scale_fill_manual(values=c('#CC99FF'), labels='clusters')
+
 ```
 
 ## (xval) Re run clusters on the Progressors without the HGD sample
 There is still a difference between the progressors and non, though the p-value does increase. Some of the progressors do start looking more like NPs in their similarity measure but not all of them.
 
 ```{r nofinal, echo=F, message=F, warning=F, fig.height=6, fig.width=10}
-simX = sum.patient.data[,c(2:4)]
-rownames(simX) = sum.patient.data[,1]
+
+gain.threshold = 1.1
+loss.threshold = 0.9
+
+simX = sum.patient.data[,c('Status','years')]
+rownames(simX) = sum.patient.data[,'Patient']
 # Leave out final sample on the progressors 
 
 for (pt in sum.patient.data$Patient) {
+  print(pt)
   x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
   if (subset(sum.patient.data, Patient == pt)$Status == 'P' & length(which(grepl('HGD|IMC', patient.data[[pt]]$info$Pathology))) > 0) {
     final = grep('HGD|IMC', patient.data[[pt]]$info$Pathology)
@@ -494,26 +601,25 @@ for (pt in sum.patient.data$Patient) {
   simX[pt, 'ns'] = net.similarity(ac)
   simX[pt, 'ss'] = sum.similarity(ac)
   simX[pt, 'clusters'] = length(clusters(ac))
+  
+  simX[pt, 'n.var'] = nrow(patient.data[[pt]]$variable.regions[,-(1:5)])
 }
   
-ttps = t.test( subset(simX, Status == 'NP')$ss, subset(simX, Status == 'P')$ss )$p.value
-gg1 = ggplot(melt(data.frame(simX[c('Status','ss')])), aes(x=Status, y=value, fill=Status)) +  
-    geom_boxplot() + geom_jitter(shape=16, position=position_jitter(0.2)) +
-    stat_boxplot(geom ='errorbar') + labs(y='sim values', x='', title=paste('Leave out HGD sample(s) p-value', signif(ttps, 3)))
-
 ttpc = t.test( subset(simX, Status == 'NP')$clusters, subset(simX, Status == 'P')$clusters )$p.value
-gg2 = ggplot(melt(data.frame(simX[c('Status','clusters')])), aes(x=Status, y=value, fill=Status)) +  
+ggplot(melt(data.frame(simX[c('Status','clusters')])), aes(x=Status, y=value, fill=Status)) +  
     geom_boxplot() + geom_jitter(shape=16, position=position_jitter(0.2)) +
     stat_boxplot(geom ='errorbar') + labs(y='num. clusters', x='', title=paste('Leave out HGD sample(s) p-value', signif(ttpc, 3)))
 
-grid.arrange(gg1, gg2, ncol=2)
+t.test(subset(simX, Status == 'NP')$n.var, subset(simX, Status == 'P')$n.var)
 
 #pander(subset(simX, Status == 'P' & ss <= mean(ss)), caption="These patients are still strongly in the Progressor group")
 
-pander(subset(simX, Status == 'P' & ss >= mean(ss)), caption="These patients are more similar to Non-Progressors without their HGD sample(s)")
+pander(subset(simX, Status == 'P' & clusters >= mean(clusters)), caption="These patients are more similar to Non-Progressors without their HGD sample(s)")
 
+fit = glm(Status~clusters, simX, family=binomial(link='logit') )
+summary(fit)
 
-simX = simX[, c('Status', 'clusters', 'ns','ss')]
+simX = simX[, c('Status', 'clusters', 'ns','ss','gain','loss')]
 noHGDPR = as.data.frame(matrix(0,1000,2,dimnames=list(c(), c('prec','recall'))))
 for (i in 1:nrow(actualMatrix)) {
   trainingRows = sample(1:nrow(simX), nrow(simX)-5)
@@ -532,10 +638,8 @@ for (i in 1:nrow(actualMatrix)) {
 
 ggplot(as.data.frame(noHGDPR), aes(x=recall, y=prec)) + geom_point() + 
   geom_hline(yintercept = 0.5, col='red', alpha=0.5) +
+  geom_vline(xintercept = 0.5, col='red', alpha=0.5) +
   labs(title='Precision/Recall for Progressor/NP prediction NO HGD')
-
-
-
 
 ```
 
@@ -547,8 +651,9 @@ In comparison, including HGD/IMC samples our predictions improve to `r length(wh
 ```{r whyq, echo=F, message=F, warning=F}
 sum.patient.data = arrange(sum.patient.data, Status)
 
-pvals = as.data.frame(matrix(ncol=2,nrow=0,dimnames=list(c(), c('clusters','ss'))))
-for (qv in seq(0.1,0.9,0.1)) {
+pvals = as.data.frame(matrix(ncol=3,nrow=0,dimnames=list(c(), c('p.clusters','mean.clusters', 'sd.clusters'))))
+status.clusters = list()
+for (qv in seq(0,0.9,0.1)) {
   print(qv)
   
   ## Using the segmentation values
@@ -563,23 +668,40 @@ for (qv in seq(0.1,0.9,0.1)) {
     ac = apcluster(negDistMat(x1, r=2), q=qv, convits=75)
     
     simPC[pt, 'ns'] = net.similarity(ac)
-    simPC[pt, 'ss'] = sum.similarity(ac)
+    #simPC[pt, 'ss'] = sum.similarity(ac)
     simPC[pt, 'clusters'] = length(clusters(ac))
   }
   
   # May be a difference
-  ttps = t.test( subset(simPC, Status == 'NP')$ss, subset(simPC, Status == 'P')$ss )$p.value
+  #ttps = t.test( subset(simPC, Status == 'NP')$ss, subset(simPC, Status == 'P')$ss )$p.value
   ttpn = t.test( subset(simPC, Status == 'NP')$ns, subset(simPC, Status == 'P')$ns )$p.value
   ttpc = t.test( subset(simPC, Status == 'NP')$clusters, subset(simPC, Status == 'P')$clusters )$p.value
 
-  pvals = rbind(pvals,cbind(ttpc,ttps))
+  pvals = rbind(pvals,cbind(ttpc, mean(simPC$clusters), sd(simPC$clusters)))
+  
+  by.clusters = simPC %>% group_by(Status) %>% summarise( n.mean.clusters=mean(clusters), n.sd.clusters=sd(clusters), se.clusters=sd(clusters)/sqrt(length(Status)) )
+  
+  status.clusters[[paste('q=',qv, sep='')]] = by.clusters
 }
-colnames(pvals) = c('clusters','sum.similarity')
-pvals$qv=seq(0.1,0.9,0.1)
+colnames(pvals) = c('p.clusters','mean.clusters', 'sd.clusters')
+pvals$qv=seq(0,0.9,0.1)
+
+clus = as.data.frame(do.call(rbind, lapply(status.clusters, function(x) c(x[['n.mean.clusters']], x[['n.sd.clusters']]  ))))
+colnames(clus) = c('NP','P', 'NP.sd', 'P.sd')
+clus$qv = seq(0,0.9,0.1)
+
+m = melt(clus[,c(1:2,5)], measure.vars=c('NP','P'))
+m[which(m$variable == 'NP'), 'sd'] = clus$NP.sd
+m[which(m$variable == 'P'), 'sd'] = clus$P.sd
+
+ggplot(m, aes(x=qv, y=value, col=variable)) + geom_point() +  
+  geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.01, alpha=0.3) +
+  geom_hline(yintercept=5, alpha=0.3) + geom_hline(yintercept=15, alpha=0.3, col='red') + 
+  labs(title='Clusters vs q parameters', x='q parameter', y='mean(clusters)')
 
 
-ggplot(melt(pvals, id.vars='qv'),aes(x=qv,y=value, color=variable)) + geom_point() +
-  labs(main="qvalus for AP", y='pvalue NP vs P', x='q param')
+ggplot(melt(pvals, measure.vars=c('p.clusters'), id.vars='qv'),aes(x=qv,y=value, color=variable)) + geom_point() +
+  labs(title='P vs NP p-values per q parameters', y='pvalue NP vs P', x='q param')
   
 
 ```
@@ -756,10 +878,29 @@ t.test( width(pl.c), width(npl.c) ) # Not for the losses
 ```
 
 
-```{r precrec, echo=F, warning=F, message=F, fig.height=12, fig.width=20}
+```{r model, echo=F, warning=F, message=F, fig.height=12, fig.width=20, eval=F}
+
+t.test(subset(sim, Status == 'P')$clusters, subset(sim, Status == 'NP')$clusters)
+
+t.test(subset(simX, Status == 'P')$clusters, subset(simX, Status == 'NP')$clusters)
 
 
+## TODO  Need to consider segment lengths relative to chromosomal lengths
 
+var.lengths = as.data.frame( do.call(rbind, lapply(patient.data, function(x){
+  if (nrow(x[['variable.regions']]) > 0) {
+    lengths = as.vector( (x[['variable.regions']]['end.pos'] - x[['variable.regions']]['start.pos'])[,1] )
+    return(c(median(lengths), mean(lengths), sd(lengths), sd(lengths)/length(lengths)))
+  }
+  return(NA)
+})) )
+colnames(var.lengths) = c('median','mean','sd','se')
+
+var.lengths = merge(sum.patient.data, var.lengths, by.x='Patient', by.y='row.names')
+
+
+var.lengths
+wilcox.test(subset(var.lengths, Status == 'P')$mean, subset(var.lengths, Status == 'NP')$mean)
 
 
 

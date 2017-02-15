@@ -20,7 +20,7 @@ outdir = args[3]
 #data = '~/Data/Ellie/QDNAseq'
 #patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
 #outdir = '~/Data/Ellie/Analysis'
-data.files = list.files(data, full.names=T)
+data.dirs = list.dirs(data, full.names=T, recursive=F)
 
 plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
 print(paste("Plot directory:", plot.dir))
@@ -28,18 +28,20 @@ if (!dir.exists(plot.dir))
   dir.create(plot.dir, recursive=T)
 
 ## Patient info file
-patient.file = grep('patient_info.xlsx', data.files, value=T)
+patient.file = grep('patient_info.xlsx', list.files(data, full.names=T), value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing patient info file in", data))
 
 all.patient.info = read.patient.info(patient.file)
+all.patient.info$Patient = gsub('\\/', '_', all.patient.info$Patient)
 head(all.patient.info)
-all.patient.info$samplename = strip.whitespace(gsub('-', '_', paste(all.patient.info$Plate.Index,trimws(all.patient.info$SLX.ID),sep="_")))
 
 patient.plot.dir = paste(plot.dir,patient.name, sep='/')
 if (!dir.exists(patient.plot.dir))  
   dir.create(patient.plot.dir, recursive=T)
 
+
+patient.name = gsub('\\/', '_', patient.name)
 print(patient.name)
 patient.info = subset(all.patient.info, Patient == patient.name)
 if (nrow(patient.info) <= 0)
@@ -62,7 +64,7 @@ fit.data$in.blacklist = F
 
 for(r in 1:nrow(blacklisted.regions)) {
   #if (r %% 50 ==0) print(r)
-	#print(blacklisted.regions[r,])
+	print(blacklisted.regions[r,])
 	fit.data$in.blacklist[ fit.data$chrom==blacklisted.regions$chromosome[r] & 
 	                        fit.data$start>=blacklisted.regions$start[r] & 
 	                        fit.data$end<=blacklisted.regions$end[r] ] = T
@@ -80,7 +82,7 @@ if (length(missingIndicies > 0))
   warning(paste("Missing several samples: ", paste(missingIndicies, collapse=', '), sep=''))
 
 # Grab just those specific samples
-window.depths.standardised = window.depths.standardised[,na.omit( match(patient.info$samplename, colnames(window.depths.standardised)) )]
+window.depths.standardised = window.depths.standardised[,na.omit( match(patient.info$Samplename, colnames(window.depths.standardised)) )]
 #samplenames = grep('D\\d', colnames(window.depths.standardised), value=T)
 
 # there are mutiple samples per patient too
@@ -102,7 +104,7 @@ print(sdev)
 
 good.bins = which(!is.na(rowSums(window.depths.standardised[,!is.na(sdevs)])))
 
-patient.name = gsub("/","_",patient.name)
+#patient.name = gsub("/","_",patient.name)
 
 for(gamma2 in c(250,5,10,25,50,100,500,1000)) { 
   #gamma2=250

@@ -1,3 +1,5 @@
+## Step 1
+
 library(plyr)
 library(ggplot2)
 library(ggdendro)
@@ -5,11 +7,19 @@ library(ggdendro)
 
 args = commandArgs(trailingOnly=TRUE)
 
-if (length(args) < 2)
-  stop("Missing required arguments: <qdna data dir> <output dir>")
+if (length(args) < 3)
+  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir>")
 
 data = args[1]
-outdir = args[2]
+patient.file = args[2]
+outdir = args[3]
+
+
+all.patient.info = read.patient.info(patient.file)
+if (is.null(all.patient.info))
+  stop(paste("Failed to read patient file", patient.file))
+all.patient.info$Patient = gsub('/', '_',all.patient.info$Patient)
+
 
 outdir = paste(outdir, "plots_fitted", sep='/')
 if ( !dir.exists(outdir) ) 
@@ -108,8 +118,15 @@ plot.dir = paste(outdir, 'coverage_binned_fitted', sep='/')
 dir.create(plot.dir, showWarnings=F)
 
 for (s in samplenames) {
-  print(paste("plotting ",s,sep=""))
-  png(paste(plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
+  pt = paste('SLX-', subset(all.patient.info, Samplename == s)$SLX.ID, sep='')
+  
+  if (length(pt) > 0) {
+    dir.create(paste(plot.dir, pt, sep='/'), showWarnings=F)
+    png(paste(paste(plot.dir, pt, sep='/'),paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
+  } else {
+    png(paste(plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
+  }
+  print(paste("plotting",pt, s))
   gg = ggplot(window.depths[,c(chr.info, s)],aes_string(x="genome.pos", y=s)) + lims(y=c(-0.25,3), x =c(0,max(window.depths$genome.pos))) + 
     geom_point(color='darkred', alpha=0.5) +
     geom_vline(data=chrs, xintercept=c(0,chrs$cum.lengths), color='darkgrey') + 
