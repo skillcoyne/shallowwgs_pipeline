@@ -53,17 +53,25 @@ read.patient.info<-function(file) {
   }
   } else {
     patient.info = read.table(file, header=T, sep='\t', stringsAsFactors=F)
-    patient.info = patient.info[, c(grep('Patient',colnames(ws), ignore.case=T),
-                                    grep('Path\\.ID',colnames(ws), ignore.case=T),
-                                    grep('Progressor',colnames(ws), ignore.case=T),
-                                    grep('Endoscopy.year',colnames(ws), ignore.case=T),
-                                    grep('Pathology',colnames(ws),ignore.case=T),
-                                    grep('Plate.Index',colnames(ws),ignore.case=T),
-                                    grep('SLX',colnames(ws),ignore.case=T),
-                                    grep('cellularity',colnames(ws),ignore.case=T),
-                                    grep('p53', colnames(ws),ignore.case=F),
-                                    grep('Number.of', colnames(ws), ignore.case=F)) ]
-  
+    
+    slx.cols = grep('SLX', colnames(patient.info), value=T)
+    if (length(slx.cols) > 1) {
+      slx.rows = patient.info[,slx.cols]
+      patient.info[slx.cols] = lapply(patient.info[slx.cols], as.null)
+      patient.info$SLX.ID = strip.whitespace(apply(slx.rows, 1, function(x) paste(x, collapse='_')))
+      patient.info$SLX.ID = sub('_$', '', patient.info$SLX.ID)
+    }
+    patient.info = patient.info[, c(grep('Patient',colnames(patient.info), ignore.case=T),
+                                    grep('Path\\.ID',colnames(patient.info), ignore.case=T),
+                                    grep('Progressor',colnames(patient.info), ignore.case=T),
+                                    grep('Endoscopy.year',colnames(patient.info), ignore.case=T),
+                                    grep('Pathology',colnames(patient.info),ignore.case=T),
+                                    grep('Plate.Index',colnames(patient.info),ignore.case=T),
+                                    grep('SLX',colnames(patient.info),ignore.case=T),
+                                    grep('cellularity',colnames(patient.info),ignore.case=T),
+                                    grep('p53', colnames(patient.info),ignore.case=F),
+                                    grep('Number.of', colnames(patient.info), ignore.case=F)) ]
+    colnames(patient.info) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads')
   }
   
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
