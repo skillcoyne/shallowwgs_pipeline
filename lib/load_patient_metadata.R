@@ -9,10 +9,9 @@ read.patient.info<-function(file) {
 
   if (grepl('\\.xlsx$', file)) {
     library(xlsx)
-  }
-  
-  patient.info = NULL
-  for (i in 1:length(getSheets(loadWorkbook(file)))) {
+
+    patient.info = NULL
+    for (i in 1:length(getSheets(loadWorkbook(file)))) {
     print(i)
     if (names(getSheets(loadWorkbook(file))[i]) == 'Technical Repeats') next
 
@@ -52,6 +51,21 @@ read.patient.info<-function(file) {
       patient.info = rbind(patient.info, ws)
     }
   }
+  } else {
+    patient.info = read.table(file, header=T, sep='\t', stringsAsFactors=F)
+    patient.info = patient.info[, c(grep('Patient',colnames(ws), ignore.case=T),
+                                    grep('Path\\.ID',colnames(ws), ignore.case=T),
+                                    grep('Progressor',colnames(ws), ignore.case=T),
+                                    grep('Endoscopy.year',colnames(ws), ignore.case=T),
+                                    grep('Pathology',colnames(ws),ignore.case=T),
+                                    grep('Plate.Index',colnames(ws),ignore.case=T),
+                                    grep('SLX',colnames(ws),ignore.case=T),
+                                    grep('cellularity',colnames(ws),ignore.case=T),
+                                    grep('p53', colnames(ws),ignore.case=F),
+                                    grep('Number.of', colnames(ws), ignore.case=F)) ]
+  
+  }
+  
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
   patient.info$Plate.Index = strip.whitespace(patient.info$Plate.Index)
   
