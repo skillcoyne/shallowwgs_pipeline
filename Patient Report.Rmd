@@ -2,7 +2,10 @@
 title: "Scoring Patients"
 author: "Sarah Killcoyne"
 date: "15 November 2016"
-output: word_document
+output:
+  html_document: 
+    toc: yes
+  word_document: default
 ---
 
 
@@ -17,7 +20,7 @@ library(Hmisc)
 library(ggdendro)
 library(reshape2)
 library(GenomicRanges)
-
+library(gridExtra)
 library(tibble)
 
 source('lib/load_patient_metadata.R')
@@ -25,7 +28,7 @@ source('lib/load_patient_metadata.R')
 data = '~/Data/Ellie'
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
-plot.dir = paste(data, 'Analysis/multipcf_plots_fitted_perPatient', sep='/')
+plot.dir = paste(data, 'Analysis/multipcf_plots_fitted_perPatient-OLD', sep='/')
 
 if (length(list.files(plot.dir)) <= 0)
   stop(paste("No analysis files found in", plot.dir ))
@@ -42,16 +45,15 @@ head(patient.info)
 
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
-sum.patient.data = ddply(patient.info, .(Patient, Status), summarise, years=paste(range(Endoscopy.Year), collapse='-'), 
-      n.samples=length(Samplename), med.cellularity=median(Barretts.Cellularity,na.rm=T))
+sum.patient.data = summarise.patient.info(patient.info)
+sum.patient.data = subset(sum.patient.data, Initial.Analysis)
+
+patient.info = subset(patient.info, Patient %in% sum.patient.data$Patient & Batch.Name %in% levels(patient.info$Batch.Name)[1:5])
 
 #pander(arrange(patient.data, Status), justify='left', caption='Patient information')
 ```
 
-
-
-## Gamma = 250
-```{r cors, echo=F, message=T, warning=F, fig.height=6, fig.width=6, fig.align='left'}
+```{r cors, echo=F, message=T, warning=F, fig.height=6, fig.width=6, fig.align='left', include=F}
 ## Cluster the samples by coverage then pull out regions
 
 ## Thresholds
@@ -68,6 +70,8 @@ for (patient.name in unique(patient.info$Patient)  )  {
   message(patient.name)
   patient.plot.dir = paste(plot.dir, patient.name, sep='/')
 
+  if(!file.exists(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""))) next
+  
   segvals = read.table(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
 
   message( paste(length(which(segvals$n.probes < min.probes)), ' probes below the minimum probe count (',min.probes,')', sep=''))
@@ -76,7 +80,7 @@ for (patient.name in unique(patient.info$Patient)  )  {
 
   # ORDER segvals by endoscopy year etc
   cur.pt = subset(patient.info, Patient == patient.name)
-  segvals = segvals[, c(colnames(segvals[1:5]), cur.pt$Samplename)]
+  segvals = segvals[, c(colnames(segvals[1:5]), intersect(colnames(segvals), cur.pt$Samplename))]
     
   patient.data[[patient.name]][['seg.vals']] = segvals
   patient.data[[patient.name]][['info']] = cur.pt
@@ -99,7 +103,7 @@ for (patient.name in unique(patient.info$Patient)  )  {
       CofV = sds/means
   
       variable.region.indices = which(sds >= sd.threshold & segvals$n.probes >= min.probes)
-      variable.regions = segvals[variable.region.indices, patient.data[[patient.name]]$info$Samplename] 
+      variable.regions = segvals[variable.region.indices, intersect(patient.data[[patient.name]]$info$Samplename, colnames(segvals))] 
       patient.data[[patient.name]][['variable.regions']] = cbind(segvals[variable.region.indices,c(1:5)],variable.regions )
       
       HC = hclust(dist(t(normalised.segvals)))
@@ -112,7 +116,7 @@ for (patient.name in unique(patient.info$Patient)  )  {
       gg3 = ggplot( melt(normalised.segvals), aes(x=value) ) + 
         facet_wrap(~variable,scales = "free_x") + 
         geom_histogram( fill=I("blue"),col=I("lightblue"),binwidth=0.3) + labs(title=paste(patient.name,'normalised segment coverage'), x='', y='')
-      print(gg3)
+     # print(gg3)
       #pt.plots[[patient.name]][['norm.hist']] = gg
       
       # par(mfrow=c(3, no.rows))
@@ -134,15 +138,96 @@ for (patient.name in unique(patient.info$Patient)  )  {
 ```
 \pagebreak
 
-```{r scores, echo=F, message=T, warning=F, fig.height=4,fig.width=4,fig.align='left'} 
-#pander(cor.scores[order(cor.scores$Status, cor.scores$similar),], justify='left')
+# Data
 
-#ggplot(cor.scores, aes(x=similar,y=different, color=Status)) + geom_point()
+This data was generated in the following pipeline:
 
-#ggplot(cor.scores, aes(y=abs(similar+different), x=c(1:nrow(cor.scores)), color=Status)) + geom_point()
+* Alignment using QDNAseq
+* Filter excluded regions
+* Joint segmentation per patient across all patient-derived-samples using PCF  (copynumber::multipcf method)
+
+The result looks like is two data matrices:
+
+1. Segmented values 
+```{r}
+head(patient.data[['AD0258']]$seg.vals)
 ```
 
-## Variable Regions
+```{r echo=F, warning=F, message=F, fig.height=10, fig.width=10}
+ggplot( melt(patient.data[['AD0258']]$seg.vals[,-(1:5)]), aes(x=value) ) + 
+        facet_wrap(~variable,scales = "free_x") + 
+        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.03) + labs(title='AD0258 segmented value distribution', x='', y='')
+```
+
+2. Row (e.g. per-region across timepoints) normalized values from the matrix above
+```{r}
+head(patient.data[['AD0258']]$norm.seg.vals)
+```
+
+```{r echo=F, warning=F, message=F, fig.height=10, fig.width=10}
+ggplot( melt(patient.data[['AD0258']]$norm.seg.vals), aes(x=value) ) + 
+        facet_wrap(~variable,scales = "free_x") + 
+        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + labs(title='AD0258 normalized segmented value distribution', x='', y='')
+
+## Per-sample normalization
+#nsv = patient.data[['AD0258']]$norm.seg.vals
+#nsv[] = lapply(patient.data[['AD0258']]$seg.vals[,-(1:5)], function(x) (x-mean(x))/sd(x))
+
+#ggplot(melt(nsv), aes(x=value))  + 
+#        facet_wrap(~variable,scales = "free_x") + 
+#        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + labs(title='AD0258 normalized segmented value distribution', x='', y='')
+
+```
+
+Patients do not share the same chromosomal regions, though they can be overlapped, or the same timepoints. So all analyses have been conducted on a per-patient basis.
+
+```{r general, warning=F, echo=F, message=F}
+gen = do.call(rbind, lapply(patient.data, function(x) nrow(x[['seg.vals']])))
+colnames(gen) = c('Number.Regions')
+
+sum.patient.data = subset(sum.patient.data, Patient %in% names(patient.data))
+
+sum.patient.data = merge(sum.patient.data, gen, by.x='Patient', by.y='row.names')
+sum.patient.data = arrange(sum.patient.data, Status, total.samples)
+sum.patient.data$years = with(sum.patient.data, paste(start.year, end.year, sep='-'))
+
+pander(sum.patient.data[,c('Patient','Status','years','total.samples','highest.path','Number.Regions')], justify='left')
+```
+
+
+# Segmented Value Distributions
+```{r echo=F, message=F, warning=F, fig.height=15, fig.width=10}
+
+lapply(patient.data, function(pt) {
+  name = pt$info$Patient[1]
+  status = pt$info$Status[1]
+  
+  g1 = ggplot( melt(pt[['seg.vals']][,-(1:5)]), aes(x=value) ) + 
+      facet_wrap(~variable,scales = "free_x") + 
+      geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.03) + 
+      labs(title='segmented value distribution', x='', y='')
+
+  
+  g2 = ggplot( melt(pt[['norm.seg.vals']]), aes(x=value) ) + 
+      facet_wrap(~variable,scales = "free_x") + 
+      geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + 
+      labs(title='normalized segmented value distribution', x='', y='')
+
+  do.call('grid.arrange', list(g1,g2, top=paste(name, status, sep=" - ")))
+})
+
+```
+
+# Variable Regions
+
+These are regions that are called as "variant" based on cutoffs derived from a single sample that had high-depth (50x) WGS done and was then downsampled. These cutoffs are:
+
+* Standard deviation of the segmented value matrix >= 0.08
+* The number of probes used >= 67, covers 1Mb 
+* Gains are called at >= 1.1
+* Losses are called at <= 0.9
+
+
 ```{r var_reg, echo=F, message=F, warning=F}
 rm(prog.regions, np.regions)
 for (patient.name in sum.patient.data$Patient) {
@@ -194,9 +279,9 @@ plot(hclust( dist(chrs$length)), main='Chromosome cluster by length')
 
 ## Grouping the chromosomes by length 1-12, 13-22
 
-t.test(subset(np.regions, chrom %in% c(1:12))$chr.ratio, subset(np.regions, chrom %in% c(13:22))$chr.ratio)
+#t.test(subset(np.regions, chrom %in% c(1:12))$chr.ratio, subset(np.regions, chrom %in% c(13:22))$chr.ratio)
 
-t.test(subset(prog.regions, chrom %in% c(1:12))$chr.ratio, subset(prog.regions, chrom %in% c(13:22))$chr.ratio)
+#t.test(subset(prog.regions, chrom %in% c(1:12))$chr.ratio, subset(prog.regions, chrom %in% c(13:22))$chr.ratio)
 
 
 df = data.frame( 'short' = rbind( 'np' = sum(table(np.regions$chrom)[1:12]),
@@ -210,10 +295,10 @@ ftL = fisher.test(df)
 
 So it appears that adjusting for chromosome length (looking at the ratio of the chromosome rather than the raw bp) there is still a significant difference between progressers and non: t-test p-value `r ttR$p.value`
 
-There appears to be no enrichment based on the longer vs shorter chromosomes either (fisher `r ftL$p.value`)
+There appears to be no enrichment based on the length of chromosomes either (fisher `r ftL$p.value`)
 
 
-```{r cor, echo=F, message=T, warning=F, fig.height=4,fig.width=4, fig.align='left'}
+```{r cor, echo=F, message=F, warning=F, fig.height=10,fig.width=10, fig.align='left'}
 
 lower<-function(rc) {
  ut = upper.tri( rc$r , diag=T) 
@@ -233,9 +318,11 @@ cors = list()
 for (name in names(patient.data)) {
 
   sample.normalised.segvals = patient.data[[name]]$norm.seg.vals # prog
-  sample.normalised.segvals =  sample.normalised.segvals[, patient.data[[name]]$info$Samplename ]
+  sample.normalised.segvals =  sample.normalised.segvals[, intersect(patient.data[[name]]$info$Samplename, colnames(sample.normalised.segvals)) ]
   
-  colnames(sample.normalised.segvals) =  paste(patient.data[[name]]$info$Endoscopy.Year,  c(1:nrow(patient.data[[name]]$info)) , sep='.')
+  info = subset(patient.data[[name]]$info, Samplename %in% colnames(sample.normalised.segvals))
+  
+  colnames(sample.normalised.segvals) =  paste(info$Endoscopy.Year,  c(1:nrow(info)) , sep='.')
 
   #sample.normalised.segvals = patient.data$AD0361$norm.seg.vals # non-p
   rc = rcorr(as.matrix(sample.normalised.segvals), type='pearson')
@@ -262,9 +349,9 @@ diffPNP = wilcox.test(unlist(lapply(cors[subset(sum.patient.data, Status == 'P')
 
 There's no clear difference (currently) between P and NP for the similar correlation (`r simPNP$p.value`) or the inverse (`r diffPNP$p.value`) correlations.  There are other ways we may be able to look at this still.
 
-## Look at Cancer Consensus Genes in the variable regions
+## How do Cancer Gene Consensus genes map to the variable regions?
 
-```{r, hmm, echo=F, message=F, warning=F}
+```{r, hmm, echo=F, message=F, warning=F, fig.height=40, fig.width=10}
 ccgenes = read.table('~/Data/CosmicCensusGenes.tsv', sep='\t', header=T, stringsAsFactors=F)
 
 noLoc = grep(':-',ccgenes$Genome.Location)
@@ -355,20 +442,20 @@ for (i in 1:nrow(gene.cnt)) {
 gene.cnt = arrange(gene.cnt, -Progressors)
 gene.p = subset(gene.cnt, Progressors >= Non.Progressors)
 
-m = melt(gene.p[1:50,c(1:4)], id.vars=c('Gene.Symbols', 'CN'))
+m = melt(gene.p[,c(1:4)], id.vars=c('Gene.Symbols', 'CN'))
 m$Gene.Symbols = factor(m$Gene.Symbols, levels= m$Gene.Symbols[c(nrow(m):1)] ) # order
 m$CN = factor(m$CN)
  
 p = ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
   geom_tile(aes(fill=value), color='white') + 
   scale_fill_gradient('n patients',low='white',high='royalblue4') + labs(x="",y='CGC Genes')
-p + geom_point(data=m[m$CN == 'gain' & m$value > 0,], aes(label='gain',y=Gene.Symbols, x=variable), size=2, shape=24, fill='red', color='red') +
-  geom_point(data=m[m$CN == 'loss' & m$value > 0,], aes(label='loss',y=Gene.Symbols, x=variable), color='green4', size=2, shape=25, fill='green4')
+p + geom_point(data=m[m$CN == 'gain' & m$value > 0,], aes(y=Gene.Symbols, x=variable), size=2, shape=24, fill='red', color='red') +
+  geom_point(data=m[m$CN == 'loss' & m$value > 0,], aes(y=Gene.Symbols, x=variable), color='green4', size=2, shape=25, fill='green4')
 
 
 gc = gene.cnt %>% group_by(Gene.Symbols) %>% summarise(Progressors=sum(Progressors), Non.Progressors=sum(Non.Progressors))
 gc = arrange(subset(gc, Progressors >= Non.Progressors), -Progressors)
-m = melt(gc[1:50,], id.vars=c('Gene.Symbols'))
+m = melt(gc, id.vars=c('Gene.Symbols'))
 m$Gene.Symbols = factor(m$Gene.Symbols, levels= m$Gene.Symbols[c(nrow(m):1)] ) # order
 ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
   geom_tile(aes(fill=value), color='white') + 
@@ -378,13 +465,16 @@ ggplot(m, aes(y=Gene.Symbols, x=variable)) +
 ```
 
 
-## Is HGD over represented for variable regions?
+# Is HGD over represented for variable regions?
+
+It's possible that the variable regions we find are entirely within the HGD/IMC samples.  So are they overrepresented?
+
 ```{r, hgd, echo=F, message=F, warning=F}
 
 pvnp = data.frame(matrix(nrow=length(subset(sum.patient.data, Status == 'P')$Patient), ncol=2, dimnames=list(subset(sum.patient.data, Status == 'P')$Patient, c('hgd','be'))))    
 for (name in subset(sum.patient.data, Status == 'P')$Patient) {
   print(name)
-  sn = grep('HGD', patient.data[[name]]$info$Pathology)
+  sn = grep('HGD|IMC', patient.data[[name]]$info$Pathology)
   if (length(sn) <= 0 | nrow(patient.data[[name]]$variable.regions) <= 0) next
   samplenames = patient.data[[name]]$info$Samplename
 
@@ -402,8 +492,10 @@ for (name in subset(sum.patient.data, Status == 'P')$Patient) {
 tt = t.test(pvnp$hgd, pvnp$be)
 pvnp = cbind(pvnp, (pvnp %>% rowwise() %>% mutate(total=hgd+be, hgd.ratio=round(hgd/(hgd+be),3) ))[c('total','hgd.ratio')])
 
+ct = cor.test(subset(sum.patient.data, Status == 'P')$total.samples, pvnp$hgd.ratio)
+
 pander(pvnp, justify='left', 
-       caption=paste("Variable regions found in HGD vs non-HGD samples of progessor patients.  There's no significant difference between them (t-test p=",signif(tt$p.value,2),').  Not all patients have HGD samples (NAs).',sep=''))
+       caption=paste("Variable regions found in HGD vs non-HGD samples of progessor patients.  There's no significant difference between them (t-test p=",signif(tt$p.value,2),').  Not all patients have HGD samples (NAs). There is also no significant correlation between the number/ratio of variable regions found in HGD samples vs non (Pearsons p=',signif(ct$p.value, 2),')',  sep=''))
 
 ```
 

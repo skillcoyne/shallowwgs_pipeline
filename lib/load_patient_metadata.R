@@ -1,20 +1,36 @@
 
-library(plyr)
+suppressPackageStartupMessages( library(plyr) )
 
 strip.whitespace <- function (x) gsub("\\s+|\\s+", "", x)
+
+summarise.patient.info<-function(df) {
+  sum.pt = (df %>% 
+    group_by(Patient, Status) %>%
+    summarise(
+      start.year=range(Endoscopy.Year)[1],
+      end.year=range(Endoscopy.Year)[2],
+      total.samples=length(Samplename), 
+      highest.path=sort(Pathology, decreasing=T)[1],
+      first.batch=sort(Batch.Name)[1],
+      med.cellularity=median(Barretts.Cellularity,na.rm=T),
+      Initial.Analysis=(sort(Batch.Name)[1] %in% levels(patient.info$Batch.Name)[1:5])
+    ))
+  return(arrange(sum.pt, Status, total.samples, highest.path))
+}
 
 read.patient.info<-function(file) {
   if (!file.exists(file))
     stop(paste(file, "doesn't exist or is not readable."))
 
-  if (grepl('\\.xlsx$', file)) {
+  if (grepl('\\.xlsx$', basename(file))) {
     library(xlsx)
 
     patient.info = NULL
     for (i in 1:length(getSheets(loadWorkbook(file)))) {
     print(i)
     if (names(getSheets(loadWorkbook(file))[i]) == 'Technical Repeats') next
-
+    batch_name = gsub(' ', '_', (names(getSheets(loadWorkbook(file))[i])))
+      
     ws = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
     ws = ws[which( ws$Patient.ID != ""), grep('Patient|Path\\.ID|Endoscopy.Year|Pathology$|Progressor|Plate.Index|SLX|cellularity|p53|Number', colnames(ws), value=T, ignore.case=T)]
     head(ws)
@@ -45,6 +61,8 @@ read.patient.info<-function(file) {
     ws[ws$p53.Status == "", 'p53.Status'] = NA
     ws[ws$Barretts.Cellularity == "", 'Barretts.Cellularity'] = NA
     
+    ws$Batch.Name = batch_name
+    
     if (is.null(patient.info)) {
       patient.info = ws
     } else {
@@ -72,6 +90,8 @@ read.patient.info<-function(file) {
                                     grep('p53', colnames(patient.info),ignore.case=F),
                                     grep('Number.of', colnames(patient.info), ignore.case=F)) ]
     colnames(patient.info) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads')
+    
+    
   }
   
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
@@ -91,15 +111,15 @@ read.patient.info<-function(file) {
     patient.info$Samplename[snames] =  paste( sub('-','_', patient.info$Plate.Index[snames]), '10725_10729', sep='_' )
   }
 
-  head(patient.info)
-  patient.info$Pathology
-  
   # Remove 'normal' samples
   patient.info = subset(patient.info, Pathology != 'D2')
   patient.info = subset(patient.info, Pathology != 'Gastriccardia')
   patient.info$Pathology = droplevels(patient.info$Pathology)
   patient.info$Pathology = ordered( patient.info$Pathology, 
                                     levels=c("normal","?","BE","ID","LGD", "IMC","HGD" ))
+  
+  patient.info$Batch.Name = ordered(patient.info$Batch.Name, 
+                                    levels=c("NP_Pilot_Study","Progressor_Pilot_Study", "Exome_subcohort", paste("Batch", c(1:10, '16S'), sep='_')))
   
   patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 

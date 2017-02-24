@@ -1,7 +1,7 @@
 ---
 title: "Sample Clustering"
 author: "Sarah Killcoyne"
-date: "12/6/2016"
+date: "23/02/2016"
 output: html_document
 ---
 
@@ -18,7 +18,7 @@ library(reshape2)
 library(GenomicRanges)
 library(gridExtra)
 library(biomaRt)
-
+library(multtest)
 library(tibble)
 library(mclust)
 
@@ -49,6 +49,8 @@ patient.file = grep('All_patient_info.xls', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
 
+load('patients.Rdata', verbose=T)
+
 patient.info = read.patient.info(patient.file)
 
 patient.info$Patient = gsub("/", "_", patient.info$Patient)
@@ -56,17 +58,8 @@ patient.info$Patient = gsub("/", "_", patient.info$Patient)
 
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
-load('patients.Rdata', verbose=T)
-
-sum.patient.data = as.data.frame(patient.info %>%
-  group_by(Patient, Status) %>%
-  summarise(
-    years=paste(range(Endoscopy.Year), collapse='-'),
-    n.samples=length(Samplename), med.cellularity=median(Barretts.Cellularity,na.rm=T),
-    mean.reads=mean(Total.Reads),
-    sd.reads=sd(Total.Reads)
-  ))
-
+sum.patient.data = summarise.patient.info(patient.info)
+sum.patient.data = as.data.frame(subset(sum.patient.data, Initial.Analysis)) ## For now
 pander(sum.patient.data)
 ```
 
@@ -80,41 +73,19 @@ p53Status = data.frame(rbind('Non-Progressors'=table(subset(patient.info, Status
            'Progressors'=table(subset(patient.info, Status == 'P')$p53.Status)))
 colnames(p53Status) = c('None', 'Positive')
 
-ttr = t.test(subset(patient.info, Status == 'NP')$Total.Reads, subset(patient.info, Status == 'P')$Total.Reads)
-ttrbe = t.test(subset(be, Status == 'NP')$Total.Reads, subset(be, Status == 'P')$Total.Reads)
-ttrlgd = t.test(subset(lgd, Status == 'NP')$Total.Reads, subset(lgd, Status == 'P')$Total.Reads)
-
-tbclgd = t.test(subset(lgd, Status == 'NP')$Barretts.Cellularity, subset(lgd, Status == 'P')$Barretts.Cellularity)
-tbcbe = t.test(subset(be, Status == 'NP')$Barretts.Cellularity, subset(be, Status == 'P')$Barretts.Cellularity)
-
-t.test(subset(patient.info, Pathology == 'BE')$Barretts.Cellularity, 
-               subset(patient.info, Pathology == 'LGD')$Barretts.Cellularity)
-
-t.test(subset(patient.info, Pathology == 'LGD')$Barretts.Cellularity, 
-               subset(patient.info, Pathology == 'HGD')$Barretts.Cellularity)
-
-
-## No differences between the number of reads by pathology
-t.test(subset(patient.info, Pathology == 'BE')$Total.Reads, subset(patient.info, Pathology == 'LGD')$Total.Reads)
-t.test(subset(patient.info, Pathology == 'BE')$Total.Reads, subset(patient.info, Pathology == 'HGD')$Total.Reads)
-t.test(subset(patient.info, Pathology == 'LGD')$Total.Reads, subset(patient.info, Pathology == 'HGD')$Total.Reads)
-
-t.test(subset(patient.info, Pathology == 'BE')$Barretts.Cellularity, subset(patient.info, Pathology == 'LGD')$Barretts.Cellularity)
-t.test(subset(patient.info, Pathology == 'BE')$Barretts.Cellularity, subset(patient.info, Pathology == 'HGD')$Barretts.Cellularity)
-t.test(subset(patient.info, Pathology == 'LGD')$Barretts.Cellularity, subset(patient.info, Pathology == 'HGD')$Barretts.Cellularity)
-
+set.seed(99)
+mtp1 = MTP(X=t(patient.info[,c('Barretts.Cellularity','Total.Reads')]), Y=as.integer((as.integer(patient.info$Pathology) > 3)), robust=T, get.adjp=T, na.rm=T)
+mtp2 = MTP(X=t(patient.info[,c('Barretts.Cellularity','Total.Reads')]), Y=patient.info$Status, robust=T, get.adjp=T, na.rm=T)
 ```
 
-There are a few things we need to be careful of and a couple of questions to check here:
+Currently with multi test correction the samples for which cellularity and #of reads are available show no difference for either status (P vs NP)
+`r pander(summary(mtp1), justify='left')`
 
-1. The total number of reads per sample between NP and P might show a difference, but currently with multi-test correction it's not significant.
-`r  signif(ttr$p.value,2)*11`
-So are those samples with lower numbers of reads showing less complexity overall?  When sequencing NP are we likely to get fewer reads than with P? If we look only at the samples with BE (no LGD or HGD samples) the difference disappears `r signif(ttrbe$p.value, 2)*11`. If we include LGD with the BE samples we again see the difference.  `r signif(ttrlgd$p.value, 2)*11`.  This is suggestive that changes in copy number result in more reads being output. 
+or for samples that are LGD/IMC/HGD vs BE
+`r pander(summary(mtp1), justify='left')`
 
 
-2. There is a significant difference in the cellularity of the Barretts sample, with progressors having a higher mean cellularity, even when only comparing samples that were either LGD or BE.  `r signif(tbclgd$p.value, 2)` However, even the BE only samples show a higher cellularity overall `r signif(tbcbe$p.value, 2)*11`  That said, currently we have a high rate of missing information, with about `r length(which(is.na(subset(patient.info, Status == 'P')$Barretts.Cellularity)))/length(which(patient.info$Status == 'P'))*100`% of the cellualarities missing for progressors and `r length(which(is.na(subset(patient.info, Status == 'NP')$Barretts.Cellularity)))/length(which(patient.info$Status == 'NP'))*100`% of the NP cellularities missing.
-
-3. With regards to p53 staining, non-progressors have no p53 positive tests, while progressors had `r p53Status[2,2]` overall.
+With regards to p53 staining, non-progressors have no p53 positive tests, while progressors had `r p53Status[2,2]` overall.
 `r pander(p53Status, justify='left', caption="P53 staining status for progressors vs non")`
 Of these `r table(be$p53.Status)[['1']]` were positive in a BE sample, and `r table(lgd$p53.Status)[['1']]` were positive when LGD samples were included.
 
@@ -124,11 +95,11 @@ It appears that in the progressors that generally the HGD or IMC pathology may s
 
 This would suggest we might have a more difficult time separating out the progressors where the early samples were all highly related and a sudden shift occurred to generate the HGD sample. This could be either sampling bias or a sudden model of progression, but I can't think of a method right now that might separate the two.
 
-```{r pca, echo=F, warning=F, message=F, fig.width=20, fig.height=20}
-sum.patient.data = arrange(sum.patient.data, Status, n.samples)
+```{r pca, echo=F, warning=F, message=F, fig.width=20, fig.height=40}
+sum.patient.data = arrange(sum.patient.data, Status, total.samples)
 
 plot.pca<-function(pt) {
-  
+
   info = arrange(patient.data[[pt]]$info, Endoscopy.Year)
 
   plots = list()
@@ -141,7 +112,7 @@ plot.pca<-function(pt) {
     pca = prcomp(t(x1), scale=T)
   
     eigenvalues = pca$sdev^2
-    screeplot(pca, main=paste(pt, df, 'scree'))
+    screeplot(pca, main=paste(pt, sv, 'scree'))
   
     #plot(pca$sd^2)
 
@@ -156,46 +127,15 @@ plot.pca<-function(pt) {
         labs(title=paste(pt, sv))
   plots[[sv]] = gg
   }  
-  do.call(grid.arrange, c(plots, list(ncol=2))
-  return(gg)
+  ga = do.call(grid.arrange, c(plots, list(ncol=2)))
+  return(ga)
 }
-
-
-plot.pca.norm<-function(pt) {
-  
-  info = arrange(patient.data[[pt]]$info, Endoscopy.Year)
-  
-  x1 = patient.data[[pt]]$norm.seg.vals[, patient.data[[pt]]$info$Samplename]
-  x1 = x1[,patient.data[[pt]]$info$Samplename]
-  colnames(x1) = paste(patient.data[[pt]]$info$Endoscopy.Year, '(', patient.data[[pt]]$info$Pathology, ')', sep='' )
-  
-  pca = prcomp(t(x1), scale=T)
-  
-  eigenvalues = pca$sdev^2
-  #screeplot(pca, main='scree')
-  
-  #plot(pca$sd^2)
-
-  df = as.data.frame(pca$x)
-  df$year = as.factor(info$Endoscopy.Year)
-  df$label = paste(info$Endoscopy.Year, '(', info$Pathology, ')', sep='' )
-  df$Pathology = info$Pathology
-
-  gg = ggplot(df, aes(PC1, PC2)) + geom_line() +
-    geom_label(aes(label=year),nudge_y=0.04) + 
-    geom_point( aes(color=Pathology, size=Pathology)) +
-    labs(title=pt)
-
-  return(gg)
-}
-
-
 
 pplots = lapply(subset(sum.patient.data, Status == 'P')$Patient, plot.pca)
-grid.arrange(grobs=pplots, ncol=2, top="Progressors")
+grid.arrange(grobs=pplots, nrow=length(subset(sum.patient.data, Status == 'P')$Patient), top="Progressors")
 
 npplots = lapply(subset(sum.patient.data, Status == 'NP')$Patient, plot.pca)
-grid.arrange(grobs=npplots, ncol=2, top="Non-Progressors")
+grid.arrange(grobs=npplots, nrow=length(subset(sum.patient.data, Status == 'NP')$Patient), top="Non-Progressors")
 
 ```
 
@@ -203,66 +143,157 @@ grid.arrange(grobs=npplots, ncol=2, top="Non-Progressors")
 
 One of the questions we'd like to answer is how to separate the progressors from the non-progressors before we see the pathological progression (HGD or even LGD).  If there is increasing instability in the genome how do we characterize it?
 
-I tried were several mixture models (e.g. EM) but wasn't able to find a pattern that could reliably separate the few mixtures I did see
+I tried were several mixture models (e.g. EM, kmeans) but wasn't able to find a pattern that could reliably separate the few mixtures I did see
 
-```{r clust, echo=T, message=T, warning=F, eval=T, fig.height=6, fig.width=6}
+### Raw segmented values 
 
-llk = vector(mode='numeric', length=nrow(sum.patient.data))
-names(llk) = sum.patient.data$Patient
-for (pt in sum.patient.data$Patient) {
-  print(pt)
-  print(ncol(patient.data[[pt]]$seg.vals[,-(1:5)]))
-  
-  x1 = as.matrix(patient.data[[pt]]$seg.vals[,-(1:5)])
-  x1 = x1[,patient.data[[pt]]$info$Samplename]
-  
-  fit <- Mclust(x1, G=3)
-  plot(fit, what='classification')
-  title(main=paste(pt, ' (',patient.data[[pt]]$info$Status[1], ')', sep=''))
+#### EM
+```{r clust, echo=T, message=T, warning=F, eval=T, fig.height=4, fig.width=4, eval=T}
 
-  llk[pt] = fit$loglik
+em.dr<-function(patient, status, x1, var.regions) {
+  clusters=c(2:4)
+  #llk = matrix(ncol=length(clusters),nrow=nrow(sum.patient.data), dimnames=list(sum.patient.data$Patient, clusters))
+
+  llk = vector(length=length(clusters), mode='numeric')
+  names(llk) = as.character(clusters)
   
-  
-#   clusterPlots <- data.frame(x1 = clusterData$x1, x2 = clusterData$x2, cluster = factor(model$classification, 
-#     levels = c(1, 2), labels = c("z = 0", "z = 1")), uncertainity = model$uncertainty, 
-#     logUncertainity = log(model$uncertainty))
-# clusterPlots.gg <- ggplot(clusterPlots)
-# clusterPlots.gg + geom_point(aes(x = x1, y = x2, color = cluster))
-  
-  
-  #tryCatch({
-  # model = densityMclust(x1, G=3)
-  # plotDensityMclustd(model, data=x1,  col='blue', lwd=2, hist.col = "lightblue",  breaks=100)
-  #   mod1dr = MclustDR(model, lambda = 0.5)
-  #   #summary(mod1dr)
-  #   table(mod1dr$mixcomp)
-  # 
-  #   #plot(mod1dr, what = "evalues")
-  #   #title(main=pt)
-  #   plot(mod1dr, what = "density")
-  #   title(main=paste(pt, ' (',patient.data[[pt]]$info$Status[1], ')', sep=''))
-  # })
+## Ok, this doesn't separate regions well either normalized or raw segment values.  Typically the clusters are highly overlapped and not very descriptive
+#for (pt in sum.patient.data$Patient) {
+    print(pt)
+#    status = subset(sum.patient.data, Patient == pt)$Status
+#    print(ncol(patient.data[[pt]]$seg.vals[,-(1:5)]))
+#    x1 = as.matrix(patient.data[[pt]]$seg.vals[,-(1:5)])
+#    x1 = x1[,patient.data[[pt]]$info$Samplename]
+    #x1 = as.matrix(patient.data[[pt]]$norm.seg.vals)
+    
+    for (g in clusters) {
+      print(g)
+      model = densityMclust(x1, G=g)
+      highCluster = which.max(colSums(model$parameters$mean))
+      
+      tryCatch({
+        mod1dr = MclustDR(model, lambda = 0.5)
+        
+        #     par(mfrow=c(2,1)) 
+        plot(mod1dr, what="evalues")
+        title(paste(pt, '(',status,') G=', g, sep=''))
+        plot(mod1dr, what='classification') # while this looks like PCA, it's not quite
+        title(paste(pt, '(',status,') G=', g, sep=''))
+        #     dev.off()
+        plot(mod1dr, what='density', dimens=1)
+        title(paste(pt, '  G=', g, sep=''))
+      }, error = function(e) {
+        cat(paste(pt, g, "failed DR"))
+      })
+      
+      a1 = rownames(x1[which(model$classification == highCluster),] )
+      if (nrow(var.regions) > 0) {
+        am = merge(a1, var.regions, all=T)
+        pander( as.data.frame(rownames(x1[which(model$classification == highCluster),])),
+             caption=paste("From the cluster with the highest means the regions above are selected, of these ",length(setdiff(rownames(var.regions), a1)),
+                           " regions are not found in the variable regions selected using cutoffs.", length(intersect(rownames(var.regions), a1)), " are in both."))
+      } else {
+        pander(rownames(x1[which(model$classification == highCluster),]),
+             caption=paste("From the cluster with the highest means the regions above are selected. This patient had no variable regions selected based on cutoffs"))
+        
+      }
+      
+      llk[as.character(g)] = model$loglik
+    }
+    return(llk)
 }
 
-# Log liklihood doesn't separate them
-t.test(llk[subset(sum.patient.data, Status == 'NP')$Patient], llk[subset(sum.patient.data, Status == 'P')$Patient])
+llk = as.data.frame(matrix(nrow=nrow(sum.patient.data),ncol=3,dimnames=list(c(sum.patient.data$Patient), c(2:4))))
+for (pt in sum.patient.data$Patient) {
+    print(pt)
+    status = subset(sum.patient.data, Patient == pt)$Status
 
+    x1 = patient.data[[pt]]$seg.vals
+    rownames(x1) = apply(x1, 1, function(x) strip.whitespace(paste(x[['chrom']], ':', x[['start.pos']], '-', x[['end.pos']], sep=''))) 
+    x1 = x1[,patient.data[[pt]]$info$Samplename]
+
+    var = patient.data[[pt]]$variable.regions
+    if (nrow(var) > 0)
+      rownames(var) = apply(var, 1, function(x) strip.whitespace(paste(x[['chrom']], ':', x[['start.pos']], '-', x[['end.pos']], sep=''))) 
+
+    llk[pt,] =  em.dr(pt,status,as.matrix(x1), var[,-(1:5)])
+  }
+
+ggplot(melt(as.matrix(llk)), aes(x=Var1, y=value, color=Var1)) + geom_point() + 
+  theme(axis.text.x=element_text(angle = 45), legend.position='none')
+  labs(title="Raw segment value log liklihoods", x='', y='loglik')
+
+
+# Log liklihood doesn't separate them individually or the range
+llk.diff = apply(llk, 1, function(x) diff(range(x)) )
+wilcox.test(llk.diff[subset(sum.patient.data, Status == 'NP')$Patient], llk.diff[subset(sum.patient.data, Status == 'P')$Patient])
+
+#t.test(llk[subset(sum.patient.data, Status == 'NP')$Patient,'2'], llk[subset(sum.patient.data, Status == 'P')$Patient,'2'])
+#t.test(llk[subset(sum.patient.data, Status == 'NP')$Patient,'3'], llk[subset(sum.patient.data, Status == 'P')$Patient,'3'])
+#t.test(llk[subset(sum.patient.data, Status == 'NP')$Patient,'4'], llk[subset(sum.patient.data, Status == 'P')$Patient,'4'])
 ```
 
-
-```{r means, echo=F, message=F, warning=F, eval=F} 
+#### Kmeans
+```{r kmeansraw, echo=F, message=F, warning=F, eval=F, fig.height=6, fig.width=6} 
 ## Kmeans
 #   x1 = as.matrix(patient.data[[pt]]$seg.vals[,-(1:5)])
 # 
-   fit = kmeans(x1, 3)
-#   plot(x1[,c(1,10)], col=km$cluster)
-# title(main=paste(pt, ' (',patient.data[[pt]]$info$Status[1], ')', sep=''))  
+for (pt in sum.patient.data$Patient) {
+    print(pt)
+    status = subset(sum.patient.data, Patient == pt)$Status
+    x1 = patient.data[[pt]]$seg.vals
+    rownames(x1) = apply(patient.data[[pt]]$seg.vals[,c(1:4)], 1, function(x) strip.whitespace(paste(x[['chrom']], ':', x[['start.pos']], '-', x[['end.pos']], sep=''))) 
+    x1 = x1[,patient.data[[pt]]$info$Samplename]
+    
+    fit = kmeans(x1, 3)
+    autoplot(fit, data=x1, label=T) + labs(title=paste(pt, '(', status, ') raw seg', sep=''))
+    pander(patient.data[[pt]]$variable.regions[,(1:4)], caption='Variable regions selected by cutoffs')
+}
+```
 
+### Normalized segmented values
+```{r clust2, echo=T, message=T, warning=F, eval=T, fig.height=4, fig.width=4, eval=T}
+llk = as.data.frame(matrix(nrow=nrow(sum.patient.data),ncol=3,dimnames=list(c(sum.patient.data$Patient), c(2:4))))
+for (pt in sum.patient.data$Patient) {
+    print(pt)
+    status = subset(sum.patient.data, Patient == pt)$Status
+    x1 = patient.data[[pt]]$norm.seg.vals
+    rownames(x1) = apply(patient.data[[pt]]$seg.vals[,c(1:4)], 1, function(x) strip.whitespace(paste(x[['chrom']], ':', x[['start.pos']], '-', x[['end.pos']], sep=''))) 
+    x1 = x1[,patient.data[[pt]]$info$Samplename]
 
-library(cluster) 
-clusplot(x1, fit$cluster, color=TRUE, shade=TRUE, labels=2, lines=0, main=pt)
+    var = patient.data[[pt]]$variable.regions
+    if (nrow(var) > 0)
+      rownames(var) = apply(var, 1, function(x) strip.whitespace(paste(x[['chrom']], ':', x[['start.pos']], '-', x[['end.pos']], sep=''))) 
+  
+    llk[pt,] = em.dr(pt,status,x1, var)
+  }
 
+ggplot(melt(as.matrix(llk)), aes(x=Var1, y=value, color=Var1)) + geom_point() + 
+  theme(axis.text.x=element_text(angle = 45), legend.position='none') + 
+  labs(title="Normalized segment value log liklihoods", x='', y='loglik')
 
+# Log liklihood doesn't separate them individually or the range
+llk.diff = apply(llk, 1, function(x) diff(range(x)) )
+wilcox.test(llk.diff[subset(sum.patient.data, Status == 'NP')$Patient], llk.diff[subset(sum.patient.data, Status == 'P')$Patient])
+
+#t.test(llk[subset(sum.patient.data, Status == 'NP')$Patient,'2'], llk[subset(sum.patient.data, Status == 'P')$Patient,'2'])
+#t.test(llk[subset(sum.patient.data, Status == 'NP')$Patient,'3'], llk[subset(sum.patient.data, Status == 'P')$Patient,'3'])
+#t.test(llk[subset(sum.patient.data, Status == 'NP')$Patient,'4'], llk[subset(sum.patient.data, Status == 'P')$Patient,'4'])
+```
+
+#### Kmeans
+```{r kmeansnorm, echo=F, message=F, warning=F, eval=F, fig.height=6, fig.width=6} 
+for (pt in sum.patient.data$Patient) {
+    print(pt)
+    status = subset(sum.patient.data, Patient == pt)$Status
+    x1 = patient.data[[pt]]$norm.seg.vals
+    rownames(x1) = apply(patient.data[[pt]]$seg.vals[,c(1:4)], 1, function(x) strip.whitespace(paste(x[['chrom']], ':', x[['start.pos']], '-', x[['end.pos']], sep=''))) 
+    x1 = x1[,patient.data[[pt]]$info$Samplename]
+    
+    fit = kmeans(x1, 3)
+    print(autoplot(fit, data=x1, label=T) + labs(title=paste(pt, '(', status, ') normalized seg', sep='')))
+    pander(patient.data[[pt]]$variable.regions[,(1:4)], caption='Variable regions selected by cutoffs')
+}
 ```
 
 
@@ -359,6 +390,7 @@ q=0.2
 sum.patient.data = arrange(sum.patient.data, Status)
 
 ## Using the segmentation values
+sum.patient.data$years = with(sum.patient.data, paste(start.year, end.year, sep='-'))
 sim = sum.patient.data[,c('Status','years')]
 rownames(sim) = sum.patient.data[,'Patient']
 for (pt in sum.patient.data$Patient) {
@@ -381,6 +413,7 @@ for (pt in sum.patient.data$Patient) {
   sim[pt, 'ns'] = net.similarity(ac)
   sim[pt, 'ss'] = sum.similarity(ac)
   sim[pt, 'clusters'] = length(clusters(ac))
+  sim[pt, 'max.sd'] = max(sapply(x1, sd))
   
   tmp = patient.data[[pt]]$variable.regions[,-(1:5)]
   sim[pt, 'n.var'] = nrow(patient.data[[pt]]$variable.regions[,-(1:5)])
@@ -394,13 +427,10 @@ for (pt in sum.patient.data$Patient) {
 }
 sim$id = rownames(sim)
 
-sm = as.data.frame(summarise(group_by(sim, Status), mean.ns=mean(ns), sd.ns=sd(ns), mean.ss=mean(ss), sd.ss=sd(ss), mean.c=mean(clusters), sd.c=sd(clusters) ))
-
 # May be a difference
 ttps = t.test( subset(sim, Status == 'NP')$ss, subset(sim, Status == 'P')$ss )$p.value
 ttpn = t.test( subset(sim, Status == 'NP')$ns, subset(sim, Status == 'P')$ns )$p.value
 ttpc = t.test( subset(sim, Status == 'NP')$clusters, subset(sim, Status == 'P')$clusters )$p.value
-
 
 ## Number of variable regions isn't so good, but maybe...
 sim %>%
@@ -418,31 +448,36 @@ g2 = ggplot(sim[,c('Status','clusters')], aes(y=clusters, x=Status, fill=Status)
 
 grid.arrange(g1, g2, top='Raw seg values')
 
-fit = glm(Status~clusters, sim, family=binomial(link='logit'))
-pander(fit, justify='left')
+# fit = glm(Status~clusters, sim, family=binomial(link='logit'))
+# pander(fit, justify='left')
+# 
+# sim = sim[, c('Status', 'clusters', 'ns','ss')]
+# actualMatrix = matrix(0,1000,2,dimnames=list(c(), c('prec','recall')))
+# for (i in 1:nrow(actualMatrix)) {
+#   trainingRows = sample(1:nrow(sim), nrow(sim)-5)
+#   train = sim[trainingRows,]
+#   test = sim[-trainingRows,]
+#   
+#   fit = glm( (as.integer(Status)-1)~clusters, train, family=binomial(link='logit'))
+#   pred = predict(fit, test, se.fit=F) # probabilities -- of which outcome though?
+#   
+#   actual = test$Status == 'P'
+#   predicted = pred>0
+#   
+#   actualMatrix[i,'prec'] = getPrecision( actual, predicted )
+#   actualMatrix[i, 'recall'] = getRecall( actual, predicted )
+# }
+# 
+# ggplot(as.data.frame(actualMatrix), aes(x=recall, y=prec)) + geom_point() + 
+#   geom_hline(yintercept = 0.5, col='red', alpha=0.5) +
+#   labs(title='Precision/Recall for Progressor/NP prediction')
 
-sim = sim[, c('Status', 'clusters', 'ns','ss')]
-actualMatrix = matrix(0,1000,2,dimnames=list(c(), c('prec','recall')))
-for (i in 1:nrow(actualMatrix)) {
-  trainingRows = sample(1:nrow(sim), nrow(sim)-5)
-  train = sim[trainingRows,]
-  test = sim[-trainingRows,]
-  
-  fit = glm( (as.integer(Status)-1)~clusters, train, family=binomial(link='logit'))
-  pred = predict(fit, test, se.fit=F) # probabilities -- of which outcome though?
-  
-  actual = test$Status == 'P'
-  predicted = pred>0
-  
-  actualMatrix[i,'prec'] = getPrecision( actual, predicted )
-  actualMatrix[i, 'recall'] = getRecall( actual, predicted )
-}
-
-ggplot(as.data.frame(actualMatrix), aes(x=recall, y=prec)) + geom_point() + 
-  geom_hline(yintercept = 0.5, col='red', alpha=0.5) +
-  labs(title='Precision/Recall for Progressor/NP prediction')
-
+rc = cor.test(sim$max.sd, sim$clusters)
 ```
+
+#### Cellularity?
+
+We needed to check if cellularity was driving the difference in clusters. Overall that does not appear to be the case if we use the maximum standard deviation across all samples in a patient as a proxy: r=`r rc$estimate`, p-value=`r signif(rc$p.value, 2)`
 
 ### Are the clusters random?
 
@@ -619,7 +654,7 @@ pander(subset(simX, Status == 'P' & clusters >= mean(clusters)), caption="These 
 fit = glm(Status~clusters, simX, family=binomial(link='logit') )
 summary(fit)
 
-simX = simX[, c('Status', 'clusters', 'ns','ss','gain','loss')]
+simX = simX[, c('Status', 'clusters', 'ns','ss','n.var')]
 noHGDPR = as.data.frame(matrix(0,1000,2,dimnames=list(c(), c('prec','recall'))))
 for (i in 1:nrow(actualMatrix)) {
   trainingRows = sample(1:nrow(simX), nrow(simX)-5)
@@ -636,10 +671,10 @@ for (i in 1:nrow(actualMatrix)) {
   noHGDPR[i, 'recall'] = getRecall( actual, predicted )
 }
 
-ggplot(as.data.frame(noHGDPR), aes(x=recall, y=prec)) + geom_point() + 
-  geom_hline(yintercept = 0.5, col='red', alpha=0.5) +
-  geom_vline(xintercept = 0.5, col='red', alpha=0.5) +
-  labs(title='Precision/Recall for Progressor/NP prediction NO HGD')
+#ggplot(as.data.frame(noHGDPR), aes(x=recall, y=prec)) + geom_point() + 
+#  geom_hline(yintercept = 0.5, col='red', alpha=0.5) +
+#  geom_vline(xintercept = 0.5, col='red', alpha=0.5) +
+#  labs(title='Precision/Recall for Progressor/NP prediction NO HGD')
 
 ```
 
@@ -694,13 +729,17 @@ m = melt(clus[,c(1:2,5)], measure.vars=c('NP','P'))
 m[which(m$variable == 'NP'), 'sd'] = clus$NP.sd
 m[which(m$variable == 'P'), 'sd'] = clus$P.sd
 
-ggplot(m, aes(x=qv, y=value, col=variable)) + geom_point() +  
-  geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.01, alpha=0.3) +
-  geom_hline(yintercept=5, alpha=0.3) + geom_hline(yintercept=15, alpha=0.3, col='red') + 
-  labs(title='Clusters vs q parameters', x='q parameter', y='mean(clusters)')
+ggplot(m, aes(x=factor(qv), y=value, col=variable)) + geom_point() +
+  geom_errorbar(aes(ymin=value-sd, ymax=value+sd), width=.02) +
+  geom_hline(yintercept=5, alpha=0.3) + 
+  geom_hline(yintercept=15, alpha=0.3, col='red') + 
+  scale_y_continuous(breaks=seq(0,max(m$value)+5, 10),labels=seq(0,max(m$value)+5, 10)  ) +
+  labs(title='Clusters vs q parameters', x='q parameter', y='mean(clusters)') 
 
+pander(clus[,c('qv','NP','P')], caption="Mean of clusters by patient status per q parameter.")
 
-ggplot(melt(pvals, measure.vars=c('p.clusters'), id.vars='qv'),aes(x=qv,y=value, color=variable)) + geom_point() +
+ggplot(melt(pvals, measure.vars=c('p.clusters'), id.vars='qv'),aes(x=factor(qv),y=value, color=variable)) + 
+  geom_point() + 
   labs(title='P vs NP p-values per q parameters', y='pvalue NP vs P', x='q param')
   
 
