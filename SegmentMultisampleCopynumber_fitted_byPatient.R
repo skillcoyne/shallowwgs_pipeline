@@ -21,6 +21,7 @@ outdir = args[3]
 #patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
 #outdir = '~/Data/Ellie/Analysis'
 data.dirs = list.dirs(data, full.names=T, recursive=F)
+data.files = list.files(data, full.names=T, recursive=T)
 
 plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
 print(paste("Plot directory:", plot.dir))
@@ -28,20 +29,22 @@ if (!dir.exists(plot.dir))
   dir.create(plot.dir, recursive=T)
 
 ## Patient info file
-patient.file = grep('patient_info.xlsx', list.files(data, full.names=T), value=T)
+patient.file = grep('All_patient_info', list.files(data, full.names=T), value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing patient info file in", data))
 
 all.patient.info = read.patient.info(patient.file)
 all.patient.info$Patient = gsub('\\/', '_', all.patient.info$Patient)
+patient.name = gsub('\\/', '_', patient.name)
+
 head(all.patient.info)
+print(unique(all.patient.info$Patient))
 
 patient.plot.dir = paste(plot.dir,patient.name, sep='/')
 if (!dir.exists(patient.plot.dir))  
   dir.create(patient.plot.dir, recursive=T)
 
 
-patient.name = gsub('\\/', '_', patient.name)
 print(patient.name)
 patient.info = subset(all.patient.info, Patient == patient.name)
 if (nrow(patient.info) <= 0)
@@ -116,6 +119,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 	                gamma=gamma2*sdev, fast=F, verbose=T)
 	
 	write.table(res,paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F)
+#read.table(paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""), sep="\t", header=T)->res 
 	
 	print(dim(res))
 	chrs=unique(res$chrom)
@@ -160,7 +164,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 		png(paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""),width=wid,height=ht)
 		par(mfrow=c(n.rows,min(no.samples,10)))
 		for(col in which(!is.na(sdevs))){
-		  print(colnames(window.depths.standardised)[col])
+		  #print(colnames(window.depths.standardised)[col])
 			plot(fit.data$end[indices],window.depths.standardised[indices,col],col="red",pch=20,cex=1,cex.axis=2,cex.lab=2,cex.main=2,xlab="pos",ylab="segmented coverage",main=paste("chr",chr,", ",colnames(window.depths.standardised)[col],sep=""),ylim=c(0,3))
 			for(ind in indices2){
 				lines(c(segvals$start.pos[ind],segvals$end.pos[ind]),rep(segvals[ind,col+5],2),col="green",lwd=4)
@@ -175,34 +179,34 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 
 	shapiro.wilk = sapply(1:nrow(segvals),function(i) {
 	  row.data=unlist(segvals[i,-(1:5)])
-	  ifelse(all(row.data==row.data[1]), NA, shapiro.test(row.data)$statistic)
+	  ifelse(all(row.data==row.data[1]) | length(row.data < 5000) , NA, shapiro.test(row.data)$statistic)
 	})
+	if (length(which(is.na(shapiro.wilk))) < 1) {
+		#out = cbind(segvals[,1:5],CofV,shapiro.wilk)
+		#names(out)[6:7] = c("coeff_of_var","ShapiroWilk")
+		#use SDs rather than CofV
+		out = cbind(segvals[,1:5],sds,shapiro.wilk)
+		names(out)[6:7] = c("st_dev","ShapiroWilk")
 	
-	#out = cbind(segvals[,1:5],CofV,shapiro.wilk)
-	#names(out)[6:7] = c("coeff_of_var","ShapiroWilk")
-	#use SDs rather than CofV
-	out = cbind(segvals[,1:5],sds,shapiro.wilk)
-	names(out)[6:7] = c("st_dev","ShapiroWilk")
+		print(paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"))
+		write.table(out,paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"),sep="\t",row.names=F,quote=F)
 	
-	print(paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"))
-	write.table(out,paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"),sep="\t",row.names=F,quote=F)
-	
-	png(paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""))
-	plot(out[,6],out[,7],cex=log(segvals$n.probes)+1,bg=rgb(1,0,0,0.5),pch=21,xlab="standard deviation",ylab="Shapiro-Wilk statistic",xlim=c(0,1))
-	dev.off()
+		png(paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""))
+		plot(out[,6],out[,7],cex=log(segvals$n.probes)+1,bg=rgb(1,0,0,0.5),pch=21,xlab="standard deviation",ylab="Shapiro-Wilk statistic",xlim=c(0,1))
+		dev.off()
+
+		DENS=density(shapiro.wilk[!is.na(shapiro.wilk) & !is.infinite(shapiro.wilk)])
+        	png(paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
+        	plot(DENS,xlab="Shapiro-Wilk statistic",main="")
+        	dev.off()
+}
 	#DENS=density(CofV[!is.na(CofV) & !is.infinite(CofV)])
 	#use SDs rather than CofV
 	DENS=density(sds[!is.na(sds) & !is.infinite(sds)],from=0,to=1)
-	
 	png(paste(gamma.plot, "/multipcf_StDev_density_gamma",gamma2,".png",sep=""))
 	plot(DENS,xlab="standard deviation",main="")
 	dev.off()
 	
-	DENS=density(shapiro.wilk[!is.na(shapiro.wilk) & !is.infinite(shapiro.wilk)])
-	png(paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
-	plot(DENS,xlab="Shapiro-Wilk statistic",main="")
-	dev.off()
-
 	sd.threshold = 0.08
 	min.probes = 67 #50
 	
@@ -216,13 +220,13 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 	
 	##thresholds selected from density plots
 	#190216 This is done, but we may want to try different thresholds
-	variable.region.indices = which(sds>=sd.threshold & segvals$n.probes>=n.threshold)
+	variable.region.indices = which(sds>=sd.threshold & segvals$n.probes>=min.probes)
 	
 	print("variable regions:")
 	print(segvals[variable.region.indices,1:5])
 
 	write.table(segvals[variable.region.indices,1:5],
-	            paste(gamma.plot, "/", patient.name, "_variableRegions_gamma",gamma2,"_sd", sd.threshold, "_n", n.threshold, ".txt",sep="")
+	            paste(gamma.plot, "/", patient.name, "_variableRegions_gamma",gamma2,"_sd", sd.threshold, "_n", min.probes, ".txt",sep="")
 	            ,sep="\t",row.names=F,quote=F)
 	
 	
@@ -230,7 +234,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 		hclust.data = segvals[variable.region.indices,-(1:5)]	
 		#colnames(hclust.data) = samplenames
 		HC = hclust(dist(t(hclust.data)))
-		png(paste(gamma.plot, "/hierarchical_clustering_plot_multipcf_gamma",gamma2,"_sd",sd.threshold,"_n",n.threshold,".png",sep=""))
+		png(paste(gamma.plot, "/hierarchical_clustering_plot_multipcf_gamma",gamma2,"_sd",sd.threshold,"_n",min.probes,".png",sep=""))
 		print(ggdendrogram(HC, rotate=T) + ggtitle(paste(patient.name, 'gamma2:', gamma2))  )
 		dev.off()
 	}
