@@ -83,17 +83,16 @@ read.patient.info<-function(file) {
     }
     patient.info = patient.info[, c(grep('Patient',colnames(patient.info), ignore.case=T),
                                     grep('Path\\.ID',colnames(patient.info), ignore.case=T),
-                                    grep('Progressor',colnames(patient.info), ignore.case=T),
+                                    grep('^(Progressor|Status)',colnames(patient.info), ignore.case=T),
                                     grep('Endoscopy.year',colnames(patient.info), ignore.case=T),
                                     grep('Pathology',colnames(patient.info),ignore.case=T),
                                     grep('Plate.Index',colnames(patient.info),ignore.case=T),
                                     grep('SLX',colnames(patient.info),ignore.case=T),
                                     grep('cellularity',colnames(patient.info),ignore.case=T),
                                     grep('p53', colnames(patient.info),ignore.case=F),
-                                    grep('Number.of', colnames(patient.info), ignore.case=F)) ]
-    colnames(patient.info) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads')
-    
-    
+                                    grep('Number.of|Total.Reads', colnames(patient.info), ignore.case=F), 
+                                    grep('Batch', colnames(patient.info), ignore.case=F)) ]
+    colnames(patient.info) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name')
   }
   
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
