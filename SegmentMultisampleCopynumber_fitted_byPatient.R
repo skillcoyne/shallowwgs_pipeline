@@ -172,7 +172,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 
 	shapiro.wilk = sapply(1:nrow(segvals),function(i) {
 	  row.data=unlist(segvals[i,-(1:5)])
-	  ifelse(all(row.data==row.data[1]) | length(row.data < 5000) , NA, shapiro.test(row.data)$statistic)
+	  ifelse(all(row.data==row.data[1]) | length(row.data) > 5000 , NA, shapiro.test(row.data)$statistic)
 	})
 	if (length(which(is.na(shapiro.wilk))) < 1) {
 		#out = cbind(segvals[,1:5],CofV,shapiro.wilk)
@@ -189,9 +189,9 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 		dev.off()
 
 		DENS=density(shapiro.wilk[!is.na(shapiro.wilk) & !is.infinite(shapiro.wilk)])
-        	png(paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
-        	plot(DENS,xlab="Shapiro-Wilk statistic",main="")
-        	dev.off()
+    png(paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
+    plot(DENS,xlab="Shapiro-Wilk statistic",main="")
+  	dev.off()
 }
 	#DENS=density(CofV[!is.na(CofV) & !is.infinite(CofV)])
 	#use SDs rather than CofV
@@ -213,7 +213,7 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
 	
 	##thresholds selected from density plots
 	#190216 This is done, but we may want to try different thresholds
-	variable.region.indices = which(sds>=sd.threshold & segvals$n.probes>=min.probes)
+	variable.region.indices = which(sds >= sd.threshold & segvals$n.probes >= min.probes)
 	
 	print("variable regions:")
 	print(segvals[variable.region.indices,1:5])
