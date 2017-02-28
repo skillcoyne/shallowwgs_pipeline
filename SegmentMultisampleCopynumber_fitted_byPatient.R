@@ -29,7 +29,7 @@ if (!dir.exists(plot.dir))
   dir.create(plot.dir, recursive=T)
 
 ## Patient info file
-patient.file = grep('All_patient_info', list.files(data, full.names=T), value=T)
+patient.file = grep('All_patient_info.xlsx', list.files(data, full.names=T), value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing patient info file in", data))
 
@@ -38,7 +38,7 @@ all.patient.info$Patient = gsub('\\/', '_', all.patient.info$Patient)
 patient.name = gsub('\\/', '_', patient.name)
 
 head(all.patient.info)
-print(unique(all.patient.info$Patient))
+#print(unique(all.patient.info$Patient))
 
 patient.plot.dir = paste(plot.dir,patient.name, sep='/')
 if (!dir.exists(patient.plot.dir))  
@@ -67,7 +67,7 @@ fit.data$in.blacklist = F
 
 for(r in 1:nrow(blacklisted.regions)) {
   #if (r %% 50 ==0) print(r)
-	print(blacklisted.regions[r,])
+	#print(blacklisted.regions[r,])
 	fit.data$in.blacklist[ fit.data$chrom==blacklisted.regions$chromosome[r] & 
 	                        fit.data$start>=blacklisted.regions$start[r] & 
 	                        fit.data$end<=blacklisted.regions$end[r] ] = T
@@ -83,10 +83,8 @@ fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
 missingIndicies = setdiff(patient.info$samplename, colnames(window.depths.standardised))
 if (length(missingIndicies > 0))
   warning(paste("Missing several samples: ", paste(missingIndicies, collapse=', '), sep=''))
-
 # Grab just those specific samples
 window.depths.standardised = window.depths.standardised[,na.omit( match(patient.info$Samplename, colnames(window.depths.standardised)) )]
-#samplenames = grep('D\\d', colnames(window.depths.standardised), value=T)
 
 # there are mutiple samples per patient too
 no.samples=ncol(window.depths.standardised)
@@ -94,10 +92,7 @@ if (no.samples <= 0)
   stop(paste("No samples represented in the data for", patient.name))
 
 # get the median absolution deviation for the observed window depths in each sample
-sdevs = vector(mode="numeric",length=no.samples)
-for(s in 1:no.samples) 
-	sdevs[s] <- getMad( window.depths.standardised[!is.na(window.depths.standardised[,s]),s], k=25)
-
+sdevs = sapply(c(1:no.samples), function(s) getMad( window.depths.standardised[!is.na(window.depths.standardised[,s]),s], k=25))
 sdevs[sdevs==0] = NA
 sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) # geometric mean??
 
@@ -106,8 +101,6 @@ print(sdevs)
 print(sdev)
 
 good.bins = which(!is.na(rowSums(window.depths.standardised[,!is.na(sdevs)])))
-
-#patient.name = gsub("/","_",patient.name)
 
 for(gamma2 in c(250,5,10,25,50,100,500,1000)) { 
   #gamma2=250
