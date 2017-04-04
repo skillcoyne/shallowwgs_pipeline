@@ -10,9 +10,14 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir>")
 
+source('lib/load_patient_metadata.R')
+
 data = args[1]
 patient.file = args[2]
 outdir = args[3]
+#data = '~/Data/Ellie/QDNAseq'
+#patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
+#outdir = '~/Data/Ellie/Analysis'
 
 
 all.patient.info = read.patient.info(patient.file)

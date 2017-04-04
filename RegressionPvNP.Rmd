@@ -1,0 +1,788 @@
+---
+title: "RegressionPvNP"
+author: "Sarah Killcoyne"
+date: "31 March 2017"
+output: 
+  html_document: 
+    fig_caption: yes
+    fig_height: 10
+    fig_width: 10
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(ggfortify)
+library(plyr)
+library(pander)
+library(Hmisc)
+library(reshape2)
+library(gridExtra)
+library(GenomicRanges)
+library(glmnet)
+
+load('patients.Rdata', verbose=T)
+
+source('lib/load_patient_metadata.R')
+
+data = '~/Data/Ellie'
+
+data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
+plot.dir = paste(data, 'Analysis/multipcf_plots_fitted_perPatient', sep='/')
+
+if (length(list.files(plot.dir)) <= 0)
+  stop(paste("No analysis files found in", plot.dir ))
+
+## Patient info file
+patient.file = grep('All_patient_info.xls', data.files, value=T)
+if (length(patient.file) != 1)
+  stop(paste("Missing/too many patient info file(s) in", data))
+
+patient.info = read.patient.info(patient.file)
+patient.info$Patient = gsub("/", "_", patient.info$Patient)
+head(patient.info)
+
+patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
+
+sum.patient.data = summarise.patient.info(patient.info)
+sum.patient.data = as.data.frame(subset(sum.patient.data, Patient %in% names(patient.data))) ## For now
+pander(sum.patient.data[,c('Patient', 'Status', 'start.year', 'end.year','total.samples','highest.path')])
+
+
+# Missing some of the samples as they aren't all sequenced yet
+for (pt in names(patient.data)) {
+  patient.data[[pt]]$info = patient.data[[pt]]$info[patient.data[[pt]]$info$Samplename %in% colnames(patient.data[[pt]]$seg.vals)[-(1:5)],]
+}
+```
+
+
+```{r apclust-func, echo=F, message=F, warning=F}
+suppressPackageStartupMessages( library(apcluster) )
+
+apclust.data<-function(segdata, samples) {
+  x1 = segdata[,intersect(colnames(segdata), samples)]
+  x1 = x1[, samples]
+  rownames(x1) = (segdata[,c(1:4)] %>%
+    rowwise() %>%
+    mutate(location=paste(paste(chrom, arm, sep=''), '.', start.pos, '-', end.pos, sep='')))$location
+  return(x1)  
+}
+
+apclust<-function(segdata) {
+  x1 = apclust.data(segdata)
+  # q=0 minimize off-diagonal similarity
+  ac = apcluster(negDistMat(r=2), x1, details=T, convits=25, q=0)
+  return(list('apres'=ac, 'data'=x1))
+}
+
+net.similarity<-function(ac) {
+  if (is.list(ac))
+    ac = ac$apres
+  ac@netsim
+}
+
+sum.similarity<-function(ac) {
+  if (is.list(ac))
+    ac = ac$apres
+  ac@dpsim
+}
+
+clusters<-function(ac) {
+  if (is.list(ac))
+    ac = ac$apres
+  ac@exemplars
+}
+
+plotAC<-function(aclist) {
+  plot(aclist$apres, aclist$data)
+} 
+
+heatmapAC<-function(aclist) {
+  heatmap(aclist$apres)
+}
+
+# First vs last samples
+#x1 = apclust.data(patient.data[[pt]]$seg.vals[,c(1:4, 6, ncol(patient.data[[pt]]$seg.vals))], patient.data[[pt]]$info$Samplename)
+```
+
+The previous analysis employed AP clustering on a per-patient basis to look for evidence that it was possible to see differences between the progressors and non-progressors, and to quantify that in some sort of complexity measure.  It was able to separate them, and continued to do so after removing HGD samples, but quickly failed to model any difference as I removed timepoints from the patient.  
+
+As suggested by Moritz it is possible to merge all of the patient samples and use GLMs to model the differences, and to select regions that may be most reflective of the differences. In this report that's what I've done, and it worked very well.  However, I'm a bit suspicious that it's worked too well.  I'm looking for biases in the data, or mistakes I might have made in setting up the model.
+
+# Encode the large data matrix
+
+To use GLMs across the patients I merge all samples from all patients and overlap the copy number segments. Where segments from a sample get split, the value of the original sample is retained for each of the split samples.
+
+
+```{r tile, echo=F, message=F, warning=F, include=F}
+
+chr.lengths = get.chr.lengths()
+chr.lengths$chrom = sub('chr','',chr.lengths$chrom)
+chr.lengths$start = 1
+
+tile.w=1e7
+
+genome = makeGRangesFromDataFrame(chr.lengths[1:22,], seqnames.field = 'chrom', end.field='chr.length')
+tiles = tile(genome, width=tile.w)
+
+tileFile = paste(as.character(tile.w),'_tiledpts.Rdata', sep='')
+if (file.exists(tileFile)) {
+  load(tileFile, verbose=T)
+} else {
+  grList = lapply(patient.data, function(df) {
+    df$info = arrange(df$info, Endoscopy.Year, Pathology)
+  
+    x1 = apclust.data(df$seg.vals, df$info$Samplename)
+    head(x1)
+  
+    segnames = as.data.frame(do.call(rbind, sapply(rownames(x1), strsplit, '[p|q].|-')))
+    colnames(segnames) = c('chr','start','end')
+    segnames[c('start','end')] = lapply(segnames[c('start','end')], function(x) as.numeric(as.character(x)))
+  
+    pt = unique(df$info$Patient)
+    return( makeGRangesFromDataFrame(cbind(segnames,pt, x1), keep.extra.columns = T) )
+  })
+  
+  sampleNames = unlist(sapply(patient.data, function(df) {
+    df$info = arrange(df$info, Endoscopy.Year, Pathology)
+    x1 = apclust.data(df$seg.vals, df$info$Samplename)
+    colnames(x1)
+  }))
+  
+  tile.segments<-function(tiles, gr, mergedSegments) {
+    ov = findOverlaps(tiles, gr)
+    for (qh in unique(queryHits(ov))) {
+      print(qh)
+      currentTile = tiles[[qh]]
+      curov = findOverlaps(currentTile, gr)
+    
+      for (i in 1:length(curov)) {
+        segment = currentTile[ queryHits(curov)[i]  ]
+        #print(segment)
+        rows = with(mergedDf, which( chr==as.character(seqnames(segment)) & start == start(segment) & end == end(segment)))
+        segmentVals = as.data.frame(elementMetadata(gr[ subjectHits(curov)[i] ]))
+        mergedSegments[rows, names(segmentVals)[-1]] = segmentVals[,-1]
+      }
+    }
+    return(mergedSegments)  
+  }
+  
+  mergedDf = do.call(rbind, lapply(tiles, function(tile) { 
+    cbind('chr'=as.character(seqnames(tile)), as.data.frame(ranges(tile))[1:2]) 
+    }) )
+  mergedDf[,sampleNames] = NA
+    
+  for (gr in grList) {
+    print(unique(gr$pt))
+    mergedDf = tile.segments(tiles, gr, mergedDf)
+  }
+  
+  #tmp = mergedDf
+  mergedDf[is.na(mergedDf)] = 0
+  rownames(mergedDf) = with(mergedDf, paste(chr, ':', start, '-', end, sep=''))
+  
+  save(mergedDf, file=tileFile)
+}
+
+
+```
+
+Using a very large segment size for tiling across all patients (`r tile.w`) I get the following binomial models.  None of them fit well, and decreasing the size of the segments results in poor (or no) fits with mostly NA coefficients, or a lot of P(0 or 1).
+
+# y = Progressors (1) vs Non (0)
+
+The labels are split such that all samples from progressor patients are (1) and all samples from non-progressors are (0).
+
+```{r labelsPNP, echo=F, message=F, include=F}
+## binomial: dysplasia 1, BE 0
+
+labels = unlist(sapply(patient.data, function(df) {
+  df$info = arrange(df$info, Endoscopy.Year, Pathology)
+  label = as.integer(df$info$Status == 'P') #as.integer(df$info$Pathology %in% c('HGD', 'IMC'))
+  names(label) = df$info$Samplename
+  return(label)
+}))
+names(labels) = sub('.*\\.', '',  names(labels))
+
+pts = do.call(rbind, lapply(patient.data, function(df) {
+  df$info = arrange(df$info, Endoscopy.Year, Pathology)
+  cbind(df$info[,c('Patient','Samplename')])
+}))
+rownames(pts) = 1:nrow(pts)
+
+# sort in label order
+if (length(setdiff(colnames(mergedDf), names(labels))) > 3)
+  warning("Labels vector is missing samples")
+
+dysplasia.df = t(mergedDf[,names(labels)])
+```
+
+We have `r table(labels)[1]` samples from non-progressors and `r table(labels)[2]` samples from progressors.
+
+Data matrix currently:
+`r pander(dysplasia.df[1:10, 1:5], caption=paste("dimensions:", paste(dim(dysplasia.df), collapse=', ')), justify='left')`
+
+## cv.glmnet Ridge vs Lasso
+
+With all `r ncol(dysplasia.df)` regions of the genome, first check if/which regression may be appropriate. It appears that pure lasso may provide the best balance for number of features with non-zero coefficients.
+
+```{r cvglmnetPNP, echo=F, warning=F, message=F}
+plot.multi.cv.glmnet<-function(x,y,alpha=c(0,1), family="binomial", title='cv.glmnet') {
+  plots <- list(  )
+  cv.models = data.frame(matrix(ncol=3,nrow=0,dimnames=list(c(), c('class','lambda','cvm'))))
+  for (a in alpha) {
+    cv = cv.glmnet(x, y, alpha=a, family=family, standardize=F)
+    cv.models = rbind(cv.models, cbind('class'=paste('cv',a,sep=''), 'lambda'=log(cv$lambda), 'cvm'=cv$cvm))
+    plots[[as.character(a)]] = autoplot(cv, main=paste('alpha',a), ylab=cv$name)
+  }
+  cv.models[c('lambda','cvm')] = lapply(cv.models[c('lambda','cvm')], function(x) as.numeric(as.character(x)))
+  
+  gg = ggplot(cv.models, aes(x=lambda, y=cvm, color=class)) + geom_point() + geom_line() + 
+      labs(x='log(Lambda)', y='Binomial Deviance', title=title)
+  
+  plots[['all']] = gg
+  
+  return(plots)
+}
+
+gp = plot.multi.cv.glmnet(dysplasia.df, labels, alpha=c(0,0.5,0.8,1), title='cv.glmnet P vs NP')
+
+cv1 = cv.glmnet(dysplasia.df, labels, alpha=1, family='binomial')
+gg = autoplot(cv1$glmnet.fit, xvar='lambda', main='alpha=1 glmnet.fit from cv.glmnet') + theme(legend.position='none') 
+
+gp[['coef.1']] = gg
+
+do.call(grid.arrange, c(gp, ncol=2, nrow=3))
+
+```
+
+## xval by patients
+
+Split into 5ths by patient, fit and predict at each split, select min lambda, get coefficients from the initial model using that value.
+
+```{r xvalpt, message=F, warning=F, echo=F, fig.height=6, fig.width=6}
+pi.hat <- function(x) exp(x)/(1+exp(x))
+
+precisionRecall<-function(actual, predicted) {
+    retrieved <- sum(predicted==1)
+    recall <- sum(predicted==1 & actual==1) / sum(actual==1)
+    precision <- sum(predicted==1 & actual==1) / retrieved
+    f1 = signif(2*(1/(1/precision+1/recall)), 2)
+    return(data.frame('precision'=precision, 'recall'=recall, 'F1'=signif(f1, 2)))
+  }
+
+cv.patient.glmnet<-function(x,y,lambda,patients) {
+  message(paste("Running", length(unique(patients$group)), "folds"))
+  
+  cv.class = matrix(nrow=5, ncol=length(lambda))
+  auc = matrix(nrow=5, ncol=length(lambda))
+  
+  for (i in 1:length(unique(patients$group))) {  ## This is not stable. 
+    message(paste(i, "fold"))
+    test.rows = which(rownames(x) %in% subset(patients, group == i)$Samplename)
+    test = x[test.rows,]
+    training = x[-test.rows,]
+    # pre-spec lambda seq
+    fit <- glmnet(training, y[-test.rows], lambda=lambda, family='binomial', alpha=1) 
+    
+    pred.class <- predict(fit, test, type='class') # check this later
+    auc[i,] = apply(pred.class, 2, function(pd) {
+      if (sum(as.numeric(pd)) <= 0) return(0)
+      as.numeric(pROC::auc(pROC::roc(response=as.numeric(pd), predictor=labels[test.rows])))  
+    })
+
+    # careful: matrix
+    pred <- pi.hat(predict(fit, test)) 
+    cv.class[i,] = apply(pred, 2, function(p) {
+      # Confusion matrix
+      #cmat = table(labels[test.rows], p>0.5)
+      #sum(diag(cmat))/sum(cmat)
+      (1-p)%*%labels[test.rows] # quantitiative
+    })
+  }
+  return(list('cv.class'=cv.class, 'auc'=auc))
+}
+
+
+fit0 <- glmnet(dysplasia.df, labels, alpha = 1) # all patients
+autoplot(fit0, xvar='lambda', main='fit0, all samples') + theme(legend.position='none') 
+lambda <- fit0$lambda
+
+# split patients in 5ths
+s = {set.seed(2); sample(rep(seq(5), length = length(unique(pts$Patient))))}
+patients = merge(pts, cbind('Patient'=unique(pts$Patient), 'group'=s), by="Patient")
+
+# This just makes sure the sets don't become too unbalanced with regards to the labels.
+sets = table(cbind(patients, labels[patients$Samplename])[,c(3:4)])
+while (length(which(sets/rowSums(sets) < 0.35)) >= 2 | length(which(sets/rowSums(sets) == 0)) > 0 ) {
+  print(".")
+  s = sample(rep(seq(5), length = length(unique(pts$Patient))))
+  patients = merge(pts, cbind('Patient'=unique(pts$Patient), 'group'=s), by="Patient")
+  sets = table(cbind(patients, labels[patients$Samplename])[,c(3:4)])
+}
+
+cv.patient = cv.patient.glmnet(dysplasia.df, labels, lambda, patients)
+lambda.opt <- lambda[which.min(colMeans(cv.patient$cv.class))]
+
+df = cbind.data.frame('lambda.at'=1:ncol(cv.patient$cv.class),'mean'=colMeans(cv.patient$cv.class), 
+                      'sme'=apply(cv.patient$cv.class, 2, sd)/5, 
+                      'sd'=apply(cv.patient$cv.class, 2, sd), 
+                      'lambda'=lambda)
+smeA = sd(colMeans(cv.patient$cv.class))/ncol(cv.patient$cv.class) #??
+
+ggplot(df, aes(y=mean,x=lambda.at)) + geom_point() + 
+  geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme)) + labs(y='mean of confusion matrix (P)') +
+  geom_point(data=subset(df, mean == min(mean)), aes(y=mean, x=lambda.at), col='red') +
+  geom_point(data=df[which.min(df$mean)+1,], aes(y=mean, x=lambda.at), col='blue') +
+  geom_point(data=df[which.min(df$mean)-1,], aes(y=mean, x=lambda.at), col='green')
+
+lambda.opt = lambda[which.min(df$mean)-1]
+
+coef.opt <- coef.glmnet(fit0, s=lambda.opt)
+coef.opt = as.matrix(coef.opt)
+coef.opt = as.matrix(coef.opt[ which(coef.opt != 0)[-1] ,])
+coef.opt = as.matrix(coef.opt[order(-coef.opt[,1]),])
+
+```
+
+At a the minimum lambda-1se (green dot) the value is `r signif(lambda.opt, 3)`. In the initial model `r length(coef.opt)` coefficients have a non-zero value.  Using these to fit a linear model by removing the remainder of the features we get a pretty clear separation between samples from progressors and non.
+
+
+```{r echo=T, tidy=T, warning=F, message=F}
+
+# So then the best model uses a lambda value in this range?
+bestF = rownames(coef.opt)
+
+## So the model would be...
+data = dysplasia.df[,bestF]
+
+fit = lm(labels~., data=cbind.data.frame(data, labels))
+summary(fit)
+```
+
+
+```{r echo=F, warning=F, message=F}
+df = cbind.data.frame('index'=1:length(labels), 'fitted'=fit$fitted.values, 'status'=labels, 'resid'=fit$residuals)
+
+grid.arrange(
+  ggplot(df, aes(x=index,y=fitted, col=as.factor(status))) + geom_point() +
+    labs(title='Fitted values vs status for selected coef', x=paste(length(fit$fitted.values),'samples'), y='fitted value'),
+  ggplot(df, aes(x=resid,y=fitted, col=as.factor(status))) + geom_point() +
+    labs(title='Fitted values vs residuals for selected coef')
+)
+
+pc = rbind('Progressors'=signif(precisionRecall(labels == 1, fit$fitted.values > 0.5), 3),
+            'Non-Progressors'=signif(precisionRecall(labels == 0, fit$fitted.values < 0.5),3))
+```
+
+The model separates surprisingly well (assuming this was the correct setup).
+
+`r pander( pc, caption="Precision/Recall statistics for the linear model using the non-zero coefficients.")`
+
+
+## Questions
+
+While this looks great, I'm a bit suspicious that it's too good.
+
+1. Can it still predict well if all HGD/IMC samples are removed from the matrix?
+2. If I remove one sample from the progressors and iteratively rerun it, at what point does it fail?  I would expect this to occur at least at the earliest timepoints where BE is indicated.
+
+### Remove HGD/IMC Samples
+
+Just as a point, the initial model is tested against `r nrow(data)` samples with `r ncol(data)` features.  
+
+```{r noHGD, echo=F, message=F, warning=F}
+`%nin%` <- Negate(`%in%`)
+
+info = do.call(rbind, lapply(patient.data, function(df) df$info))
+
+samples = intersect(rownames(data), subset(info, Pathology %nin% c('HGD', 'IMC'))$Samplename)
+
+fit = lm(labels~., data=cbind.data.frame(data[samples,], 'labels'=labels[samples]))
+```
+
+This model is fit against `r nrow(data[samples,])` samples instead as `r nrow(data)-length(samples)` are pathologically HGD/IMC. While this looks great, I'm a bit surprised.
+
+```{r echo=F,warning=F,message=F, fig.width=6,fig.height=6}
+
+df = cbind.data.frame('index'=1:length(labels[samples]), 'fitted'=fit$fitted.values, 'status'=labels[samples], 'resid'=fit$residuals)
+
+grid.arrange(
+  ggplot(df, aes(x=index,y=fitted, col=as.factor(status))) + geom_point() +
+    labs(title='Fitted values vs status for selected coef', x=paste(length(fit$fitted.values),'samples'), y='fitted value'),
+  ggplot(df, aes(x=resid,y=fitted, col=as.factor(status))) + geom_point() +
+    labs(title='Fitted values vs residuals for selected coef')
+)
+
+pc = rbind('Progressors'=signif(precisionRecall(labels[samples] == 1, fit$fitted.values > 0.5), 3),
+              'Non-Progressors'=signif(precisionRecall(labels[samples] == 0, fit$fitted.values < 0.5),3))
+```
+
+
+`r pander(pc , caption="Precision/Recall statistics for the linear model using the non-zero coefficients.")`
+
+### Remove LGD Samples as well
+
+This just strikes me as far too good.  I would expect some of the progressor samples to separate even with LGD removed, but not all.  
+
+```{r echo=F,warning=F,message=F, fig.width=6,fig.height=6}
+
+samples = intersect(rownames(data), subset(info, Pathology %nin% c('HGD', 'IMC', 'LGD'))$Samplename)
+fit = lm(labels~., data=cbind.data.frame(data[samples,], 'labels'=labels[samples]))
+
+df = cbind.data.frame('index'=1:length(labels[samples]), 'fitted'=fit$fitted.values, 'status'=labels[samples], 'resid'=fit$residuals)
+
+grid.arrange(
+  ggplot(df, aes(x=index,y=fitted, col=as.factor(status))) + geom_point() +
+    labs(title='Fitted values vs status for selected coef', x=paste(length(fit$fitted.values),'samples'), y='fitted value'),
+  ggplot(df, aes(x=resid,y=fitted, col=as.factor(status))) + geom_point() +
+    labs(title='Fitted values vs residuals for selected coef')
+)
+
+pc = rbind('Progressors'=signif(precisionRecall(labels[samples] == 1, fit$fitted.values > 0.5), 3),
+              'Non-Progressors'=signif(precisionRecall(labels[samples] == 0, fit$fitted.values < 0.5),3))
+
+```
+
+
+`r pander(pc,caption="Precision/Recall statistics for the linear model using the non-zero coefficients.")`
+
+
+### Peel back samples one at a time until it fails
+
+This is not what I would expect. By the time I get to the earliest timepoint most of the remaining samples in the progressors are BE only. Some of them should not separate well.
+
+```{r peel, echo=F, message=F, warning=F, fig.height=4,fig.width=4}
+get.next.samples<-function(patient.data, i) {
+  as.vector(unlist(sapply(patient.data, function(pd) {
+    j = i
+    pd$info = arrange(pd$info, Endoscopy.Year, Pathology)
+  
+    if (j >= nrow(pd$info)) j = nrow(pd$info)
+    
+    pd$info[1:(nrow(pd$info)-j), 'Samplename']
+  }) ))
+}
+
+nonps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'NP')$Patient], 0)
+for (i in seq(1,35,5)) {
+  ps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'P')$Patient], i)
+  message(paste("# progressor samples (removing from the newest to oldest):", length(ps)))
+  samples = c(nonps, ps)
+  
+  fit = lm(labels~., data=cbind.data.frame(data[samples,], 'labels'=labels[samples]))
+  summary(fit)
+
+  df = cbind.data.frame('index'=1:length(labels[samples]), 'fitted'=fit$fitted.values, 'status'=labels[samples], 'resid'=fit$residuals)
+  
+  grid.arrange(
+    ggplot(df, aes(x=index,y=fitted, col=as.factor(status))) + geom_point() +
+      labs(title='Fitted values vs status for selected coef', x='', y='fitted value'),
+    #ggplot(df, aes(x=resid,y=fitted, col=as.factor(status))) + geom_point() +
+    #  labs(title='Fitted values vs residuals for selected coef'),
+    top=paste("Total samples in fit:", length(samples))
+  )
+  
+  
+  pc = rbind.data.frame('Progressor'=signif(precisionRecall(labels[samples] == 1, fit$fitted.values > 0.5),3),
+       'Non-Progressor'=signif(precisionRecall(labels[samples] == 0, fit$fitted.values < 0.5),3))
+  
+  pander(pc, justify='left')
+}
+
+
+```
+
+`r pander(table(subset(patient.info, Samplename %in% samples)[,c('Status','Pathology')]), caption="Pathology of samples in final model")`
+
+## Again randomly assigning labels
+
+One check is to randomly assign labels and rerun the model, at the same time I am pulling out samples in time backwards. The good thing is that the model no longer works as I would expect.
+
+```{r, echo=F, message=F, warning=F, fig.height=4,fig.width=4}
+fstats = matrix()
+nonps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'NP')$Patient], 0)
+for (i in seq(1,35,10)) {
+  ps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'P')$Patient], i)
+  message(paste("# progressor samples (removing from the newest to oldest):", length(ps)))
+  samples = c(nonps, ps)
+  
+  randLabels = sample(c(0,1), length(samples), replace = T)
+  
+  fit = lm(labels~., data=cbind.data.frame(data[samples,], 'labels'=randLabels))
+  summary(fit)
+
+  df = cbind.data.frame('index'=1:length(labels[samples]), 'fitted'=fit$fitted.values, 'status'=labels[samples], 'resid'=fit$residuals)
+  
+  grid.arrange(
+    ggplot(df, aes(x=index,y=fitted, col=as.factor(status))) + geom_point() +
+      labs(title='Fitted values vs status for selected coef', x='', y='fitted value'),
+#    ggplot(df, aes(x=resid,y=fitted, col=as.factor(status))) + geom_point() +
+#      labs(title='Fitted values vs residuals for selected coef'),
+    top=paste("Total samples in fit:", length(samples))
+  )
+  
+  pc = rbind.data.frame('Progressor'=signif(precisionRecall(labels[samples] == 1, fit$fitted.values > 0.5),3),
+       'Non-Progressor'=signif(precisionRecall(labels[samples] == 0, fit$fitted.values < 0.5),3))
+  
+  
+  pander(pc, justify='left')
+}
+```
+
+Final precision recall, is just too good:
+
+`r pander(pc, justify='left')`
+
+
+# Biases?
+
+Some of the samples are going to have duplicated values in the matrix due to the method of overlapping segments to encode all of the patient data together.  It's possible that is causing the progressors to stand out more?
+
+### 1. Duplication of values - remove samples
+
+If I remove samples (not patients) by the number of duplicated values they have in the matrix the fit actually separates more. Somehow I expected they might separate less.
+
+```{r, echo=F, message=F, warning=F, fig.height=4,fig.width=4}
+duprows = apply(data, 1, function(row) {
+  length(which(duplicated(row)))
+})
+
+pi = cbind.data.frame(patient.info[,c(1,3:5,8:10,12)], 'duprows'=duprows[patient.info$Samplename])
+
+#t.test(subset(pi, Status == 'NP')$duprows, subset(pi, Status == 'P')$duprows)$p.value
+
+## So what happens if I remove from the model those with the most duplicated rows? 
+#summary(duprows)
+
+samples = names(duprows[which(duprows <= median(duprows))])
+
+pander(
+  cbind(pi %>% group_by(Status) %>% summarise('total.dup'=sum(duprows,na.rm=T)), table(labels[samples]))[,c(1,2,4)],
+  caption="There are significantly more duplicated rows following the overlap process in progressors (total.dup). In the samples that have less than the median number of duplicated values, both P and NP are still represented at about the same rate (~44% of rows are P)")
+
+
+  fit = lm(labels~., data=cbind.data.frame(data[samples,], 'labels'=labels[samples]))
+
+  df = cbind.data.frame('index'=1:length(labels[samples]), 'fitted'=fit$fitted.values, 'status'=labels[samples], 'resid'=fit$residuals)
+  
+  grid.arrange(
+    ggplot(df, aes(x=index,y=fitted, col=as.factor(status))) + geom_point() +
+      labs(title='Fitted values vs status for selected coef', x='', y='fitted value'),
+#    ggplot(df, aes(x=resid,y=fitted, col=as.factor(status))) + geom_point() +
+#      labs(title='Fitted values vs residuals for selected coef'),
+    top=paste("Total samples in fit:", length(samples))
+  )
+  
+  pc = rbind.data.frame('Progressor'=signif(precisionRecall(labels[samples] == 1, fit$fitted.values > 0.5),3),
+       'Non-Progressor'=signif(precisionRecall(labels[samples] == 0, fit$fitted.values < 0.5),3))
+  
+```
+
+
+`r  pander(pc, caption=paste('The median for duplicated values in a row is',median(duprows),'the linear model that uses just those rows with less than the median shows a complete separation'))`
+
+
+### 2. Duplication of values - remove by patient 
+
+Remove all samples from single patients if any of their samples have a high number of duplicated rows, most of these are progressors. The resulting fit is still suspiciously good though so I think the bias isn't based on duplicated values.
+
+```{r, echo=F, message=F, warning=F, fig.height=4,fig.width=4}
+pi = cbind.data.frame(patient.info[,c(1,3:5,8:10,12)], 'duprows'=duprows[patient.info$Samplename])
+
+## So what happens if I remove from the model those with the most duplicated rows? 
+#summary(duprows)
+
+toremove = names(duprows[which(duprows > median(duprows))])
+
+samples = intersect(rownames(data), subset(patient.info, Patient %in% unique(subset(patient.info, Samplename %in% toremove)$Patient))$Samplename)
+
+pander(table(labels[samples]), caption="0=NP, 1=P")
+
+  fit = lm(labels~., data=cbind.data.frame(data[samples,], 'labels'=labels[samples]))
+
+  df = cbind.data.frame('index'=1:length(labels[samples]), 'fitted'=fit$fitted.values, 'status'=labels[samples], 'resid'=fit$residuals)
+  
+  grid.arrange(
+    ggplot(df, aes(x=index,y=fitted, col=as.factor(status))) + geom_point() +
+      labs(title='Fitted values vs status for selected coef', x='', y='fitted value'),
+#    ggplot(df, aes(x=resid,y=fitted, col=as.factor(status))) + geom_point() +
+#      labs(title='Fitted values vs residuals for selected coef'),
+    top=paste("Total samples in fit:", length(samples))
+  )
+  
+  pc = rbind.data.frame('Progressor'=signif(precisionRecall(labels[samples] == 1, fit$fitted.values > 0.5),3),
+       'Non-Progressor'=signif(precisionRecall(labels[samples] == 0, fit$fitted.values < 0.5),3))
+  
+```
+
+
+`r pander(pc, caption=paste('In this I removed all samples from patients that had greater than the median value',median(duprows), 'of duplicated rows. The separation is less perfect but still very good.'))`
+
+
+
+```{r, echo=F, warning=F, message=F, eval=F}
+test.rows = which(rownames(dysplasia.df) %in% subset(patients, group == 3)$Samplename)
+test = dysplasia.df[test.rows,]
+training = dysplasia.df[-test.rows,]
+
+##  Found here http://amunategui.github.io/binary-outcome-modeling/  this probably isn't correct for my case
+library(caret)
+
+objControl <- trainControl(method='cv', number=5, returnResamp='none')
+#objModel <- train(training,as.factor(labels[-test.rows]), method='glmnet',trControl=objControl, lambda=lambda.opt)
+objModel <- train(dysplasia.df[,bestF],as.factor(labels), method='glmnet',trControl=objControl, lambda=lambda.opt)
+
+vimp <- varImp(objModel, scale=F, lambda = lambda.opt)
+results <- data.frame(row.names(vimp$importance),vimp$importance$Overall)
+results$VariableName <- rownames(vimp)
+colnames(results) <- c('VariableName','Weight')
+results <- results[(results$Weight != 0),]
+
+which(results$VariableName %in% bestF)
+
+ggplot(subset(results, Weight > 10), aes(x=reorder(VariableName, Weight), y=Weight)) + 
+  geom_bar(stat="identity", fill='blue', color='grey') + coord_flip() +
+  labs(y="< (-) importance >  < neutral >  < importance (+) >", x="")
+#+   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+## Very close to the same for the top N coefficients
+rownames(coef.opt) %in% as.character(arrange(results, -Weight)$VariableName) 
+
+```
+
+
+```{r labels2, echo=F, message=F, include=F, eval=F}
+# y = HGD (1) vs BE/LGD (0)
+
+#Do the same again, but with HGD/IMC labeled instead
+
+
+## binomial: dysplasia 1, BE 0
+labels = unlist(sapply(patient.data, function(df) {
+  df$info = arrange(df$info, Endoscopy.Year, Pathology)
+  label = as.integer(df$info$Pathology %in% c('HGD', 'IMC'))
+  names(label) = df$info$Samplename
+  return(label)
+}))
+names(labels) = sub('.*\\.', '',  names(labels))
+
+# sort in label order
+if (length(setdiff(colnames(mergedDf), names(labels))) > 3)
+  warning("Labels vector is missing samples")
+```
+
+
+```{r cvglmnet, echo=F, warning=F, message=F, fig.height=8, fig.width=8, eval=F}
+#Note on the labels. When trying to classify samples that are HGD or not we have `r table(labels)[1]` samples without and only `r table(labels)[2]`) with HGD.  
+
+## cv.glmnet?
+
+
+
+gp = plot.multi.cv.glmnet(dysplasia.df, labels, alpha=c(0,0.5,1), title='cv.glmnet HGD vs BE')
+do.call(grid.arrange, c(gp, ncol=2, nrow=3))
+
+cv1 = cv.glmnet(dysplasia.df, labels, alpha=1, family='binomial')
+plot(cv1$glmnet.fit, main='alpha=1 glmnet.fit from cv.glmnet')
+```
+
+
+```{r xvalpt2, message=F, warning=F, echo=F, fig.height=6, fig.width=6, eval=F}
+
+# This just makes sure the sets don't become too unbalanced with regards to the labels.
+sets = table(cbind(patients, labels[patients$Samplename])[,c(3:4)])
+s = sample(rep(seq(5), length = length(unique(pts$Patient))))
+patients = merge(pts, cbind('Patient'=unique(pts$Patient), 'group'=s), by="Patient")
+
+while ( length(which(table(patients$group)/nrow(patients) < 0.2)) > 1 ) {
+  print(".")
+  s = sample(rep(seq(5), length = length(unique(pts$Patient))))
+  patients = merge(pts, cbind('Patient'=unique(pts$Patient), 'group'=s), by="Patient")
+  #sets = table(cbind(patients, labels[patients$Samplename])[,c(3:4)])
+}
+
+
+fit0 <- glmnet(dysplasia.df, labels, alpha = 1) # all patients
+plot(fit0)
+title(main='fit0, all samples')
+lambda <- fit0$lambda
+
+cv.class = matrix(nrow=5, ncol=length(lambda))
+prec.rec = matrix(nrow=5, ncol=length(lambda))
+auc = matrix(nrow=5, ncol=length(lambda))
+for (i in 1:5) {
+    test.rows = which(rownames(dysplasia.df) %in% subset(patients, group == i)$Samplename)
+    test = dysplasia.df[test.rows,]
+    training = dysplasia.df[-test.rows,]
+    # pre-spec lambda seq
+    fit <- glmnet(training, labels[-test.rows], lambda=lambda, family='binomial', alpha=1) 
+    plot(fit)
+    title(main=paste('fold', i))
+
+    # careful: matrix
+    pred <- pi.hat(predict(fit, test)) 
+    pred.class <- predict(fit, test, type='class') # check this later
+    
+    auc[i,] = apply(pred.class, 2, function(x) {
+      if (sum(as.numeric(x)) <= 0) return(0)
+      as.numeric(auc(roc(response=as.numeric(x), predictor=labels[test.rows])))  
+    })
+    
+    # prec.rec[i,] = apply(pred.class, 2, function(p) {
+    #    precisionRecall(labels[test.rows], as.integer(p))$recall
+    # })
+    cv.class[i,] = apply(pred, 2, function(p) {
+      # Confusion matrix
+      #boxplot(p~labels[test.rows], main=i)
+      # cmat = table(labels[test.rows], p>0.5)
+      # sum(diag(cmat))/sum(cmat)
+      (1-p)%*%labels[test.rows] # quantitiative
+    })
+    #s = sample(1:ncol(pred),1)
+    #boxplot(pred[,s]~labels[test.rows], main=s)
+}
+lambda.opt <- lambda[which.min(colMeans(cv.class))]
+
+## TODO...NOPE, this pulls nearly all of the features so START OVER.  This is likely because there are so few HGD samples
+
+print(paste("mean auc at optimal lambda:", round(mean(auc[,which.min(colMeans(cv.class))]),2)))
+
+#coef.opt <- coef.glmnet(fit0, s=min(fit0$lambda))
+coef.opt <- coef.glmnet(fit0, s=lambda.opt)
+coef.opt = as.matrix(coef.opt)
+coef.opt = as.matrix(coef.opt[ which(coef.opt != 0)[-1] ,])
+coef.opt = as.matrix(coef.opt[order(-coef.opt[,1]),])
+
+print( rownames(coef.opt) )
+
+test.rows = which(rownames(dysplasia.df) %in% subset(patients, group == 3)$Samplename)
+test = dysplasia.df[test.rows,]
+training = dysplasia.df[-test.rows,]
+
+##  Found here http://amunategui.github.io/binary-outcome-modeling/  this probably isn't correct for my case
+
+objControl <- trainControl(method='cv', number=5, returnResamp='none')
+#objModel <- train(training,as.factor(labels[-test.rows]), method='glmnet',trControl=objControl, lambda=lambda.opt)
+
+predictions <- predict(object=objModel, test)
+print(roc(predictions, as.integer(labels[test.rows]))$auc)
+
+#objModel <- train(dysplasia.df,as.factor(labels), method='glmnet',trControl=objControl, lambda=lambda.opt)
+
+vimp <- varImp(objModel, scale=F, lambda = lambda.opt)
+results <- data.frame(row.names(vimp$importance),vimp$importance$Overall)
+results$VariableName <- rownames(vimp)
+colnames(results) <- c('VariableName','Weight')
+results <- results[(results$Weight != 0),]
+
+ggplot(subset(results, Weight > 20), aes(x=reorder(VariableName, Weight), y=Weight)) + 
+  geom_bar(stat="identity", fill='blue', color='grey') + coord_flip() +
+  labs(y="< (-) importance >  < neutral >  < importance (+) >", x="")
+#+   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+## Very close to the same for the top N coefficients
+rownames(coef.opt) %in% as.character(arrange(results, -Weight)$VariableName) 
+
+```
+

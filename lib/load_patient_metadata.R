@@ -1,11 +1,11 @@
 
-suppressPackageStartupMessages( library(plyr) )
+suppressPackageStartupMessages( library(dplyr) )
 
 strip.whitespace <- function (x) gsub("\\s+|\\s+", "", x)
 
 summarise.patient.info<-function(df) {
   sum.pt = (df %>% 
-              group_by(Patient, Status) %>%
+              group_by(Patient, Status, Set) %>%
               summarise(
                 start.year=range(Endoscopy.Year)[1],
                 end.year=range(Endoscopy.Year)[2],
@@ -18,7 +18,7 @@ summarise.patient.info<-function(df) {
   return(arrange(sum.pt, Status, total.samples, highest.path))
 }
 
-read.patient.info<-function(file) {
+read.patient.info<-function(file, set='Training') {
   if (!file.exists(file))
     stop(paste(file, "doesn't exist or is not readable."))
   
@@ -26,9 +26,16 @@ read.patient.info<-function(file) {
     library(xlsx)
     
     patient.info = NULL
+    test.training = NULL
     for (i in 1:length(getSheets(loadWorkbook(file)))) {
-      print(i)
+      #print(i)
       if (names(getSheets(loadWorkbook(file))[i]) == 'Technical Repeats') next
+      
+      if (names(getSheets(loadWorkbook(file))[i]) == 'TrainingTest') {
+        test.training = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
+        next
+      }
+      
       batch_name = gsub(' ', '_', (names(getSheets(loadWorkbook(file))[i])))
       
       ws = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
@@ -68,6 +75,7 @@ read.patient.info<-function(file) {
       if (is.null(patient.info)) {
         patient.info = ws
       } else {
+        #print(paste('binding', batch_name))
         patient.info = rbind(patient.info, ws)
       }
     }
@@ -124,5 +132,45 @@ read.patient.info<-function(file) {
   
   patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
   
+  if (is.null(test.training)) stop("No information on test/training sets")
+    
+  patient.info = merge(patient.info, test.training[,grep('Patient|Set|Analysis', colnames(test.training), value=T)], by.x='Patient', by.y='Patient', all=T)
+  
+  patient.info = subset(patient.info, Set == set)
+  message(paste("Returning only the", set, "set", sep=" "))
+
   return(patient.info)
 }
+
+
+get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='hg19') {
+  chr.lengths = read.table(paste('http://genome.ucsc.edu/goldenpath/help/', build, '.chrom.sizes',sep='') , sep='\t', header=F)
+  colnames(chr.lengths) = c('chrom','chr.length')
+  chr.lengths = subset(chr.lengths, chrom %in% chrs)
+  chr.lengths$chrom = factor(chr.lengths$chrom, levels=chrs)
+  chr.lengths = arrange(chr.lengths, chrom)
+  
+  cytoband.url = 'http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/cytoBand.txt.gz'
+  cytoband.file = paste('/tmp', basename(cytoband.url), sep='/')
+  
+  if (!file.exists(cytoband.file)) {
+    success = download.file(cytoband.url, cytoband.file)
+    if (!success)
+      stop(paste("Could not download", cytoband.url))
+  }
+  
+  cytobands = read.table(cytoband.file, sep='\t', header=F)
+  colnames(cytobands) = c('chrom','start','end','band','attr')
+  cytobands$chrom = factor(cytobands$chrom, levels=chrs)
+  
+  centromeres = subset(cytobands, attr == 'acen')
+  
+  chr.lengths$chr.cent = ddply(centromeres, .(chrom), summarise, cent=mean(range(start, end)) )$cent
+  chr.lengths$cent.gap = ddply(centromeres, .(chrom), summarise, gap = (max(end)-min(start))/2 )$gap
+  chr.lengths$genome.length = cumsum(as.numeric(chr.lengths$chr.length))
+  
+  return(chr.lengths)
+}
+
+
+
