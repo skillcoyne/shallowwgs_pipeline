@@ -79,6 +79,12 @@ read.patient.info<-function(file, set='Training') {
         patient.info = rbind(patient.info, ws)
       }
     }
+    patient.info = merge(patient.info, test.training[,grep('Patient|Set|Analysis', colnames(test.training), value=T)], by.x='Patient', by.y='Patient', all=T)
+    
+    # Remove 'normal' samples
+    patient.info = subset(patient.info, !grepl('D2', Pathology, ignore.case=T))
+    patient.info = subset(patient.info, !grepl('Gastriccardia', Pathology, ignore.case=T))
+
   } else {
     patient.info = read.table(file, header=T, sep='\t', stringsAsFactors=F)
     
@@ -99,8 +105,9 @@ read.patient.info<-function(file, set='Training') {
                                     grep('cellularity',colnames(patient.info),ignore.case=T),
                                     grep('p53', colnames(patient.info),ignore.case=F),
                                     grep('Number.of|Total.Reads', colnames(patient.info), ignore.case=F), 
-                                    grep('Batch', colnames(patient.info), ignore.case=F)) ]
-    colnames(patient.info) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name')
+                                    grep('Batch', colnames(patient.info), ignore.case=F),
+                                    grep('Set', colnames(patient.info), ignore.case=F)) ]
+    colnames(patient.info) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set')
   }
   
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
@@ -108,24 +115,18 @@ read.patient.info<-function(file, set='Training') {
 
   patient.info[] = lapply(patient.info[], strip.whitespace)
   
-    
   patient.info[c('Status','Pathology','p53.Status')] = 
     lapply(patient.info[c('Status','Pathology','p53.Status')], function(x) factor(strip.whitespace(x)))
   
   patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads')] = 
     lapply(patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads')], as.numeric)
   
-  
   patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
   ## TODO Mistake in earlier version of the patient file caused this will be fixed for the next run
   snames = grep('_1072(5|9)$', patient.info$Samplename)
-  if ( length(snames > 0) ) {
+  if ( length(snames > 0) ) 
     patient.info$Samplename[snames] =  paste( sub('-','_', patient.info$Plate.Index[snames]), '10725_10729', sep='_' )
-  }
   
-  # Remove 'normal' samples
-  patient.info = subset(patient.info, Pathology != 'D2')
-  patient.info = subset(patient.info, Pathology != 'Gastriccardia')
   patient.info$Pathology = droplevels(patient.info$Pathology)
   patient.info$Pathology = ordered( patient.info$Pathology, 
                                     levels=c("normal","?","BE","ID","LGD", "IMC","HGD" ))
@@ -135,9 +136,8 @@ read.patient.info<-function(file, set='Training') {
   
   patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
   
-  if (is.null(test.training)) stop("No information on test/training sets")
+  #if (is.null(test.training)) stop("No information on test/training sets")
     
-  patient.info = merge(patient.info, test.training[,grep('Patient|Set|Analysis', colnames(test.training), value=T)], by.x='Patient', by.y='Patient', all=T)
   
   if (!grepl('^all$', set, ignore.case = T)) {
     patient.info = subset(patient.info, Set == set)
