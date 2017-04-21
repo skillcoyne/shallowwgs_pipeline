@@ -105,7 +105,10 @@ read.patient.info<-function(file, set='Training') {
   
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
   patient.info$Plate.Index = strip.whitespace(patient.info$Plate.Index)
+
+  patient.info[] = lapply(patient.info[], strip.whitespace)
   
+    
   patient.info[c('Status','Pathology','p53.Status')] = 
     lapply(patient.info[c('Status','Pathology','p53.Status')], function(x) factor(strip.whitespace(x)))
   
@@ -136,8 +139,12 @@ read.patient.info<-function(file, set='Training') {
     
   patient.info = merge(patient.info, test.training[,grep('Patient|Set|Analysis', colnames(test.training), value=T)], by.x='Patient', by.y='Patient', all=T)
   
-  patient.info = subset(patient.info, Set == set)
-  message(paste("Returning only the", set, "set", sep=" "))
+  if (!grepl('^all$', set, ignore.case = T)) {
+    patient.info = subset(patient.info, Set == set)
+    message(paste("Returning only the", set, "set", sep=" "))
+  } else {
+    message(paste("Returning all patient data."))
+  }
 
   return(patient.info)
 }

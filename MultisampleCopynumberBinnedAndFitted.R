@@ -20,7 +20,7 @@ outdir = args[3]
 #outdir = '~/Data/Ellie/Analysis'
 
 
-all.patient.info = read.patient.info(patient.file)
+all.patient.info = read.patient.info(patient.file, set='All')
 if (is.null(all.patient.info))
   stop(paste("Failed to read patient file", patient.file))
 all.patient.info$Patient = gsub('/', '_',all.patient.info$Patient)
@@ -125,12 +125,13 @@ dir.create(plot.dir, showWarnings=F)
 for (s in samplenames) {
   pt = paste('SLX-', subset(all.patient.info, Samplename == s)$SLX.ID, sep='')
   
-  if (length(pt) > 0) {
-    dir.create(paste(plot.dir, pt, sep='/'), showWarnings=F)
-    png(paste(paste(plot.dir, pt, sep='/'),paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
-  } else {
-    png(paste(plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
-  }
+  #if (length(pt) > 0) {
+    pt.plot.dir = strip.whitespace(paste(plot.dir, pt, sep='/'))
+    dir.create(pt.plot.dir, showWarnings=F)
+    png(paste(pt.plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
+  #} else {
+  #  png(paste(plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
+  #}
   print(paste("plotting",pt, s))
   gg = ggplot(window.depths[,c(chr.info, s)],aes_string(x="genome.pos", y=s)) + lims(y=c(-0.25,3), x =c(0,max(window.depths$genome.pos))) + 
     geom_point(color='darkred', alpha=0.5) +
