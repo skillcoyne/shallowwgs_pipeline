@@ -10,6 +10,7 @@ summarise.patient.info<-function(df) {
                 start.year=range(Endoscopy.Year)[1],
                 end.year=range(Endoscopy.Year)[2],
                 total.samples=length(Samplename), 
+                total.endos=length(unique(Path.ID)),
                 highest.path=sort(Pathology, decreasing=T)[1],
                 first.batch=sort(Batch.Name)[1],
                 med.cellularity=median(Barretts.Cellularity,na.rm=T),

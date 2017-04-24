@@ -171,29 +171,35 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
   means = apply(segvals[,-(1:5)],1,mean)
   CofV = sds/means
   
-  shapiro.wilk = sapply(1:nrow(segvals),function(i) {
-    row.data=unlist(segvals[i,-(1:5)])
-    ifelse(all(row.data==row.data[1]) | length(row.data) > 5000 , NA, shapiro.test(row.data)$statistic)
-  })
-  if (length(which(is.na(shapiro.wilk))) < 1) {
-    #out = cbind(segvals[,1:5],CofV,shapiro.wilk)
-    #names(out)[6:7] = c("coeff_of_var","ShapiroWilk")
-    #use SDs rather than CofV
-    out = cbind(segvals[,1:5],sds,shapiro.wilk)
-    names(out)[6:7] = c("st_dev","ShapiroWilk")
-    
-    print(paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"))
-    write.table(out,paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"),sep="\t",row.names=F,quote=F)
-    
-    png(paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""))
-    plot(out[,6],out[,7],cex=log(segvals$n.probes)+1,bg=rgb(1,0,0,0.5),pch=21,xlab="standard deviation",ylab="Shapiro-Wilk statistic",xlim=c(0,1), main=patient.name)
-    dev.off()
-    
-    png(paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
-    DENS=density(shapiro.wilk[!is.na(shapiro.wilk) & !is.infinite(shapiro.wilk)])
-    plot(DENS,xlab="Shapiro-Wilk statistic",main=patient.name)
-    dev.off()
+  
+  if ((ncol(segvals)-5) > 3) {
+    shapiro.wilk = sapply(1:nrow(segvals),function(i) {
+      row.data=unlist(segvals[i,-(1:5)])
+      ifelse(all(row.data==row.data[1]) | length(row.data) > 5000 , NA, shapiro.test(row.data)$statistic)
+    })
+    if (length(which(is.na(shapiro.wilk))) < 1) {
+      #out = cbind(segvals[,1:5],CofV,shapiro.wilk)
+      #names(out)[6:7] = c("coeff_of_var","ShapiroWilk")
+      #use SDs rather than CofV
+      out = cbind(segvals[,1:5],sds,shapiro.wilk)
+      names(out)[6:7] = c("st_dev","ShapiroWilk")
+      
+      print(paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"))
+      write.table(out,paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"),sep="\t",row.names=F,quote=F)
+      
+      png(paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""))
+      plot(out[,6],out[,7],cex=log(segvals$n.probes)+1,bg=rgb(1,0,0,0.5),pch=21,xlab="standard deviation",ylab="Shapiro-Wilk statistic",xlim=c(0,1), main=patient.name)
+      dev.off()
+      
+      png(paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
+      DENS=density(shapiro.wilk[!is.na(shapiro.wilk) & !is.infinite(shapiro.wilk)])
+      plot(DENS,xlab="Shapiro-Wilk statistic",main=patient.name)
+      dev.off()
+    }
+  } else {
+    warning(paste("Too few samples to run shapiro wilk", (ncol(segvals)-5)))
   }
+  
   #DENS=density(CofV[!is.na(CofV) & !is.infinite(CofV)])
   #use SDs rather than CofV
   png(paste(gamma.plot, "/multipcf_StDev_density_gamma",gamma2,".png",sep=""))
