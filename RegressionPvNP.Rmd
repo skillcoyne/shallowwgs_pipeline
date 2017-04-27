@@ -46,7 +46,7 @@ patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
 sum.patient.data = summarise.patient.info(patient.info)
 sum.patient.data = as.data.frame(subset(sum.patient.data, Patient %in% names(patient.data))) ## For now
-pander(sum.patient.data[,c('Patient', 'Status', 'start.year', 'end.year','total.samples','highest.path')])
+pander(sum.patient.data[,c('Patient', 'Status', 'start.year', 'end.year','total.samples','total.endos','highest.path')])
 
 
 # Missing some of the samples as they aren't all sequenced yet
@@ -261,13 +261,17 @@ do.call(grid.arrange, c(gp, ncol=2, nrow=3))
 Split into 5ths by patient, fit and predict at each split, select min lambda, get coefficients from the initial model using that value.
 
 ```{r xvalpt, message=F, warning=F, echo=F, fig.height=6, fig.width=6}
-precisionRecall<-function(actual, predicted) {
+precisionRecall<-function(actual, predicted) { ## needs to calculate for both 0 and 1
     retrieved <- sum(predicted==1)
     recall <- sum(predicted==1 & actual==1) / sum(actual==1)
+    sum(predicted==0 & actual==0) / sum(actual==0)
+    
     precision <- sum(predicted==1 & actual==1) / retrieved
     f1 = signif(2*(1/(1/precision+1/recall)), 2)
     return(data.frame('precision'=precision, 'recall'=recall, 'F1'=signif(f1, 2)))
-  }
+}
+
+
 
 pi.hat<-function(x) exp(x)/(1+exp(x))
 
@@ -276,16 +280,17 @@ non.zero.coef<-function(fit, s) {
   cf[which(cf != 0),][-1]
 }
 
-cv.patient.glmnet<-function(x,y,lambda,patients) {
-  message(paste("Running", length(unique(patients$group)), "folds"))
+cv.patient.glmnet<-function(x,y,lambda,pts) {
+  message(paste("Running", length(unique(pts$group)), "folds"))
   
   cv.class = matrix(nrow=5, ncol=length(lambda))
-  auc = matrix(nrow=5, ncol=length(lambda))
+  f1 = matrix(nrow=5, ncol=length(lambda))
+  prec = f1; recall = f1
 
   fit.e = list()
   for (i in 1:length(unique(patients$group))) {  ## This is not stable. 
     message(paste(i, "fold"))
-    test.rows = which(rownames(x) %in% subset(patients, group == i)$Samplename)
+    test.rows = which(rownames(x) %in% subset(pts, group == i)$Samplename)
     test = x[test.rows,]
     training = x[-test.rows,]
     # pre-spec lambda seq
@@ -293,12 +298,18 @@ cv.patient.glmnet<-function(x,y,lambda,patients) {
     # autoplot(fit) + theme(legend.position="none")
     
     pred.class <- predict(fit, test, type='class') # check this later
-    auc[i,] = apply(pred.class, 2, function(pd) {
+
+
+    proc = do.call(rbind, apply(pred.class, 2, function(pd) {
       if (sum(as.numeric(pd)) <= 0) return(0)
       #as.numeric(pROC::auc(pROC::roc(response=as.numeric(pd), predictor=labels[test.rows])))  
-      precisionRecall(labels[test.rows], as.numeric(pd))$F1
-    })
+      precisionRecall(labels[test.rows], as.numeric(pd))
+    }))
 
+    f1[i,] = proc$F1
+    prec[i,] = proc$precision
+    recall[i,] = proc$recall
+    
     # careful: matrix
     pred <- pi.hat(predict(fit, test)) 
     cv.class[i,] = apply(pred, 2, function(p) {
@@ -326,11 +337,13 @@ cv.patient.glmnet<-function(x,y,lambda,patients) {
           geom_point(data=df[which.max(df$mean)+1,], aes(y=mean, x=lambda.at, colour="max+1"), size=3) +
           geom_point(data=df[which.max(df$mean)-1,], aes(y=mean, x=lambda.at, colour="max-1"), size=3) +
           geom_hline(yintercept=df[which.max(df$mean)-1,'mean'], colour='grey') +
-          annotate("text", x=5, y=max(df$mean)+0.0005, label=round(df[which.max(df$mean)-1,'mean'],2)) +
+          annotate("text", x=5, y=max(df$mean)+0.005, label=round(df[which.max(df$mean)-1,'mean'],2)) +
+          annotate("text", x=6, y=max(df$mean)-0.005, label=round(median(df$sme),4)) +
           theme(axis.title.x = element_text(size = 15, vjust=-.2)) + scale_colour_discrete(name = "Best lambda values") +
           labs(title="CV Performance")
 
-  return(list('cv.class'=cv.class, 'f1'=auc[which.max(df$mean)-1], 'lambda.opt'=lambda.opt, 'lambdas'=df, 'plot'=gp, 'non.zero.cf'=nzcf))
+  return(list('max.cm'=df[which.max(df$mean)-1,'mean'], 'f1'=mean(f1[,which.max(df$mean)-1]), 'precision'=mean(prec[,which.max(df$mean)-1]), 'recall'=mean(recall[,which.max(df$mean)-1]),
+              'lambda.opt'=lambda.opt, 'lambdas'=df, 'plot'=gp, 'non.zero.cf'=nzcf))
 }
 
 fit0 <- glmnet(dysplasia.df, labels, alpha = 1) # all patients
@@ -355,26 +368,45 @@ lambda.opt = cv.patient$lambda.opt
 
 coef.opt = as.data.frame(non.zero.coef(fit0, lambda.opt))
 
-grid.arrange(cv.patient$plot)
+grid.arrange(cv.patient$plot + ggtitle(paste("CV Performance, 5-fold xval. mean f1 at opt lambda:", cv.patient$f1)))
 
 ## check how often the feature(s) is selected at that lamda in each split. "stability selection"
-
-for (i in 1:length(cv.patient$non.zero.cf)) {
-  df = as.data.frame(cv.patient$non.zero.cf[[i]])
-  colnames(df) = i
-  coef.opt = merge(coef.opt, df, by='row.names', all.x=T)
-  rownames(coef.opt) = coef.opt$Row.names
-  coef.opt$Row.names = NULL
-  coef.opt[,(i+1)] = as.integer(!is.na(coef.opt[,(i+1)]))
+coef.stability<-function(opt, nz.list) {
+  for (i in 1:length(nz.list)) {
+    df = as.data.frame(nz.list[[i]])
+    colnames(df) = i
+    opt = merge(opt, df, by='row.names', all.x=T)
+    rownames(opt) = opt$Row.names
+    opt$Row.names = NULL
+    opt[,(i+1)] = as.integer(!is.na(opt[,(i+1)]))
+  }
+  opt = opt[order(sapply(rownames(opt), function(x) as.numeric(unlist(strsplit(x, ':'))[1])  )),]
+  return(opt)
 }
-coef.opt = coef.opt[order(sapply(rownames(coef.opt), function(x) as.numeric(unlist(strsplit(x, ':'))[1])  )),]
+
+coef.opt.stability = coef.stability(coef.opt, cv.patient$non.zero.cf)
 
 ```
-
 
 `r pander(coef.opt, justify='left', caption='Features from the glm fitted with all data. Each numbered column indicates if the feature was identified in that split.')`
 
 At a the minimum lambda-1se (green dot) the value is `r signif(lambda.opt, 3)`. In the initial model `r length(coef.opt)` coefficients have a non-zero value.  
+
+### Feature stability
+
+`r length(which(rowSums(coef.opt.stability[,2:6])>= 3))` features are stable in 3:5 splits
+
+`r length(which(rowSums(coef.opt.stability[,2:6])>= 4))` features are stable in 4:5 splits
+
+`r length(which(rowSums(coef.opt.stability[,2:6])>= 5))` features are stable in 5:5 splits
+
+Optimal model?
+```{r}
+
+gfit = glm(labels~.,data=cbind.data.frame(dysplasia.df[,names(non.zero.coef(fit0, lambda.opt))], labels), family=binomial(link='logit'))
+autoplot(gfit)
+
+```
 
 
 
@@ -391,16 +423,66 @@ samples = intersect(rownames(dysplasia.df), subset(info, Pathology %nin% c('HGD'
 
 cv.nohgd = cv.patient.glmnet(x=dysplasia.df[samples,], y=labels[samples], lambda, subset(patients, Samplename %in% samples))
 #lambda.opt = cv.patient$lambda.opt
-grid.arrange(cv.nohgd$plot + ggtitle("CV Performance, No HGD/IMC samples"))
-#coef.opt = as.data.frame(non.zero.coef(fit0, lambda.opt))
+grid.arrange(cv.nohgd$plot + ggtitle(paste("CV Performance, No HGD/IMC samples. mean f1:", cv.nohgd$f1)))
+nohgd.stab = coef.stability(coef.opt, cv.nohgd$non.zero.cf)
 
 
 samples = intersect(rownames(dysplasia.df), subset(info, Pathology %nin% c('HGD', 'IMC', 'LGD'))$Samplename)
 cv.nolgd = cv.patient.glmnet(x=dysplasia.df[samples,], y=labels[samples], lambda, subset(patients, Samplename %in% samples))
-#lambda.opt = cv.patient$lambda.opt
-grid.arrange(cv.nolgd$plot + ggtitle("CV Performance, No HGD/IMC/LGD samples"))
+grid.arrange(cv.nolgd$plot + ggtitle(paste("CV Performance, No HGD/IMC/LGD samples. mean f1:", cv.nohgd$f1)))
+nolgd.stab = coef.stability(coef.opt, cv.nolgd$non.zero.cf)
+
+```
+
+#### No HGD feature stability
+
+`r length(which(rowSums(nohgd.stab[,2:6])>= 3))` features are stable in 3:5 splits
+
+`r length(which(rowSums(nohgd.stab[,2:6])>= 4))` features are stable in 4:5 splits
+
+`r length(which(rowSums(nohgd.stab[,2:6])>= 5))` features are stable in 5:5 splits
+
+#### No LGD feature stability
+
+`r length(which(rowSums(nolgd.stab[,2:6])>= 3))` features are stable in 3:5 splits
+
+`r length(which(rowSums(nolgd.stab[,2:6])>= 4))` features are stable in 4:5 splits
+
+`r length(which(rowSums(nolgd.stab[,2:6])>= 5))` features are stable in 5:5 splits
 
 
+
+### Leave one patient out
+
+```{r loop, echo=F, message=F, warning=F, fig.height=40, fig.width=30}
+fpr = data.frame(matrix(ncol=5,nrow=0))
+# Randomize patients
+pt.samp = sample(sum.patient.data$Patient)
+
+#plots = list()
+
+for (pt in pt.samp) {
+  samples = as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Patient != pt)$Patient], function(pt) pt$info$Samplename)))
+  
+  cv.back = cv.patient.glmnet(x=dysplasia.df[samples,], y=labels[samples], lambda, subset(patients, Samplename %in% samples))
+#  print(median(cv.back$lambdas$sme))
+ # print( paste(cv.back$f1, cv.back$precision) )
+   fpr = rbind(fpr, c(cv.back$max.cm, cv.back$f1, cv.back$precision, cv.back$recall, length(samples)))
+ 
+#  plots[[ pt ]] = cv.back$plot + ggtitle(paste("# Samples:", length(samples))) + theme(legend.position = "none")
+}
+colnames(fpr) = c('performance','f1','prec','recall','n.samples')
+
+ggplot(fpr, aes(performance, f1)) + 
+  geom_point() + 
+  ylim(0,1) + xlim(0,1) + labs(title="LOO (patient)", x='CV Performance', y='f1 statistic')
+
+```
+
+
+## Peel back timepoints
+
+```{r, echo=F, message=F, warning=F}
 get.next.samples<-function(patient.data, i) {
   as.vector(unlist(sapply(patient.data, function(pd) {
     j = i
@@ -412,16 +494,42 @@ get.next.samples<-function(patient.data, i) {
   }) ))
 }
 
-nonps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'NP')$Patient], 0)
-plots = list()
-for (i in seq(1,35,5)) {
-  ps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'P')$Patient], i)
-  samples = c(nonps, ps)
-  cv.back = cv.patient.glmnet(x=dysplasia.df[samples,], y=labels[samples], lambda, subset(patients, Samplename %in% samples))
-  plots[[ as.character(i) ]] = cv.back$plot + ggtitle(paste("CV Performance - ", length(ps), "progressor samples"))
-}
+#subset(sum.patient.data, Status == 'P' & total.endos >= 8)
 
-do.call('grid.arrange', c(plots, ncol=2, top="Peeling back timepoints in progressors"))
+#cv.back = cv.patient.glmnet(x=dysplasia.df[samples,], y=labels[samples], lambda, subset(patients, Samplename %in% samples))
+#print(cv.back$f1)
+
+nonps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'NP')$Patient], 0)
+#plots = list()
+fpr = data.frame(matrix(ncol=4,nrow=0))
+for (i in c(0,1,seq(2,25,3))) {
+  ps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'P')$Patient], i)
+  samples = get.next.samples(patient.data, i)
+  #samples = c(nonps, ps)
+  cv.back = cv.patient.glmnet(x=dysplasia.df[samples,], y=labels[samples], lambda, subset(patients, Samplename %in% samples))
+  print( paste(cv.back$f1, cv.back$precision) )
+  fpr = rbind(fpr, c(cv.back$f1, cv.back$precision, cv.back$recall, length(ps)))
+#  plots[[ as.character(i) ]] = cv.back$plot + ggtitle(paste(length(ps), "progressor samples. mean f1:", cv.back$f1))
+}
+colnames(fpr) = c('f1','prec','recall','n.samples')
+pander(fpr[1:5,], justify='left')
+#do.call('grid.arrange', c(plots, ncol=2, top="Peeling back timepoints in progressors"))
+
+
+ps = get.next.samples(patient.data[subset(sum.patient.data, Status == 'P')$Patient], 11)
+samples = c(nonps, ps)
+  cv.back = cv.patient.glmnet(x=dysplasia.df[samples,], y=labels[samples], lambda, subset(patients, Samplename %in% samples))
+  print(median(cv.back$lambdas$sme))
+  cv.back$plot + ggtitle(paste("CV Performance - ", length(ps), "progressor samples"))
+
+info = subset(patient.info, Samplename %in% samples)
+head(info)
+
+pander(summarise.patient.info(subset(info, Status == 'P'))[,c(1:7)], justify='left')
+
+coef.opt.stability = coef.stability(coef.opt, cv.back$non.zero.cf)
+
+pander(coef.opt.stability[which(rowSums(coef.opt.stability[,2:6]) > 0),], justify='left', caption="Features initially identified that also are found in the subset of samples")
 
 ```
 

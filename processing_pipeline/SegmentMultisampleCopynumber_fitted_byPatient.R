@@ -13,6 +13,7 @@ source("lib/fastPCF.R")
 source('lib/load_patient_metadata.R')
 
 
+
 data = args[1]
 patient.name = args[2]
 outdir = args[3]
@@ -29,7 +30,10 @@ if (!dir.exists(plot.dir))
   dir.create(plot.dir, recursive=T)
 
 ## Patient info file
-patient.file = grep('All_patient_info.xlsx', list.files(data, full.names=T), value=T)
+filename = 'All_patient_info.txt'
+if (require(xlsx)) filename = 'All_patient_info.xlsx' 
+  
+patient.file = grep(filename, list.files(data, full.names=T), value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing patient info file in", data))
 

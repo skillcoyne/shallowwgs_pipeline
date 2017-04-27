@@ -38,7 +38,8 @@ patient.file = grep('All_patient_info.xls', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
 
-patient.info = read.patient.info(patient.file)
+dataset = 'Training'
+patient.info = read.patient.info(patient.file, set=dataset)
 patient.info$Patient = gsub("/", "_", patient.info$Patient)
 head(patient.info)
 
@@ -50,6 +51,9 @@ sum.patient.data = summarise.patient.info(patient.info)
 
 #pander(arrange(patient.data, Status), justify='left', caption='Patient information')
 ```
+
+
+# Description of '`r dataset`' data set
 
 ```{r cors, echo=F, message=T, warning=F, fig.height=6, fig.width=6, fig.align='left', include=F}
 ## Cluster the samples by coverage then pull out regions
@@ -153,14 +157,13 @@ lapply(names(patient.data), function(pt) {
 })
 
 
-save(patient.data, file='patients.Rdata')
+save(patient.data, file=paste(dataset, '_patients.Rdata', sep=''))
 
 
+example.pt = subset(sum.patient.data, Status == 'P' & total.samples > 2)$Patient[1]
 ## Note the number of probes per patient/sample
 ```
 \pagebreak
-
-# Data
 
 This data was generated in the following pipeline:
 
@@ -170,26 +173,26 @@ This data was generated in the following pipeline:
 
 The result looks like two data matrices:
 
-1. Segmented values 
+1. Segmented values (progressor): `r example.pt` 
 ```{r}
-head(patient.data[['AD0258']]$seg.vals)
+head(patient.data[[example.pt]]$seg.vals)
 ```
 
 ```{r echo=F, warning=F, message=F, fig.height=10, fig.width=10}
-ggplot( melt(patient.data[['AD0258']]$seg.vals[,-(1:5)]), aes(x=value) ) + 
+ggplot( melt(patient.data[[example.pt]]$seg.vals[,-(1:5)]), aes(x=value) ) + 
         facet_wrap(~variable,scales = "free_x") + 
-        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.03) + labs(title='AD0258 segmented value distribution', x='', y='')
+        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.03) + labs(title=paste(example.pt,' segmented value distribution'), x='', y='')
 ```
 
 2. Row (e.g. per-region across timepoints) normalized values from the matrix above
 ```{r}
-head(patient.data[['AD0258']]$norm.seg.vals)
+head(patient.data[[example.pt]]$norm.seg.vals)
 ```
 
 ```{r echo=F, warning=F, message=F, fig.height=10, fig.width=10}
-ggplot( melt(patient.data[['AD0258']]$norm.seg.vals), aes(x=value) ) + 
+ggplot( melt(patient.data[[example.pt]]$norm.seg.vals), aes(x=value) ) + 
         facet_wrap(~variable,scales = "free_x") + 
-        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + labs(title='AD0258 normalized segmented value distribution', x='', y='')
+        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + labs(title=paste(example.pt,' normalized segmented value distribution'), x='', y='')
 
 ## Per-sample normalization
 #nsv = patient.data[['AD0258']]$norm.seg.vals
@@ -257,7 +260,7 @@ lapply(patient.data, function(pt) {
       geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + 
       labs(title='normalized segmented value distribution', x='', y='')
 
-  do.call('grid.arrange', list(g1,g2, top=paste(name, status, sep=" - ")))
+  do.call('grid.arrange', list(g1,g2, top=paste(name, status, sep=" - "), ncol=2))
 })
 
 ```
@@ -285,27 +288,37 @@ segment.lengths = lapply(patient.data, function(df) {
 })
 
 
-prog.regions = sapply(var.seg.lengths[sum.patient.data$Patient], nrow)
+n.var.regions = sapply(var.seg.lengths, nrow)
+wilcox.test(n.var.regions[prog.pt], n.var.regions[np.pt])
 
 sum.patient.data$Num.Var.Regions = as.vector(sapply(var.seg.lengths[sum.patient.data$Patient], nrow))
 
 chrs = read.table('hg19_chrom.txt',sep='\t', header=T)
+
+# Segment lengths, variable regions
 var.seg.lengths = lapply(var.seg.lengths, function(x) merge(x, chrs, by.x='chr', by.y='chr') )
 
-segment.lengths= lapply(segment.lengths, function(x) merge(x, chrs, by.x='chr', by.y='chr') )
+# All segments
+segment.lengths = lapply(segment.lengths, function(x) merge(x, chrs, by.x='chr', by.y='chr') )
 
-opcov = sapply(segment.lengths[prog.pt], function(x) {
+# Genome coverage
+genome.coverage = sapply(segment.lengths, function(x) {
   sum(as.numeric(x[['seg.len']]))/sum(as.numeric(chrs$length))
 })
 
-onpcov = sapply(segment.lengths[np.pt], function(x) {
-  sum(as.numeric(x[['seg.len']]))/sum(as.numeric(chrs$length))
-})
+# No difference in coverage
+covtt = wilcox.test(genome.coverage[prog.pt], genome.coverage[np.pt])
 
+# Variable region length by ratio of chromosome
 chr.ratios = lapply(var.seg.lengths, function(x) x[['seg.len']]/x[['length']])
-# Segment coverage, variable regions
-ttR = t.test(unlist(chr.ratios[subset(sum.patient.data, Status == 'P')$Patient]), 
-             unlist(chr.ratios[subset(sum.patient.data, Status == 'NP')$Patient]))
+
+melted = melt(chr.ratios)
+melted = merge(sum.patient.data[,c('Patient', 'Status')], melted, by.x='Patient', by.y='L1')
+
+chr.ratio.tt = t.test(unlist(chr.ratios[prog.pt]), unlist(chr.ratios[np.pt]))
+
+ggplot(melted, aes(Status, value, fill=Status)) + geom_boxplot() + 
+  labs(title=paste("Variable region length, p-value", ifelse(chr.ratio.tt$p.value < 0.001, "<0.001", signif(chr.ratio.tt$p.value,2))),y='Segment Length/Chr length')
 
 var.seg.lengths = lapply(var.seg.lengths, function(df) {
   as.data.frame(df %>%
@@ -314,18 +327,18 @@ var.seg.lengths = lapply(var.seg.lengths, function(df) {
             chr.ratio = sum(seg.len)/length[1]))
 })
 
+# Genome coverage of the variable regions
 pcov = median(sapply(var.seg.lengths[prog.pt], function(x) 
   sum(as.numeric(x[['seg.lengths']]))/sum(as.numeric(x[['length']])) ), na.rm=T)
 
 npcov = median(sapply(var.seg.lengths[np.pt], function(x) 
   sum(as.numeric(x[['seg.lengths']]))/sum(as.numeric(x[['length']])) ), na.rm=T)
 
-
 ## Grouping the chromosomes by length 1-12, 13-22
-#t.test(subset(np.regions, chrom %in% c(1:12))$chr.ratio, subset(np.regions, chrom %in% c(13:22))$chr.ratio)
+get.chrs<-function(x, chrs) { subset(x, chr %in% chrs)$chr.ratio }
 
-#t.test(subset(prog.regions, chrom %in% c(1:12))$chr.ratio, subset(prog.regions, chrom %in% c(13:22))$chr.ratio)
-
+long.chr.tt = t.test(unlist(lapply(var.seg.lengths[prog.pt], get.chrs, chrs=c(1:12))), unlist(lapply(var.seg.lengths[np.pt], get.chrs, chrs=c(1:12))))
+short.chr.tt = t.test(unlist(lapply(var.seg.lengths[prog.pt], get.chrs, chrs=c(13:22))), unlist(lapply(var.seg.lengths[np.pt], get.chrs, chrs=c(13:22))))
 
 #There may be an enrichment for segments in the shorter chromosomes amongst progressors but it's weak (fisher `r ftL$p.value`)
 #df = data.frame( 'short' = rbind( 'np' = sum(table(np.regions$chrom)[1:12]),
@@ -336,8 +349,7 @@ npcov = median(sapply(var.seg.lengths[np.pt], function(x)
 #ftL = fisher.test(df)
 ```
 
-
-So it appears that adjusting for chromosome length (looking at the ratio of the chromosome covered by segments rather than the raw bp) a significant difference in the coverage of the genome by CN segments that are variable between progressors and non: t-test p-value `r signif(ttR$p.value, 2)`.  Overall bp coverage of the sWGS is `r round(mean(c(opcov, onpcov)), 2)*100`%  (P `r round(mean(opcov),2)`, NP `r round(mean(onpcov), 2)`).  
+So it appears that adjusting for chromosome length (looking at the ratio of the chromosome covered by segments rather than the raw bp) a significant difference in the coverage of the genome by CN segments that are variable between progressors and non: t-test p-value `r signif(chr.ratio.tt$p.value, 2)`.  Overall bp coverage of the sWGS is `r round(mean(genome.coverage), 2)*100`%  (P `r round(mean(genome.coverage[prog.pt]),2)`, NP `r round(mean(genome.coverage[np.pt]), 2)`).  
 
 Variable regions cover `r round(pcov, 2)*100`% of the the progressors genome, and `r round(npcov, 2)*100`% of non-progressor genomes.
 
@@ -482,26 +494,33 @@ for (i in 1:nrow(gene.cnt)) {
 }
 
 gene.cnt = arrange(gene.cnt, -Progressors)
-gene.p = subset(gene.cnt, Progressors >= Non.Progressors)
+## RAD51B is screwing up the plot simply because it shows 16 non-progressors (8 progressors) with a gain but the next closest is 9 so we'll just filter that out for now
+gene.cnt = subset(gene.cnt, gene.cnt$Gene.Symbols != 'RAD51B')
+
+#gene.p = subset(gene.cnt, Progressors >= Non.Progressors)
+gene.p = gene.cnt
 
 m = melt(gene.p[,c(1:4)], id.vars=c('Gene.Symbols', 'CN'))
 m$Gene.Symbols = factor(m$Gene.Symbols, levels= m$Gene.Symbols[c(nrow(m):1)] ) # order
 m$CN = factor(m$CN)
- 
-p = ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
+
+ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
   geom_tile(aes(fill=value), color='white') + 
-  scale_fill_gradient('n patients',low='white',high='royalblue4') + labs(x="",y='CGC Genes')
-p + geom_point(data=m[m$CN == 'gain' & m$value > 0,], aes(y=Gene.Symbols, x=variable), size=2, shape=24, fill='red', color='red') +
-  geom_point(data=m[m$CN == 'loss' & m$value > 0,], aes(y=Gene.Symbols, x=variable), color='green4', size=2, shape=25, fill='green4')
+  scale_fill_gradient('n patients',low='white',high='red') + labs(x="",y='CGC Genes')
+# + geom_point(data=m[m$CN == 'gain' & m$value > 0,], aes(y=Gene.Symbols, x=variable), size=2, shape=24, fill='red', color='red') +
+#  geom_point(data=m[m$CN == 'loss' & m$value > 0,], aes(y=Gene.Symbols, x=variable), color='green4', size=2, shape=25, fill='green4')
 
 
-#gc = gene.cnt %>% group_by(Gene.Symbols) %>% summarise(Progressors=sum(Progressors), Non.Progressors=sum(Non.Progressors))
-#gc = arrange(subset(gc, Progressors >= Non.Progressors), -Progressors)
-#m = melt(gc, id.vars=c('Gene.Symbols'))
-#m$Gene.Symbols = factor(m$Gene.Symbols, levels= m$Gene.Symbols[c(nrow(m):1)] ) # order
-#ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
-#  geom_tile(aes(fill=value), color='white') + 
-#  scale_fill_gradient('n patients',low='white',high='royalblue4') + labs(x="",y='CGC Genes')
+gc = gene.cnt %>% group_by(Gene.Symbols) %>% summarise(Progressors=sum(Progressors), Non.Progressors=sum(Non.Progressors))
+gc = arrange(subset(gc, Progressors >= Non.Progressors), -Progressors)
+gc = gc[1:60,]
+m = melt(gc, id.vars=c('Gene.Symbols'))
+#m$value = as.factor(m$value)
+m$Gene.Symbols = factor(m$Gene.Symbols, levels= m$Gene.Symbols[c(nrow(m):1)] ) # order
+ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
+  geom_tile(aes(fill=value), color='white') + 
+  scale_fill_gradient('n patients',low='white',high='red') + labs(x="",y='CGC Genes') + ggtitle("Top 50 genes only")
+
 ```
 
 
