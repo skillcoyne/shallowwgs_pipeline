@@ -111,13 +111,14 @@ for(gamma2 in c(250,5,10,25,50,100,500,1000)) {
   # columns 2 and 3 contain chr and pos, which multipcf requires
   # ?? gamma is the important parameter here, is the loop to help find an appropriate gamma? 
   ## Note that the pre processing of the data was to provide Windsorized values
-  filenames = c(paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""), '/tmp/estimates.txt')
+  filename = paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep="")
   
   data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
   res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
   
   #plotChrom(data=data,segments=res,chrom=1, layout=c(ncol(data)-2,1))
-  
+  message(paste("Writing pcf output to",filename))
+  write.table(res, file=filename, sep="\t", quote=F)
   #write.table(res,paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",quote=F)
   #read.table(paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""), sep="\t", header=T)->res 
   
