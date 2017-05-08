@@ -39,42 +39,52 @@ fit.data = NULL
 raw.data = NULL
 samplenames=NULL
 for(dir in data.dirs) {
-  print(dir)
+  print(paste("Reading directory", dir))
 	files = list.files(dir,pattern="[fitted|corrected]ReadCounts.txt")
+  slx = sub('SLX-','', basename(dir))
 
-	if (length(files) == 1) {
-	  fit = read.table(paste(dir,"/",files[1],sep=""),sep="\t",header=T,stringsAsFactors=F)  # fitted reads
-	  name = sub('SLX-', '', basename(dir))
-	  cols = grep('D\\d', colnames(fit))
-	  colnames(fit)[cols]= paste(colnames(fit)[cols], name, sep="_") 
-	  
-	  raw = read.table(paste(dir,"/",gsub("fitted|correctedR","r",files[1]),sep=""),sep="\t",header=T,stringsAsFactors=F) # raw reads
-	  colnames(raw)[cols]= paste(colnames(raw)[cols], name, sep="_") # hardcoded...fix this from spreadsheets later
-	  
-	  if (is.null(fit.data)) {
-	    fit.data = fit
-	    raw.data = raw
-	  } else {
-	    fit.data = cbind(fit.data,fit[,cols])
-	    raw.data = cbind(raw.data,raw[,cols])
+  # Files that do not contain individual indecies
+	if (length(files) == 1 | !grepl('D\\d+_D\\d+', files)) {
+	  for (file in files) {
+	    print(paste("Reading file", file))
+	    spl = strsplit(file,"\\.")
+	    
+	    fitted.file = paste(dir,"/",file,sep="")
+	    raw.file = list.files(dir, pattern=paste(paste(unlist(spl)[1:2],collapse='.'), '(rawReadCounts|copyNumberSegmented)', sep='.'), full.names = T)[1]
+	    
+	    fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
+	    f.cols = grep('D\\d', colnames(fit))
+	    colnames(fit)[f.cols] = paste(colnames(fit)[f.cols], slx, sep="_") 
+	    
+	    raw = read.table(raw.file,sep="\t",header=T,stringsAsFactors=F) # raw reads
+	    r.cols = grep('D\\d', colnames(raw))
+	    colnames(raw)[r.cols] = paste(colnames(raw)[r.cols], slx, sep="_") 
+	    raw = raw[,colnames(fit)]	    
+	    
+	    if (is.null(fit.data)) {
+	      fit.data = fit
+	      raw.data = raw
+	    } else {
+	      fit.data = cbind(fit.data,fit[,f.cols])
+	      raw.data = cbind(raw.data,raw[,f.cols])
+	    }
 	  }
-
-	} else {
-  	short.name = gsub("_fitted","",gsub("^.*/SLX-","",dir))
+	} else { # individual index
 	  for(file in files){
-		  print(file)
+	    print(paste("Reading file", file))
 		  spl = strsplit(file,"\\.")
-		
-  		fitted.file = paste(dir,"/",file,sep="")
-  		raw.file = paste(dir,"/",gsub("fitted","raw",file),sep="")
+
+		  fitted.file = paste(dir,"/",file,sep="")
+		  raw.file = sub('fitted', 'raw', fitted.file)
+		  
   		if (!file.exists(fitted.file) | !file.exists(raw.file)) 
   		  stop("Missing fitted/raw file ")
 
   		fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
-  		colnames(fit)[5] = paste(spl[[1]][2],short.name,sep="_")
+  		colnames(fit)[5] = paste(spl[[1]][2],slx,sep="_")
   		
   		raw = read.table(raw.file,sep="\t",header=T,stringsAsFactors=F) # raw reads
-  		colnames(raw)[5] = paste(spl[[1]][2],short.name,sep="_")
+  		colnames(raw)[5] = paste(spl[[1]][2],slx,sep="_")
 
 	  	if(is.null(fit.data)){
 	  		fit.data = fit
