@@ -50,7 +50,7 @@ for(dir in data.dirs) {
 	    spl = strsplit(file,"\\.")
 	    
 	    fitted.file = paste(dir,"/",file,sep="")
-	    raw.file = list.files(dir, pattern=paste(paste(unlist(spl)[1:2],collapse='.'), '(rawReadCounts|copyNumberSegmented)', sep='.'), full.names = T)[1]
+	    raw.file = list.files(dir, pattern=paste(paste(unlist(spl)[1],collapse='.'), '.*(rawReadCounts|copyNumberSegmented)', sep='.'), full.names = T)[1]
 	    
 	    fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
 	    f.cols = grep('D\\d', colnames(fit))
@@ -99,6 +99,7 @@ for(dir in data.dirs) {
 	  }
   }
 }
+
 #save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
 save(fit.data, raw.data, file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
 
