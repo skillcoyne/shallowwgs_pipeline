@@ -10,7 +10,7 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir>")
 
-source('lib/load_patient_metadata.R')
+source('../lib/load_patient_metadata.R')
 
 data = args[1]
 patient.file = args[2]
