@@ -140,7 +140,7 @@ read.patient.info<-function(file, set='Training') {
   #if (is.null(test.training)) stop("No information on test/training sets")
     
   
-  if (!grepl('^all$', set, ignore.case = T)) {
+  if (!grepl('all', set, ignore.case = T)) {
     patient.info = subset(patient.info, Set == set)
     message(paste("Returning only the", set, "set", sep=" "))
   } else {
