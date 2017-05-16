@@ -53,9 +53,14 @@ sum.validation.info = summarise.patient.info(validation.patient.info)
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
 sum.patient.data = summarise.patient.info(patient.info)
-sum.patient.data = as.data.frame(subset(sum.patient.data, Patient %in% names(patient.data))) ## For now
 
-pander(sum.patient.data[,c('Patient', 'Status', 'start.year', 'end.year','total.samples','total.endos','highest.path')], justify='left')
+
+if (length(which(sapply(patient.data, function(df) nrow(df$seg.vals)) == 0)) > 0)
+  warning(paste("Patients missing data:",
+    paste(names(which(sapply(patient.data, function(df) nrow(df$seg.vals)) == 0)), collapse=', ')))
+
+patient.data[which(sapply(patient.data, function(df) nrow(df$seg.vals)) == 0)] = NULL
+sum.patient.data = as.data.frame(subset(sum.patient.data, Patient %in% names(patient.data))) ## For now
 
 # Missing some of the samples as they aren't all sequenced yet
 for (pt in names(patient.data)) {
@@ -63,6 +68,10 @@ for (pt in names(patient.data)) {
   #print(patient.data[[pt]]$info$Samplename %in% colnames(patient.data[[pt]]$seg.vals)[-(1:5)])
   patient.data[[pt]]$info = patient.data[[pt]]$info[patient.data[[pt]]$info$Samplename %in% colnames(patient.data[[pt]]$seg.vals)[-(1:5)],]
 }
+
+pander(sum.patient.data[,c('Patient', 'Status', 'start.year', 'end.year','total.samples','total.endos','highest.path')], justify='left')
+
+
 ```
 
 
@@ -104,6 +113,7 @@ tile.sample.segments<-function(tileFile, sample.data) {
   } else {
     message("Tiling patient data...")
     grList = lapply(sample.data, function(df) {
+      print(unique(df$info$Patient))
       df$info = arrange(df$info, Endoscopy.Year, Pathology)
       
       x1 = apclust.data(df$seg.vals, df$info$Samplename)
@@ -160,7 +170,7 @@ tile.sample.segments<-function(tileFile, sample.data) {
 }
 
 mergedDf = tile.sample.segments(paste(as.character(tile.w),'_tiledpts.Rdata', sep=''), patient.data)
-
+dim(mergedDf)
 #validatioMergedDf = tile.sample.segments(paste(as.character(tile.w),'validation_tiledpts.Rdata', sep=''), validation.patient.data)
 
 ```
@@ -192,12 +202,13 @@ if (length(setdiff(colnames(mergedDf), names(labels))) > 3)
   warning("Labels vector is missing samples")
 
 dysplasia.df = t(mergedDf[,names(labels)])
+dim(dysplasia.df)
 ```
 
 We have `r table(labels)[1]` samples from non-progressors and `r table(labels)[2]` samples from progressors.
 
 Example subset of the data matrix:
-`r pander(dysplasia.df[1:10, 1:5], caption=paste("dimensions:", paste(dim(dysplasia.df), collapse=', ')), justify='left')`
+`r pander(dysplasia.df[1:5, 1:5], caption=paste("dimensions:", paste(dim(dysplasia.df), collapse=', ')), justify='left')`
 
 
 
@@ -288,7 +299,15 @@ create.patient.sets<-function(pts, n, splits, minR=0.2) {
   return(patients)
 }
 
-crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=NULL, minR=0.2, select='performance') {
+binomial.deviance<-function(pmat, y) {
+  # Binomial deviance, lifted from cv.lognet
+  prob_min = 1e-05; prob_max = 1 - prob_min
+  pmat = pmin(pmax(pmat, prob_min), prob_max)
+  dev = apply(pmat, 2, function(p)  -2*((y==1)*log(p)+(y==0)*log(1-p)) )
+  return(dev)
+}
+
+crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=NULL, minR=0.2, select='classification') {
   if (nfolds > 5) minR = 0.1
   message(paste("Running", splits, "splits",nfolds,"times on", paste(dim(x), collapse=':'), 'alpha=',a ))
   fit.e = list()
@@ -317,14 +336,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
       })
       
       # Binomial deviance, lifted from cv.lognet
-      predmat = predict(fitCV, test, type='response')
-      prob_min = 1e-05; prob_max = 1 - prob_min
-
-      predmat = pmin(pmax(predmat, prob_min), prob_max)
-
-      yT = as.factor(y[test.rows])
-      dev = apply(predmat, 2, function(p)  -2*((yT==1)*log(p)+(yT==0)*log(1-p)) )
-      
+      dev = binomial.deviance(predict(fitCV, test, type='response'), as.factor(y[test.rows]))
       deviance[i,] = apply(dev, 2, weighted.mean, w=rep(1, nrow(dev)), na.rm=T)
       
       fit.e[[length(fit.e)+1]] = fitCV
@@ -343,17 +355,20 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
                         'mean.b.dev' = colMeans(cv.binomial.deviance),
                         'sd.b.dev' = apply(cv.binomial.deviance, 2,sd),
                         'sme.b.dev' = apply(cv.binomial.deviance, 2, sd)/sqrt(nrow(cv.binomial.deviance)),
-                        'lambda.min' = F, 'lambda.1se' = F, `lambda-1se` = F)
-  #df$lambda.1se = FALSE
-  #df$`lambda-1se` = FALSE
-  
-  if (select == 'performance') {
+                        'lambda.min' = F, 'lambda.1se' = F)
+
+  if (select == 'classification') {
     df$lambda.min = df$mean == max(df$mean)
-    df[df$log.lambda < subset(df, mean == max(mean))$log.lambda+sd(df$log.lambda),][1, 'lambda.1se'] = TRUE
+    se1 = df[df$lambda.min == T, 'mean'] - df[df$lambda.min == T, 'sme']
+    
+    arrange(subset(df, mean < se1 & !lambda.min & log.lambda > subset(df, lambda.min)$log.lambda ), -mean)[1:10,]
+    df[arrange(subset(df, mean < se1 & !lambda.min & log.lambda > subset(df, lambda.min)$log.lambda ), -mean)[1, 'lambda.at'], 'lambda.1se'] = T
     #df[df$log.lambda < subset(df, mean == max(mean))$log.lambda-sd(df$log.lambda),][1, 'lambda-1se'] = TRUE
   } else if (select == 'deviance') {
     df$lambda.min = df$mean.b.dev == min(df$mean.b.dev)
-    df[df$mean.b.dev >= df[df$lambda.min == T, 'mean.b.dev'] + sd(df$mean.b.dev), ][1, 'lambda.1se'] = T
+    se1 = df[df$lambda.min == T, 'mean.b.dev'] - df[df$lambda.min == T, 'sme.b.dev']
+    df[arrange(subset(df, mean.b.dev <= se1 & !lambda.min), -mean.b.dev)[1, 'lambda.at'], 'lambda.1se'] = T
+    #df[df$mean.b.dev >= df[df$lambda.min == T, 'mean.b.dev'] + sd(df$mean.b.dev), ][1, 'lambda.1se'] = T
   }
 
   lambda.min = lambda[subset(df, lambda.min == T)$lambda.at]
@@ -367,7 +382,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
   plots$deviance = plots$deviance + theme(legend.position='bottom') + scale_colour_discrete(name="") + 
     labs(title=paste(splits,' splits, ',nfolds,' folds, alpha=',a, sep=''), y='mean Binomial Deviance', x='log(lambda)') 
 
-  return(list('max.cm'=df[which.max(df$mean)-1,'mean'], 
+  return(list('max.cm'=df[df$lambda.1se ==T,'mean'], 
               'lambda.min'=lambda.min, 'lambda.1se'=lambda.1se, 'lambdas'=df, 'plot'=plots$performance, 'deviance.plot'=plots$deviance, 'non.zero.cf'=nzcf))
 }
 
@@ -386,29 +401,18 @@ plot.patient.cv<-function(df, fit=NULL) {
              label=round(df[subset(df, lambda.min == T)$lambda.at,'mean'],3)) 
   
   if (nrow(subset(df, lambda.1se == T)) > 0) {
-    gp = gp + geom_point(data=subset(df, lambda.1se == T), aes(y=mean, x=log.lambda, colour="lambda.min+1se"), size=2 ) +
+    gp = gp + geom_point(data=subset(df, lambda.1se == T), aes(y=mean, x=log.lambda, colour="lambda.1se"), size=2 ) +
       geom_vline(xintercept = subset(df, lambda.1se == T)$log.lambda, colour='grey') +
       annotate("text", x=subset(df, lambda.1se == T)$log.lambda, y=min(df$mean)+sd(df$mean), 
                label=round(df[subset(df, lambda.1se == T)$lambda.at,'mean'],3)) 
 
-    gpD = gpD + geom_point(data=subset(df, lambda.1se == T), aes(y=mean.b.dev, x=log.lambda, colour="lambda.min+1se"), size=2 ) +
+    gpD = gpD + geom_point(data=subset(df, lambda.1se == T), aes(y=mean.b.dev, x=log.lambda, colour="lambda.1se"), size=2 ) +
       geom_vline(xintercept = subset(df, lambda.1se == T)$log.lambda, colour='grey') +
       annotate("text", x=subset(df, lambda.1se == T)$log.lambda, y=min(df$mean)+sd(df$mean), 
                label=round(df[subset(df, lambda.1se == T)$lambda.at,'mean'],3)) 
   }
   
-  if (nrow(subset(df, `lambda-1se` == T)) > 0) {
-      gp = gp + geom_point(data=subset(df, `lambda-1se` == T), aes(y=mean, x=log.lambda, colour="lambda.min-1se"), size=2 ) +
-      geom_vline(xintercept = subset(df, `lambda-1se` == T)$log.lambda, colour='grey') +
-      annotate("text", x=subset(df, `lambda-1se` == T)$log.lambda, y=min(df$mean)+sd(df$mean), 
-               label=round(df[subset(df, `lambda-1se` == T)$lambda.at,'mean'],3)) 
 
-      gpD = gpD + geom_point(data=subset(df, `lambda-1se` == T), aes(y=mean.b.dev, x=log.lambda, colour="lambda.min-1se"), size=2 ) +
-      geom_vline(xintercept = subset(df, `lambda-1se` == T)$log.lambda, colour='grey') +
-      annotate("text", x=subset(df, `lambda-1se` == T)$log.lambda, y=min(df$mean)+sd(df$mean), 
-               label=round(df[subset(df, `lambda-1se` == T)$lambda.at,'mean'],3)) 
-  }
-  
   gp = gp + theme(legend.position='bottom') + scale_colour_discrete(name = "") 
   gpD = gpD + theme(legend.position='bottom') + scale_colour_discrete(name="") 
 
@@ -417,11 +421,10 @@ plot.patient.cv<-function(df, fit=NULL) {
     
     coef.min = subset(df, lambda.min == T)$nzcoef
     coef.1se = subset(df, lambda.1se == T)$nzcoef
-    coef.m.1se = subset(df, `lambda-1se` == T)$nzcoef
-    
+
     d = coef.1se-coef.min
     
-    coef.text = arrange(subset(df,nzcoef %in% c(0,  coef.min, coef.1se, coef.m.1se, max(nzcoef) )), -lambda.min, -lambda.1se)
+    coef.text = arrange(subset(df,nzcoef %in% c(0,  coef.min, coef.1se, max(nzcoef) )), -lambda.min, -lambda.1se)
     coef.text = arrange(coef.text[!duplicated(coef.text$nzcoef),], -nzcoef)
     
     gp = gp + annotate("text", y=min(df$mean), x=coef.text$log.lambda, label=coef.text$nzcoef, color='darkblue')
@@ -434,34 +437,48 @@ return(list('performance'=gp, 'deviance'=gpD))
 
 
 ```{r xvalpt, message=F, warning=F, echo=T, fig.height=16, fig.width=16}
-performance.plots = list(); coefs = list(); deviance.plots = list()
-plots = list()
-folds = 10; splits=5
+coefs = list(); plots = list(); performance.at.1se = list()
+folds = 10; splits = 5
 alpha.values = c(0,0.5,0.7,0.8,0.9,1)
-
 if (file.exists('/tmp/all.pt.alpha.Rdata')) {
   load('/tmp/all.pt.alpha.Rdata', verbose=F)
 } else {
   for (a in alpha.values) {
     fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=1000, family='binomial') # all patients
-    autoplot(fit0, xvar='lambda', main=paste('fit0, all samples, alpha=',a,sep='')) + theme(legend.position='none') 
+    #autoplot(fit0, xvar='lambda', main=paste('fit0, all samples, alpha=',a,sep='')) + theme(legend.position='none') 
     
-    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=fit0$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance')
+    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=fit0$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fit0)
     
     lambda.opt = ifelse( length(cv.patient$lambda.1se) > 0, cv.patient$lambda.1se, cv.patient$lambda.min )
     
     coef.opt = as.data.frame(non.zero.coef(fit0, lambda.opt))
     coefs[[as.character(a)]] = coef.stability(coef.opt, cv.patient$non.zero.cf)
     
-    #performance.plots[[as.character(a)]] = cv.patient$plot + ggtitle(paste('alpha=',a,sep=''))
-    #deviance.plots[[as.character(a)]] = cv.patient$deviance.plot + ggtitle(paste('alpha=',a,sep=''))
+    plots[[as.character(a)]] = arrangeGrob(cv.patient$plot+ggtitle('Classification'), cv.patient$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
-    plots[[as.character(a)]] = arrangeGrob(cv.patient$plot+ggtitle('CV Performance'), cv.patient$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
+    performance.at.1se[[as.character(a)]] = subset(cv.patient$lambdas, lambda.1se == T)
   }
-  save(plots, coefs, file='/tmp/all.pt.alpha.Rdata')
+  save(plots, coefs, performance.at.1se, file='/tmp/all.pt.alpha.Rdata')
 }
   
 do.call(grid.arrange, c(plots, top='All samples, 10fold, 5 splits'))
+```
+
+
+```{r xvalpt2, message=F, warning=F, echo=T}
+
+performance.at.1se = do.call(rbind, performance.at.1se)
+performance.at.1se$alpha = rownames(performance.at.1se)
+
+performance.at.1se = cbind(performance.at.1se, do.call(rbind, lapply(coefs, function(x) cbind('n.Coef'=nrow(x), '75%'=length(which(rowSums(x)/50 >= 0.75))))))
+
+ggplot(performance.at.1se, aes(alpha, mean)) + geom_point() +
+  geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme)) + ylim(0.5,0.8) +
+  geom_text(aes(label=n.Coef), nudge_y=0.03) +
+  geom_text(aes(label=paste('(',`75%`,')',sep='')), nudge_y=0.02) +
+  labs(x='Elasticnet penalty value', y='Model performance at lambda.1se', 
+       title=paste('All samples,', folds, 'folds,', splits, 'patient splits'))
+  
 
 ## check how often the feature(s) is selected at that lamda in each split. "stability selection"
 coef.stable = lapply( coefs[c('0.8','0.9','1')], function(cf) {
@@ -504,33 +521,43 @@ Just as a point, the initial model is trained against `r nrow(dysplasia.df)` sam
 
 info = do.call(rbind, lapply(patient.data, function(df) df$info))
 
+no.hgd.plots = list(); coefs = list(); performance.at.1se = list()
 if (file.exists('/tmp/nohgd.Rdata')) {
   load('/tmp/nohgd.Rdata', verbose=T)
 } else {
   # No HGD/IMC
   samples = intersect(rownames(dysplasia.df), subset(info, Pathology %nin% c('HGD', 'IMC'))$Samplename)
-  
-  no.hgd.plots = list()
-  coefs = list()
   for (a in alpha.values) {
-    fit1 <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=1000) # all patients
-    autoplot(fit1, xvar='lambda', main='fit1, no HGD/IMC samples') + theme(legend.position='none') 
-    lambda1 <- fit1$lambda
+    # all patients
+    fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=1000) 
+
+    cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoHGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD)
     
-    cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=lambda1, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fit1, select='deviance')
+    no.hgd.plots[[as.character(a)]] = arrangeGrob(cv.nohgd$plot+ggtitle('Classification'), cv.nohgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
-    #plots[[as.character(a)]] = cv.nohgd$plot + ggtitle(paste('alpha=',a,sep=''))
-    
-    no.hgd.plots[[as.character(a)]] = arrangeGrob(cv.patient$plot+ggtitle('CV Performance'), cv.patient$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
-    
-    coef.1se = as.data.frame(non.zero.coef(fit1, cv.nohgd$lambda.1se))
+    coef.1se = as.data.frame(non.zero.coef(fitNoHGD, cv.nohgd$lambda.1se))
     coefs[[as.character(a)]] = coef.stability(coef.1se, cv.nohgd$non.zero.cf)
+    
+    performance.at.1se[[as.character(a)]] = subset(cv.nohgd$lambdas, lambda.1se == T)
   }
-  save(no.hgd.plots, coefs, file='/tmp/nohgd.Rdata')
+  save(no.hgd.plots, coefs, performance.at.1se, file='/tmp/nohgd.Rdata')
 }
   
 do.call(grid.arrange, c(no.hgd.plots, top="No HGD/IMC samples", ncol=2))
+```
 
+```{r noHGD2, echo=T, message=F, warning=F}
+performance.at.1se = do.call(rbind, performance.at.1se)
+performance.at.1se$alpha = rownames(performance.at.1se)
+
+performance.at.1se = cbind(performance.at.1se, do.call(rbind, lapply(coefs, function(x) cbind('n.Coef'=nrow(x), '75%'=length(which(rowSums(x)/50 >= 0.75))))))
+
+ggplot(performance.at.1se, aes(alpha, mean)) + geom_point() +
+  geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme)) + ylim(0.5,0.8) +
+  geom_text(aes(label=n.Coef), nudge_y=0.03) +
+  geom_text(aes(label=paste('(',`75%`,')',sep='')), nudge_y=0.02) +
+  labs(x='Elasticnet penalty value', y='Model performance at lambda.1se', 
+       title=paste('No HGD/IMC samples,', folds, 'folds,', splits, 'patient splits'))
 
 ## check how often the feature(s) is selected at that lamda in each split. "stability selection"
 coef.stable = lapply( coefs[c('0.8','0.9','1')], function(cf) {
@@ -551,7 +578,6 @@ stability = do.call(rbind, lapply(coef.stable, function(cf) {
   cbind('75%'=length(which(cf >= 0.75)),  '50%'=length(which(cf >= 0.5)),  '<50%'=length(which(cf < 0.5)))
 }))
 rownames(stability) = names(coef.stable)
-
 ```
 
 #### Feature Stability
@@ -568,7 +594,7 @@ They also share all of the non-zero coefficients (`r which.max(sapply(coef.stabl
 Now remove all LGD samples from the progressor's and retrain.
 
 ```{r noLGD, echo=T, message=F, warning=F, fig.height=16, fig.width=16}
-
+nolgd.plots = list(); coefs = list(); performance.at.1se = list()
 if (file.exists('/tmp/nolgd.Rdata')) {
   load('/tmp/nolgd.Rdata', verbose=T)
 } else {
@@ -578,26 +604,36 @@ if (file.exists('/tmp/nolgd.Rdata')) {
   # No HGD/IMC/LGD in all patients
   samples = intersect(rownames(dysplasia.df), subset(info, Pathology %nin% c('HGD', 'IMC', 'LGD'))$Samplename)
   
-  nolgd.plots = list(); coefs = list()
   for (a in alpha.values) {
-    fit2 <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=1000) # all patients
-    autoplot(fit2, xvar='lambda', main='fit1, no HGD/IMC samples') + theme(legend.position='none') 
-    lambda2 <- fit2$lambda
+    fitNoLGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=1000) # all patients
+
+    cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoLGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD)
     
-    cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=lambda2, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fit2, select='deviance')
+    nolgd.plots[[as.character(a)]] = arrangeGrob(cv.nolgd$plot+ggtitle('Classification'), cv.nolgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
-    #plots[[as.character(a)]] = cv.nolgd$plot + ggtitle(paste('alpha=',a,sep=''))
-    
-    nolgd.plots[[as.character(a)]] = arrangeGrob(cv.nolgd$plot+ggtitle('CV Performance'), cv.nolgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
-    
-    coef.1se = as.data.frame(non.zero.coef(fit2, cv.nolgd$lambda.1se))
+    coef.1se = as.data.frame(non.zero.coef(fitNoLGD, cv.nolgd$lambda.1se))
     coefs[[as.character(a)]] = coef.stability(coef.1se, cv.nolgd$non.zero.cf)
+    
+    performance.at.1se[[as.character(a)]] = subset(cv.nolgd$lambdas, lambda.1se == T)
   }
-  save(nolgd.plots, coefs, file='/tmp/nolgd.Rdata')
+  save(nolgd.plots, coefs, performance.at.1se, file='/tmp/nolgd.Rdata')
 }
   
-  
 do.call(grid.arrange, c(plots, top="No HGD/IMC/LGD samples", ncol=2))
+```
+
+```{r noLGD2, echo=T, message=F, warning=F}
+performance.at.1se = do.call(rbind, performance.at.1se)
+performance.at.1se$alpha = rownames(performance.at.1se)
+
+performance.at.1se = cbind(performance.at.1se, do.call(rbind, lapply(coefs, function(x) cbind('n.Coef'=nrow(x), '75%'=length(which(rowSums(x)/50 >= 0.75))))))
+
+ggplot(performance.at.1se, aes(alpha, mean)) + geom_point() +
+  geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme)) + ylim(0.5,0.8) +
+  geom_text(aes(label=n.Coef), nudge_y=0.03) +
+  geom_text(aes(label=paste('(',`75%`,')',sep='')), nudge_y=0.02) +
+  labs(x='Elasticnet penalty value', y='Model performance at lambda.1se', 
+       title=paste('No HGD/IMC/LGD samples,', folds, 'folds,', splits, 'patient splits'))
 
 
 ## check how often the feature(s) is selected at that lamda in each split. "stability selection"
@@ -633,34 +669,43 @@ They also share all of the non-zero coefficients (`r which.max(sapply(coef.stabl
 
 ```{r, echo=T, message=F, warning=F, fig.height=16, fig.width=16}
 m = median(subset(sum.patient.data, Status == 'P')$total.samples)
-
 nonps = as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'NP')$Patient], function(df) df$info$Samplename)))
 
-# Few
-samples = c(nonps, as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'P' & total.samples < m)$Patient], function(pt) pt$info$Samplename))))
+if (file.exists('/tmp/few.Rdata')) {
+  load('/tmp/few.Rdata', verbose=T)
+} else {
+  # Few
+  samples = c(nonps, as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'P' & total.samples < m)$Patient], function(pt) pt$info$Samplename))))
 
-few.plots = list()
-for (a in alpha.values) {
-  fit0 <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=500, family='binomial') # all patients
-  cv.back.few = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fit0$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fit0, minR=0.1, select='deviance')
-  #few.plots[[as.character(a)]] = cv.back.few$plot + ggtitle(paste('alpha=',a,sep=''))
-  
-  few.plots[[as.character(a)]] = arrangeGrob(cv.back.few$plot+ggtitle('CV Performance'), cv.back.few$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
-}
+  few.plots = list()
+  for (a in alpha.values) {
+    fitF <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=500, family='binomial') # all patients
+    cv.back.few = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitF$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fitF, minR=0.1)
+    #few.plots[[as.character(a)]] = cv.back.few$plot + ggtitle(paste('alpha=',a,sep=''))
+    
+    few.plots[[as.character(a)]] = arrangeGrob(cv.back.few$plot+ggtitle('Classification'), cv.back.few$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
+  }
+  save(few.plots, file='/tmp/few.Rdata')
+} 
 do.call(grid.arrange, c(few.plots, ncol=2, top=paste(nrow(subset(sum.patient.data, Status == 'P' & total.samples < m))," Progressors with < median # samples (",m,")")))
 
 # Many
-samples = c(nonps, as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'P' & total.samples >= m)$Patient], function(pt) pt$info$Samplename))))
+if (file.exists('/tmp/many.Rdata')) {
+  load('/tmp/many.Rdata', verbose=T)
+} else {
+  samples = c(nonps, as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'P' & total.samples >= m)$Patient], function(pt) pt$info$Samplename))))
+  
+  many.plots = list()
+  for (a in alpha.values) {
+    fitM <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=500, family='binomial') # all patients
+    
+    cv.back.many = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitM$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fitM)
 
-many.plots = list()
-for (a in alpha.values) {
-  fit0 <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=500, family='binomial') # all patients
-  
-  cv.back.many = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fit0$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fit0, select='deviance')
-  #many.plots[[as.character(a)]] = cv.back.many$plot + ggtitle(paste('alpha=',a,sep=''))
-  
-  many.plots[[as.character(a)]] = arrangeGrob(cv.back.many$plot+ggtitle('CV Performance'), cv.back.many$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
+    many.plots[[as.character(a)]] = arrangeGrob(cv.back.many$plot+ggtitle('Classification'), cv.back.many$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
+  }
+  save(many.plots, file='/tmp/many.Rdata')
 }
+
 do.call(grid.arrange, c(many.plots, ncol=2, top=paste(nrow(subset(sum.patient.data, Status == 'P' & total.samples >= m))," Progressors with >= median # samples (",m,")")))
 
 ```
@@ -677,6 +722,7 @@ pg.samp = lapply(patient.data, function(pt) {
   info$SampleSD = apply(pt$seg.vals[,info$Samplename], 2, sd)
   info$SampleMEAN =  apply(pt$seg.vals[,info$Samplename], 2, mean)
   info$Prediction = NA
+  info$Prediction.Dev.Resid = NA
   info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
   return(info)
 })
@@ -685,7 +731,6 @@ pg.samp = lapply(patient.data, function(pt) {
 if (file.exists('/tmp/loo.Rdata')) {
   load('/tmp/loo.Rdata', verbose=T)
 } else {
-
   performance.at.1se = c(); coefs = list(); plots = list(); fits = list()
   # Remove each patient (LOO)
   for (pt in names(pg.samp)) {
@@ -697,10 +742,10 @@ if (file.exists('/tmp/loo.Rdata')) {
     a = 1
     fitLOO <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=1000) # all patients
     cv = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitLOO$lambda, 
-                                  pts=subset(pts, Samplename %in% samples), a=a, nfolds=10, splits=5, fit=fitLOO, select='deviance')
+                                  pts=subset(pts, Samplename %in% samples), a=a, nfolds=10, splits=5, fit=fitLOO)
     #plots[[pt]] = cv$plot + ggtitle(pt)
     
-    plots[[pt]] = arrangeGrob(cv$plot+ggtitle('CV Performance'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
+    plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
     
     fits[[pt]] = cv  
     
@@ -710,24 +755,25 @@ if (file.exists('/tmp/loo.Rdata')) {
       coef.1se = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
       coefs[[pt]] = coef.stability(coef.1se, cv$non.zero.cf)
       
-      pg.samp[[pt]]$Prediction = predict(fitLOO, dysplasia.df[pg.samp[[pt]]$Samplename,], s=cv$lambda.1se, type='response')[,1]
+      logit <- function(p){log(p/(1-p))}
+      inverse.logit <- function(or){1/(1 + exp(-or))}
+
+      pm = predict(fitLOO, dysplasia.df[pg.samp[[pt]]$Samplename,], s=cv$lambda.1se, type='response')
+      sy = sqrt(binomial.deviance(pm, labels[pg.samp[[pt]]$Samplename]))
+    
+      #df = cbind.data.frame(pm, sy, 1:length(sy))
+      #colnames(df) = c('pred','dev','x')
+      #ggplot(df, aes(x, pred)) + geom_point() + geom_errorbar(aes(ymin=pred-dev, ymax=pred+dev))
+      
+    pg.samp[[pt]]$Prediction = pm[,1]
+    pg.samp[[pt]]$Prediction.Dev.Resid = sy[,1] 
+      
     } else {
       warning(paste("Patient", pt, "did not have a 1se"))
     }
   }
   save(plots, performance.at.1se, coefs, fits, pg.samp, file='/tmp/loo.Rdata')
 }
-
-# do.call(grid.arrange, c(lapply(fits[sample(subset(sum.patient.data, Status == 'NP')$Patient, 4)], function(f) {
-#   plt = plot.patient.cv(f$lambdas)   
-#   arrangeGrob(plt$performance +ggtitle('CV Performance'), plt$deviance+ggtitle('Binomial Deviance'), ncol=2)
-# })))
-
-
-# do.call(grid.arrange, c(lapply(fits[sample(subset(sum.patient.data, Status == 'P')$Patient, 4)], function(f) {
-#   plt = plot.patient.cv(f$lambdas)   
-#   arrangeGrob(plt$performance +ggtitle('CV Performance'), plt$deviance+ggtitle('Binomial Deviance'), ncol=2)
-# })))
 
 ggplot(as.data.frame(performance.at.1se), aes(y=performance.at.1se, x='LOO')) + ylim(0.5,0.9) +
   geom_boxplot( fill='lightblue', color='darkgrey', outlier.fill=NA, outlier.color=NA) + geom_jitter() +
@@ -792,7 +838,10 @@ pred.by.endo<-function(pt, nyears) {
   return(p)
 }
 
-predicted.progression<-function(x) { if(is.na(x)) return(NA); as.integer(length(which(x == 1)) > 0)  }
+predicted.progression<-function(x, pos=1) { 
+  if(length(which(is.na(x))) == length(x)) return(NA)
+  as.integer(length(which(x == pos)) > 0)  
+}
 
 p.predictions = as.data.frame(matrix(data=0,nrow=6, ncol=3, dimnames=list(c(), c('%.Predicted','n.Endoscopies','n.Patients'))))
 for (i in 1:nrow(p.predictions)) {
@@ -802,7 +851,9 @@ for (i in 1:nrow(p.predictions)) {
   p.predictions[i,] =  rbind(round(sum(pp[!is.na(pp)]/length(pp[!is.na(pp)])), 2), i, length(pp))
 }
 
-ggplot(p.predictions, aes(y=`%.Predicted`,x=n.Endoscopies)) + geom_bar(stat="identity", fill='dodgerblue3') + #geom_text(aes(label=`%.Predicted`), nudge_y=0.005) + 
+ggplot(p.predictions, aes(y=`%.Predicted`,x=n.Endoscopies)) + 
+  geom_bar(stat="identity", fill='dodgerblue3') + 
+  geom_text(aes(label=paste(`%.Predicted`*100, '%', sep='')), nudge_y=-0.02) + 
   geom_text(aes(label=paste(n.Patients, 'patients')), nudge_y=0.005) + ggtitle("Progression predicted per endoscopy")
 ```
 
@@ -810,7 +861,7 @@ ggplot(p.predictions, aes(y=`%.Predicted`,x=n.Endoscopies)) + geom_bar(stat="ide
 `r pander(p.predictions, justify='left', caption=paste("For any given endoscopy if a single sample (same pathology ID, different blocks) is predicted as 'progressor' that endoscopy is considered to be indicative of progression. At each endoscopy the percentage is calculated excluding any patients that are diagnosed HGD at that point. There are ",length(subset(sum.patient.data, Status == 'P')$Patient), " progressor patients. Based on that, ", p.predictions[1,1]*100, "% are correctly predicted at the first endoscopy.", sep=''))`
 
 What about the non-progressors that had progressor predictions?
-```{r}
+```{r, warning=F, message=F}
 
 np.predictions = as.data.frame(matrix(data=0,nrow=6, ncol=3, dimnames=list(c(), c('%.Predicted','n.Endoscopies','n.Patients'))))
 for (i in 1:nrow(np.predictions)) {
@@ -822,6 +873,82 @@ for (i in 1:nrow(np.predictions)) {
 
 
 ```
+
+# How do I evaluate the predictions?
+
+I'm a bit at a loss here. I understand why penalized regression wouldn't have a CI, but then I'm not sure how best to evaluate the predictions.  Do I just take the predictions at face value and leave it at that?
+
+```{r, warning=F, message=F, fig.height=4, fig.width=4}
+all = do.call(rbind,lapply(pg.samp, function(df) {
+  df[,c('Status','Prediction','Prediction.Dev.Resid')]
+}))
+
+binomial.deviance
+
+ggplot(all, aes(Prediction.Dev.Resid, Prediction, color=Status)) + geom_point()  + 
+  labs(y='Predicted (response)', x='Binomial dev residual?')
+```
+
+
+# Randomize the labels
+
+By patient.  This should break the models...and as would be expected, the models are really poor with perfomance at 50% or less (coin toss).
+
+```{r, echo=T, warning=F, message=F}
+
+rand.patients = sum.patient.data
+rand.patients$Status = sample( c('NP','P'), nrow(sum.patient.data), replace=T, prob=c(0.5,0.5))
+
+r.labels = unlist(apply(rand.patients[,c('Patient','Status')],1, function(st) {
+  info = patient.data[[ st['Patient'] ]]$info
+  lbl = rep(as.integer( st['Status'] == 'P' ), nrow(info))
+  names(lbl) = info$Samplename
+  return(lbl)
+}))
+
+
+# sort in label order
+r.dysplasia.df = t(mergedDf[,names(r.labels)])
+
+r.coefs = list(); r.plots = list()
+folds = 10; splits=5
+for (a in c(0,0.5,1)) {
+  fitR <- glmnet(r.dysplasia.df, r.labels, alpha=a, nlambda=1000, family='binomial') # all patients
+
+  cv.R = crossvalidate.by.patient(x=r.dysplasia.df, y=r.labels, lambda=fitR$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fitR)
+    
+  lambda.opt = ifelse( length(cv.R$lambda.1se) > 0, cv.R$lambda.1se, cv.R$lambda.min )
+    
+  coef.opt = as.data.frame(non.zero.coef(fitR, lambda.opt))
+  r.coefs[[as.character(a)]] = coef.stability(coef.opt, cv.R$non.zero.cf)
+    
+  r.plots[[as.character(a)]] = arrangeGrob(cv.R$plot+ggtitle('Classification'), cv.R$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
+}
+  
+do.call(grid.arrange, c(r.plots, top='All samples, Randomized labels (by patient)'))
+
+## check how often the feature(s) is selected at that lamda in each split. "stability selection"
+r.coef.stable = lapply( r.coefs, function(cf) {
+  sort(rowSums(cf[,-1]), decreasing=T)
+})
+
+cfs = as.data.frame(matrix(data=0,nrow=length(unique(unlist(sapply(r.coef.stable, names)))), ncol=length(names(r.coef.stable)), 
+                           dimnames=list(unique(unlist(sapply(r.coef.stable, names))), names(r.coef.stable) )))
+
+for (i in names(r.coef.stable)) 
+  cfs[intersect(rownames(cfs), names(r.coef.stable[[i]])), i] = 1
+
+r.coef.stable = lapply(r.coef.stable, function(cf) cf/(folds*splits))
+
+r.stability = do.call(rbind, lapply(r.coef.stable, function(cf) {
+  cbind('75%'=length(which(cf >= 0.75)),  '50%'=length(which(cf >= 0.5)),  '<50%'=length(which(cf < 0.5)))
+}))
+rownames(r.stability) = names(r.coef.stable)
+
+```
+
+
+`r pander(table(rowSums(cfs)))`
 
 
 

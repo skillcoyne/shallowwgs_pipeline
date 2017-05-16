@@ -26,10 +26,9 @@ read.patient.info<-function(file, set='Training') {
   if (grepl('\\.xlsx$', basename(file))) {
     library(xlsx)
     
-    patient.info = NULL
-    test.training = NULL
+    patient.info = NULL;  test.training = NULL
     for (i in 1:length(getSheets(loadWorkbook(file)))) {
-      #print(i)
+      print(i)
       if (names(getSheets(loadWorkbook(file))[i]) == 'Technical Repeats') next
       
       if (names(getSheets(loadWorkbook(file))[i]) == 'TrainingTest') {
@@ -62,7 +61,7 @@ read.patient.info<-function(file, set='Training') {
                  grep('Plate.Index',colnames(ws),ignore.case=T),
                  grep('SLX',colnames(ws),ignore.case=T),
                  grep('cellularity',colnames(ws),ignore.case=T),
-                 grep('p53', colnames(ws),ignore.case=F),
+                 grep('p53.status', colnames(ws),ignore.case=F),
                  grep('Number.of', colnames(ws), ignore.case=F)) ]
       
       
@@ -147,6 +146,7 @@ read.patient.info<-function(file, set='Training') {
     message(paste("Returning all patient data."))
   }
 
+  patient.info$Patient = gsub('/', '_',patient.info$Patient)
   return(patient.info)
 }
 

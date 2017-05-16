@@ -5,19 +5,19 @@ library(ggplot2)
 library(ggdendro)
 # this version removes qDNAseq 'blacklisted' regions and uses 'fitted' read counts
 
-args = commandArgs(trailingOnly=TRUE)
+#args = commandArgs(trailingOnly=TRUE)
 
-if (length(args) < 3)
-  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir>")
+#if (length(args) < 3)
+#  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir>")
 
-source('../lib/load_patient_metadata.R')
+source('lib/load_patient_metadata.R')
 
-data = args[1]
-patient.file = args[2]
-outdir = args[3]
-#data = '~/Data/Ellie/QDNAseq'
-#patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
-#outdir = '~/Data/Ellie/Analysis'
+#data = args[1]
+#patient.file = args[2]
+#outdir = args[3]
+data = '~/Data/Ellie/QDNAseq'
+patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
+outdir = '~/Data/Ellie/Analysis'
 
 
 all.patient.info = read.patient.info(patient.file, set='All')
@@ -40,64 +40,71 @@ raw.data = NULL
 samplenames=NULL
 for(dir in data.dirs) {
   print(paste("Reading directory", dir))
-	files = list.files(dir,pattern="[fitted|corrected]ReadCounts.txt")
+  files = list.files(dir,pattern="[fitted|corrected]ReadCounts.txt", full.names=T)
   slx = sub('SLX-','', basename(dir))
-
+  
   # Files that do not contain individual indecies
-	if (length(files) == 1 | !grepl('D\\d+_D\\d+', files)) {
-	  for (file in files) {
-	    print(paste("Reading file", file))
-	    spl = strsplit(file,"\\.")
-	    
-	    fitted.file = paste(dir,"/",file,sep="")
-	    raw.file = list.files(dir, pattern=paste(paste(unlist(spl)[1],collapse='.'), '.*(rawReadCounts|copyNumberSegmented)', sep='.'), full.names = T)[1]
-	    
-	    fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
-	    f.cols = grep('D\\d', colnames(fit))
-	    colnames(fit)[f.cols] = paste(colnames(fit)[f.cols], slx, sep="_") 
-	    
-	    raw = read.table(raw.file,sep="\t",header=T,stringsAsFactors=F) # raw reads
-	    r.cols = grep('D\\d', colnames(raw))
-	    colnames(raw)[r.cols] = paste(colnames(raw)[r.cols], slx, sep="_") 
-	    raw = raw[,colnames(fit)]	    
-	    
-	    if (is.null(fit.data)) {
-	      fit.data = fit
-	      raw.data = raw
-	    } else {
-	      fit.data = cbind(fit.data,fit[,f.cols])
-	      raw.data = cbind(raw.data,raw[,f.cols])
-	    }
-	  }
-	} else { # individual index
-	  for(file in files){
-	    print(paste("Reading file", file))
-		  spl = strsplit(file,"\\.")
-
-		  fitted.file = paste(dir,"/",file,sep="")
-		  raw.file = sub('fitted', 'raw', fitted.file)
-		  
-  		if (!file.exists(fitted.file) | !file.exists(raw.file)) 
-  		  stop("Missing fitted/raw file ")
-
-  		fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
-  		colnames(fit)[5] = paste(spl[[1]][2],slx,sep="_")
-  		
-  		raw = read.table(raw.file,sep="\t",header=T,stringsAsFactors=F) # raw reads
-  		colnames(raw)[5] = paste(spl[[1]][2],slx,sep="_")
-
-	  	if(is.null(fit.data)){
-	  		fit.data = fit
-	  		raw.data = raw
-	  	}else{ # add to table
-	  		fit.data = cbind(fit.data,fit[,5])
-	  		raw.data = cbind(raw.data, raw[,5])
-	  		
-	  		colnames(fit.data)[ncol(fit.data)] = colnames(fit)[5]
-	  		colnames(raw.data)[ncol(raw.data)] = colnames(raw)[5]
-	  	}	  
-	  }
+  if (length(files) == 1 || !grepl('D\\d+_D\\d+', files)) {
+    for (file in files) {
+      print(paste("Reading file", file))
+      spl = strsplit(basename(file),"\\.")
+      
+      fitted.file = file
+      raw.file = list.files(dir, pattern='\\.(raw)?readCounts', full.names=T)
+      if (length(raw.file) > 1)
+        stop(paste("Error finding raw read counts in", dir))
+      
+      message( paste('FIT:', basename(fitted.file), '  RAW:', basename(raw.file)) )
+      
+      fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
+      f.cols = grep('D\\d', colnames(fit))
+      colnames(fit)[f.cols] = paste(colnames(fit)[f.cols], slx, sep="_") 
+      
+      raw = read.table(raw.file,sep="\t",header=T,stringsAsFactors=F) # raw reads
+      r.cols = grep('D\\d', colnames(raw))
+      colnames(raw)[r.cols] = paste(colnames(raw)[r.cols], slx, sep="_") 
+      raw = raw[,colnames(fit)]	    
+      
+      if (is.null(fit.data)) {
+        fit.data = fit
+        raw.data = raw
+      } else {
+        fit.data = cbind(fit.data,fit[,f.cols])
+        raw.data = cbind(raw.data,raw[,f.cols])
+      }
+    }
+  } else { # individual index
+    for(file in files){
+      print(paste("Reading file", file))
+      spl = strsplit(basename(file),"\\.")
+      
+      fitted.file = file
+      raw.file = sub('fitted', 'raw', fitted.file)
+      
+      message( paste('FIT:', basename(fitted.file), '  RAW:', basename(raw.file)) )
+      
+      if (!file.exists(fitted.file) || !file.exists(raw.file)) 
+        stop("Missing fitted/raw file ")
+      
+      fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
+      colnames(fit)[5] = paste(spl[[1]][2],slx,sep="_")
+      
+      raw = read.table(raw.file,sep="\t",header=T,stringsAsFactors=F) # raw reads
+      colnames(raw)[5] = paste(spl[[1]][2],slx,sep="_")
+      
+      if (is.null(fit.data)) {
+        fit.data = fit
+        raw.data = raw
+      } else { # add to table
+        fit.data = cbind(fit.data,fit[,5])
+        raw.data = cbind(raw.data, raw[,5])
+        
+        colnames(fit.data)[ncol(fit.data)] = colnames(fit)[5]
+        colnames(raw.data)[ncol(raw.data)] = colnames(raw)[5]
+      }	  
+    }
   }
+  print(dim(fit.data))
 }
 
 #save.image(file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
@@ -134,17 +141,20 @@ plot.dir = paste(outdir, 'coverage_binned_fitted', sep='/')
 dir.create(plot.dir, showWarnings=F)
 
 for (s in samplenames) {
+  print(s)
   pt = paste('SLX-', subset(all.patient.info, Samplename == s)$SLX.ID, sep='')
   
   #if (length(pt) > 0) {
-    pt.plot.dir = strip.whitespace(paste(plot.dir, pt, sep='/'))
-    dir.create(pt.plot.dir, showWarnings=F)
-    png(paste(pt.plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
+  pt.plot.dir = strip.whitespace(paste(plot.dir, pt, sep='/'))
+  dir.create(pt.plot.dir, showWarnings=F)
+  png(paste(pt.plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
   #} else {
   #  png(paste(plot.dir,paste(s,"coverage_binned_fitted.png",sep="_"),sep="/"),width=1600,height=800)
   #}
   print(paste("plotting",pt, s))
-  gg = ggplot(window.depths[,c(chr.info, s)],aes_string(x="genome.pos", y=s)) + lims(y=c(-0.25,3), x =c(0,max(window.depths$genome.pos))) + 
+  
+  gg = ggplot(window.depths[,c(chr.info, s)],aes_string(x="genome.pos", y=s)) + 
+    lims(y=c(round(min(window.depths[[s]],na.rm=T), 2),round(max(window.depths[[s]],na.rm=T), 2)), x =c(0,max(window.depths$genome.pos))) + 
     geom_point(color='darkred', alpha=0.5) +
     geom_vline(data=chrs, xintercept=c(0,chrs$cum.lengths), color='darkgrey') + 
     geom_text(data=chrs, aes(x=l.pos, y=rep(3, length(chrom)), label=chrom)) + 
