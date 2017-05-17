@@ -78,7 +78,13 @@ pander(sum.patient.data[,c('Patient', 'Status', 'start.year', 'end.year','total.
 ```{r apclust-func, echo=F, message=F, warning=F}
 apclust.data<-function(segdata, samples) {
   x1 = segdata[,intersect(colnames(segdata), samples)]
-  x1 = x1[, samples]
+  
+  if (length(samples) <= 1) { 
+    x1 = as.data.frame(x1)
+    colnames(x1) = samples
+  } else {
+    x1 = x1[, samples]
+  }
   rownames(x1) = (segdata[,c(1:4)] %>%
                     rowwise() %>%
                     mutate(location=paste(paste(chrom, arm, sep=''), '.', start.pos, '-', end.pos, sep='')))$location
@@ -719,8 +725,13 @@ Leave out each patient (both P and NP) and run a new CV fit each time then predi
 info = do.call(rbind, lapply(patient.data, function(df) df$info))
 pg.samp = lapply(patient.data, function(pt) {
   info = pt$info
-  info$SampleSD = apply(pt$seg.vals[,info$Samplename], 2, sd)
-  info$SampleMEAN =  apply(pt$seg.vals[,info$Samplename], 2, mean)
+  print(unique(info$Patient))
+  info$SampleSD = NA
+  info$SampleMEAN = NA
+  if (length(info$Samplename) > 1) {
+    info$SampleSD = apply(pt$seg.vals[,info$Samplename], 2, sd)
+    info$SampleMEAN =  apply(pt$seg.vals[,info$Samplename], 2, mean)
+  }
   info$Prediction = NA
   info$Prediction.Dev.Resid = NA
   info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
@@ -736,12 +747,20 @@ if (file.exists('/tmp/loo.Rdata')) {
   for (pt in names(pg.samp)) {
     tmp.patient.data = patient.data[subset(sum.patient.data, Patient != pt)$Patient]
     samples = as.vector(unlist(sapply(tmp.patient.data, function(df) df$info$Samplename )))
-    length(samples)
     
+    train.rows = which(rownames(dysplasia.df) %in% samples)
+    training = dysplasia.df[train.rows,]
+    test = dysplasia.df[-train.rows,]
+
+    # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
+    sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(test) > 1, nrow(test), 1),  ncol=ncol(training),
+                            dimnames=list(pg.samp[[pt]]$Samplename,colnames(training)), sparse=T)
+    for(i in colnames(test)) sparsed_test_data[,i] = test[,i]
+
     # Fit generated on all samples, including HGD
     a = 1
-    fitLOO <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=1000) # all patients
-    cv = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitLOO$lambda, 
+    fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=1000) # all patients
+    cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=fitLOO$lambda, 
                                   pts=subset(pts, Samplename %in% samples), a=a, nfolds=10, splits=5, fit=fitLOO)
     #plots[[pt]] = cv$plot + ggtitle(pt)
     
@@ -758,7 +777,7 @@ if (file.exists('/tmp/loo.Rdata')) {
       logit <- function(p){log(p/(1-p))}
       inverse.logit <- function(or){1/(1 + exp(-or))}
 
-      pm = predict(fitLOO, dysplasia.df[pg.samp[[pt]]$Samplename,], s=cv$lambda.1se, type='response')
+      pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       sy = sqrt(binomial.deviance(pm, labels[pg.samp[[pt]]$Samplename]))
     
       #df = cbind.data.frame(pm, sy, 1:length(sy))

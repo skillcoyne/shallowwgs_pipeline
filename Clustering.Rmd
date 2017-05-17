@@ -12,7 +12,6 @@ output:
 library(ggplot2)
 library(GGally)
 library(plyr)
-library(xlsx)
 library(dplyr)
 library(pander)
 library(Hmisc)
@@ -37,11 +36,11 @@ if (length(list.files(plot.dir)) <= 0)
   stop(paste("No analysis files found in", plot.dir ))
 
 ## Patient info file
-patient.file = grep('All_patient_info.xls', data.files, value=T)
+patient.file = grep('All_patient_info.txt', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
 
-load('patients.Rdata', verbose=T)
+load('Training_patients.Rdata', verbose=T)
 
 patient.info = read.patient.info(patient.file)
 patient.info$Patient = gsub("/", "_", patient.info$Patient)
@@ -106,21 +105,31 @@ It appears that in the progressors that generally the HGD or IMC pathology may s
 
 This would suggest we might have a more difficult time separating out the progressors where the early samples were all highly related and a sudden shift occurred to generate the HGD sample. This could be either sampling bias or a sudden model of progression, but I can't think of a method right now that might separate the two.
 
-```{r pca, echo=F, warning=F, message=F, fig.width=8, fig.height=4}
+```{r pca, echo=F, warning=F, message=F, fig.width=8, fig.height=4, eval=F}
 sum.patient.data = arrange(sum.patient.data, Status, total.samples)
 
 plot.pca<-function(pt) {
   print(pt)
   info = arrange(patient.data[[pt]]$info, Endoscopy.Year)
+  if (length(info$Samplename) <= 1) return(NA)
+  
   info = info[which(info$Samplename %in% colnames(patient.data[[pt]][['seg.vals']])[-(1:5)]),]
   plots = list()
   for (sv in c('seg.vals')) {
     
     x1 = patient.data[[pt]][[sv]][, info$Samplename]
-    x1 = x1[,info$Samplename]
+    
+    if (length(info$Samplename) <= 1) { 
+      x1 = as.data.frame(x1)
+      colnames(x1) = info$Samplename
+    } else {
+      x1 = x1[, info$Samplename]
+    }
+
     colnames(x1) = paste(info$Endoscopy.Year, '(', info$Pathology, ')', sep='' )
-  
-    pca = prcomp(t(x1), scale=T)
+
+    #pca = prcomp(t(x1), scale=length(info$Samplename) > 2)
+    pca = prcomp(t(x1), scale=length(info$Samplename) > 2)
   
     eigenvalues = pca$sdev^2
     #screeplot(pca, main=paste(pt, sv, 'scree'))
@@ -146,7 +155,7 @@ pplots = lapply(subset(sum.patient.data, Status == 'P')$Patient, plot.pca)
 #npplots = lapply(subset(sum.patient.data, Status == 'NP')$Patient, plot.pca)
 ```
 
-```{r echo=F, message=F, warning=F, pcaplots, fig.align='left', fig.height=30, fig.width=20}
+```{r echo=F, message=F, warning=F, pcaplots, fig.align='left', fig.height=30, fig.width=20, eval=F}
 grid.arrange(grobs=pplots, nrow=length(subset(sum.patient.data, Status == 'P')$Patient), top="Progressors")
 #grid.arrange(grobs=npplots, nrow=length(subset(sum.patient.data, Status == 'NP')$Patient), top="Non-Progressors")
 ```

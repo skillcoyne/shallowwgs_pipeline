@@ -34,18 +34,14 @@ if (length(list.files(plot.dir)) <= 0)
   stop(paste("No analysis files found in", plot.dir ))
 
 ## Patient info file
-patient.file = grep('/All_patient_info.xls', data.files, value=T)
+patient.file = grep('/All_patient_info.txt', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
 
 dataset = 'Training'
 #dataset = 'Test'
 patient.info = read.patient.info(patient.file, set=dataset)
-patient.info$Patient = gsub("/", "_", patient.info$Patient)
 head(patient.info)
-
-bad_batch = which(patient.info$Batch.Name %in% c('Batch_8', 'Batch_9'))
-patient.info = patient.info[-(bad_batch),]
 
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
@@ -71,87 +67,98 @@ sd.threshold = 0.08  # cov by numbers of probes
 gain.threshold = 1.1
 loss.threshold = 0.9
 
-lowprobes = c()
 
-patient.data = list()
 
-for (patient.name in sum.patient.data$Patient  )  {
-  message(patient.name)
-  patient.plot.dir = paste(plot.dir, patient.name, sep='/')
 
-  if(!file.exists(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""))) next
+cachefile = paste(dataset, '_patients.Rdata', sep='')
+if ( file.exists(cachefile) ) {
+  load(cachefile, verbose=T)
+} else {
+  patient.data = list(); lowprobes = c()
   
-  segvals = read.table(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
-
-  missing = c(setdiff(colnames(segvals)[-(1:5)], subset(patient.info, Patient == patient.name)$Samplename),
-                    setdiff(subset(patient.info, Patient == patient.name)$Samplename, colnames(segvals)[-(1:5)]))
+  for (patient.name in sum.patient.data$Patient  )  {
+    message(patient.name)
+    patient.plot.dir = paste(plot.dir, patient.name, sep='/')
   
-  if (length(missing) > 0) {
-    warning(paste("Missing", length(missing), "sample(s) in patient", patient.name))
-    next
-  }
-
-  probes = length(which(segvals$n.probes < min.probes))
-  message( paste(probes, ' probes (', round(probes/nrow(segvals))*100, '%)',' below the minimum probe count (',min.probes,')', sep=''))
-  if (probes/nrow(segvals) >= 0.75) lowprobes = c(lowprobes, patient.name)
-  
-  segvals = segvals[segvals$n.probes >= min.probes,]
-  dim(segvals)
-
-  # ORDER segvals by endoscopy year etc
-  cur.pt = subset(patient.info, Patient == patient.name)
-  segvals = segvals[, c(colnames(segvals[1:5]), intersect(colnames(segvals), cur.pt$Samplename))]
+    if (!file.exists(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""))) {
+      warning(paste("Missing segmented file for", patient.name))
+      next
+    }
     
-  if (nrow(segvals) < 100) {
-    warning(paste(patient.name, 'has fewer than 100 genomic reginos with segmented values:', nrow(segvals)))
-    next
-  }
+    segvals = read.table(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
+    dim(segvals)
   
-  patient.data[[patient.name]][['seg.vals']] = segvals
-  patient.data[[patient.name]][['info']] = cur.pt
-
-  sample.cols = grep('^D\\d+_D\\d+', colnames(segvals))
-  if (nrow(segvals) > 0) {
-      HC = hclust(dist(t(segvals[,sample.cols])))
-      gg1 = ggdendrogram(HC, rotate=T) + labs(title = paste(patient.name,": fitted segment coverage"),x="")
-      #print(gg1)
-
+    missing = c(setdiff(colnames(segvals)[-(1:5)], subset(patient.info, Patient == patient.name)$Samplename),
+                      setdiff(subset(patient.info, Patient == patient.name)$Samplename, colnames(segvals)[-(1:5)]))
+    
+    if (length(missing) > 0) {
+      warning(paste("Missing", length(missing), "sample(s) of", length(subset(patient.info, Patient == patient.name)$Samplename), "in patient", patient.name))
+      #next
+    }
+  
+    probes = length(which(segvals$n.probes < min.probes))
+    message( paste(probes, ' probes (', round(probes/nrow(segvals),2)*100, '%)',' below the minimum probe count (',min.probes,')', sep=''))
+    if (probes/nrow(segvals) >= 0.75) lowprobes = c(lowprobes, patient.name)
+    
+    segvals = segvals[segvals$n.probes >= min.probes,]
+    dim(segvals)
+  
+    # ORDER segvals by endoscopy year etc
+    cur.pt = subset(patient.info, Patient == patient.name)
+    segvals = segvals[, c(colnames(segvals[1:5]), intersect(colnames(segvals), cur.pt$Samplename))]
+      
+    if (nrow(segvals) < 100) {
+      warning(paste(patient.name, 'has fewer than 100 genomic regions with segmented values:', nrow(segvals)))
+      #next
+    }
+    
+    patient.data[[patient.name]][['seg.vals']] = segvals
+    patient.data[[patient.name]][['info']] = cur.pt
+  
+    sample.cols = grep('^D\\d+_D\\d+', colnames(segvals))
+  
+    if (length(sample.cols) > 0) {
+      if (length(sample.cols) > 2) {  
+        HC = hclust(dist(t(segvals[,sample.cols])))
+        gg1 = ggdendrogram(HC, rotate=T) + labs(title = paste(patient.name,": fitted segment coverage"),x="")
+        #print(gg1)
+      }
+  
       # Normalize  (value-mean(value))/sd(value)
       normalised.segvals = segvals[,sample.cols]
-      for(c in 1:nrow(normalised.segvals)) 
-        normalised.segvals[c,] = (normalised.segvals[c,]-mean(unlist(normalised.segvals[c,])))/sd(unlist(normalised.segvals[c,]))
-      
-      patient.data[[patient.name]][['norm.seg.vals']] = normalised.segvals
-      
-      # Variable Regions
-      sds = apply(segvals[,sample.cols],1,sd)
-      means = apply(segvals[,sample.cols],1,mean)
-      CofV = sds/means
+      if (length(sample.cols) > 1) {  
+        for(c in 1:nrow(normalised.segvals)) 
+          normalised.segvals[c,] = (normalised.segvals[c,]-mean(unlist(normalised.segvals[c,])))/sd(unlist(normalised.segvals[c,]))
+        patient.data[[patient.name]][['norm.seg.vals']] = normalised.segvals
+        
+        HC = hclust(dist(t(normalised.segvals)))
+        gg2 = ggdendrogram(HC, rotate=T) + labs(title=paste(patient.name,": normalised fitted segment coverage", x=""))
+        #print(gg2)
   
-      variable.region.indices = which(sds >= sd.threshold & segvals$n.probes >= min.probes)
-      variable.regions = segvals[variable.region.indices, intersect(patient.data[[patient.name]]$info$Samplename, colnames(segvals))] 
-      patient.data[[patient.name]][['variable.regions']] = cbind(segvals[variable.region.indices,c(1:5)],variable.regions )
-      
-      HC = hclust(dist(t(normalised.segvals)))
-      gg2 = ggdendrogram(HC, rotate=T) + labs(title=paste(patient.name,": normalised fitted segment coverage", x=""))
-      #print(gg2)
-
-      no.samples = ncol(normalised.segvals)
-      no.rows = ceiling(no.samples/3)
-
-      gg3 = ggplot( melt(normalised.segvals), aes(x=value) ) + 
-        facet_wrap(~variable,scales = "free_x") + 
-        geom_histogram( fill=I("blue"),col=I("lightblue"),binwidth=0.3) + labs(title=paste(patient.name,'normalised segment coverage'), x='', y='')
-
-      #if(nrow(segvals)>=3) {
-        # order by date of endoscopy
-        patient = subset(patient.info, Patient == patient.name)
-        patient = arrange(patient, Endoscopy.Year, Pathology, Samplename)
-       # }
-        sample.normalised.segvals = normalised.segvals[, intersect(colnames(normalised.segvals), patient$Samplename)]
+        no.samples = ncol(normalised.segvals)
+        no.rows = ceiling(no.samples/3)
+  
+        gg3 = ggplot( melt(normalised.segvals), aes(x=value) ) + 
+          facet_wrap(~variable,scales = "free_x") + 
+          geom_histogram( fill=I("blue"),col=I("lightblue"),binwidth=0.3) + labs(title=paste(patient.name,'normalised segment coverage'), x='', y='')
       }
+        
+      # Variable Regions can only be called relative to each sample so if there's only one sample we can't make a call
+      if (length(sample.cols) > 1) {
+        sds = apply(segvals[,sample.cols],1,sd)
+        means = apply(segvals[,sample.cols],1,mean)
+        CofV = sds/means
+      
+        variable.region.indices = which(sds >= sd.threshold & segvals$n.probes >= min.probes)
+        variable.regions = segvals[variable.region.indices, intersect(patient.data[[patient.name]]$info$Samplename, colnames(segvals))] 
+        patient.data[[patient.name]][['variable.regions']] = cbind(segvals[variable.region.indices,c(1:5)],variable.regions )
+      }
+      
+      patient = arrange(subset(patient.info, Patient == patient.name),  Endoscopy.Year, Pathology, Samplename)
+    }
+  }
+save(patient.data, file=paste(dataset, '_patients.Rdata', sep=''))
 }
-
 print(paste("Missing patients:", paste(setdiff(sum.patient.data$Patient, names(patient.data)), collapse=', ')))
 
 sum.patient.data = subset(sum.patient.data, Patient %in% names(patient.data))
@@ -173,7 +180,7 @@ for (n in msgs) {
     print(n)
 }
 
-save(patient.data, file=paste(dataset, '_patients.Rdata', sep=''))
+
 
 
 example.pt = subset(sum.patient.data, Status == 'P' & total.samples > 2)$Patient[5]
@@ -235,8 +242,6 @@ ggplot(sum.patient.data) + geom_boxplot( aes(y=median.seg.len, x=Status, group=S
 
 There's no significant difference between the length of segments in progressors vs non.  There's a larger spread of lengths in progressors, but the means are nearly identical.
 
-
-
 ```{r echo=F, message=F, warning=F, fig.height=15, fig.width=10, eval=F}
 # Segmented Value Distributions
 lapply(patient.data, function(pt) {
@@ -287,17 +292,17 @@ wilcox.test(n.var.regions[prog.pt], n.var.regions[np.pt])
 
 sum.patient.data$Num.Var.Regions = as.vector(sapply(var.seg.lengths[sum.patient.data$Patient], nrow))
 
-chrs = read.table('hg19_chrom.txt',sep='\t', header=T)
+chr.info = read.table('hg19_chrom.txt',sep='\t', header=T)
 
 # Segment lengths, variable regions
-var.seg.lengths = lapply(var.seg.lengths, function(x) merge(x, chrs, by.x='chr', by.y='chr') )
+var.seg.lengths = lapply(var.seg.lengths, function(x) merge(x, chr.info, by.x='chr', by.y='chr') )
 
 # All segments
-segment.lengths = lapply(segment.lengths, function(x) merge(x, chrs, by.x='chr', by.y='chr') )
+segment.lengths = lapply(segment.lengths, function(x) merge(x, chr.info, by.x='chr', by.y='chr') )
 
 # Genome coverage
 genome.coverage = sapply(segment.lengths, function(x) {
-  sum(as.numeric(x[['seg.len']]))/sum(as.numeric(chrs$length))
+  sum(as.numeric(x[['seg.len']]))/sum(as.numeric(chr.info$length))
 })
 
 # No difference in coverage
@@ -314,12 +319,10 @@ chr.ratio.tt = t.test(unlist(chr.ratios[prog.pt]), unlist(chr.ratios[np.pt]))
 ggplot(melted, aes(Status, value, fill=Status)) + geom_boxplot() + 
   labs(title=paste("Variable region length, p-value", ifelse(chr.ratio.tt$p.value < 0.001, "<0.001", signif(chr.ratio.tt$p.value,2))),y='Segment Length/Chr length')
 
-var.seg.lengths = lapply(var.seg.lengths, function(df) {
-  as.data.frame(df %>%
-  group_by(chr, length) %>%
-  summarise(seg.lengths = sum(seg.len), 
-            chr.ratio = sum(seg.len)/length[1]))
+var.seg.lengths =  lapply(var.seg.lengths, function(df) {
+   ddply(df, .(chr, length), summarise, seg.lengths = sum(seg.len), chr.ratio = sum(seg.len)/length[1])
 })
+
 
 # Genome coverage of the variable regions
 pcov = median(sapply(var.seg.lengths[prog.pt], function(x) 
@@ -441,7 +444,7 @@ cancer.consensus.genes<-function(reg, ccgenes) {
 rm(var.regions)
 for (patient.name in names(patient.data)) {
   regions = patient.data[[patient.name]]$variable.regions[,c('chrom','arm','start.pos','end.pos')]
-  if (nrow(regions) <= 0) next
+  if (is.null(regions) || nrow(regions) <= 0) next
 
   reg = cancer.consensus.genes(regions, ccgenes)
   x = patient.data[[patient.name]]$variable.regions[which(!is.na(reg$Gene.Symbols)), intersect(patient.data[[patient.name]]$info$Samplename, colnames(patient.data[[patient.name]]$variable.regions))  ]
@@ -477,9 +480,7 @@ var.regions$patient.name = as.character(var.regions$patient.name)
 
 var.regions = var.regions[-grep('CDKN2A\\(p14\\)', var.regions$Gene.Symbols),]
 
-gene.cnt = var.regions %>%
-  group_by(Gene.Symbols, CN) %>%
-  summarise(Progressors=length(which(status == 'P')), Non.Progressors=length(which(status == 'NP')) )
+gene.cnt = ddply(var.regions, .(Gene.Symbols, CN), summarise, Progressors=length(which(status == 'P')), Non.Progressors=length(which(status == 'NP')))
 gene.cnt[,unique(var.regions$patient.name)] = 0
 gene.cnt = gene.cnt[which(!is.na(gene.cnt$Gene.Symbols)),]
 
@@ -499,22 +500,22 @@ gene.cnt = subset(gene.cnt, gene.cnt$Gene.Symbols != 'RAD51B')
 gene.p = gene.cnt
 
 m = melt(gene.p[,c(1:4)], id.vars=c('Gene.Symbols', 'CN'))
-m$Gene.Symbols = factor(m$Gene.Symbols, levels= m$Gene.Symbols[c(nrow(m):1)] ) # order
+m$Gene.Symbols = factor(m$Gene.Symbols, levels=unique(m$Gene.Symbols[c(nrow(m):1)]) ) # order
 m$CN = factor(m$CN)
 
 ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
   geom_tile(aes(fill=value), color='white') + 
-  scale_fill_gradient('n patients',low='white',high='red') + labs(x="",y='CGC Genes')
-# + geom_point(data=m[m$CN == 'gain' & m$value > 0,], aes(y=Gene.Symbols, x=variable), size=2, shape=24, fill='red', color='red') +
-#  geom_point(data=m[m$CN == 'loss' & m$value > 0,], aes(y=Gene.Symbols, x=variable), color='green4', size=2, shape=25, fill='green4')
+  scale_fill_gradient('n patients',low='white',high='red') + labs(x="",y='CGC Genes') +
+  geom_point(data=m[m$CN == 'gain' & m$value > 0,], aes(y=Gene.Symbols, x=variable), size=2, shape=24, fill='red', color='red') +
+  geom_point(data=m[m$CN == 'loss' & m$value > 0,], aes(y=Gene.Symbols, x=variable), color='green4', size=2, shape=25, fill='green4')
 
 
-gc = gene.cnt %>% group_by(Gene.Symbols) %>% summarise(Progressors=sum(Progressors), Non.Progressors=sum(Non.Progressors))
+gc = ddply(gene.cnt, .(Gene.Symbols), summarise, Progressors=sum(Progressors), Non.Progressors=sum(Non.Progressors))
 gc = arrange(subset(gc, Progressors >= Non.Progressors), -Progressors)
 gc = gc[1:60,]
 m = melt(gc, id.vars=c('Gene.Symbols'))
 #m$value = as.factor(m$value)
-m$Gene.Symbols = factor(m$Gene.Symbols, levels= m$Gene.Symbols[c(nrow(m):1)] ) # order
+m$Gene.Symbols = factor(m$Gene.Symbols, levels=unique(m$Gene.Symbols[c(nrow(m):1)]) ) # order
 ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
   geom_tile(aes(fill=value), color='white') + 
   scale_fill_gradient('n patients',low='white',high='red') + labs(x="",y='CGC Genes') + ggtitle("Top 50 genes only")
@@ -530,6 +531,9 @@ It's possible that the variable regions we find are entirely within the HGD/IMC 
 
 pvnp = data.frame(matrix(nrow=length(subset(sum.patient.data, Status == 'P')$Patient), ncol=2, dimnames=list(subset(sum.patient.data, Status == 'P')$Patient, c('hgd','be'))))    
 for (name in subset(sum.patient.data, Status == 'P')$Patient) {
+  var.regions = patient.data[[name]]$variable.regions
+  if ( is.null(var.regions) || nrow(var.regions) == 0 ) next
+  
   sn = which(colnames(patient.data[[name]]$variable.regions)[-(1:5)] %in% subset(patient.data[[name]]$info, grepl('HGD|IMC', Pathology))$Samplename)
   if (length(sn) <= 0 | nrow(patient.data[[name]]$variable.regions) <= 0) next
   
@@ -556,11 +560,15 @@ pander(pvnp, justify='left',
 
 ```
 
-This is just looking at the distribution of values per sample. The average ploidy per sample is around 1.  Currently we're calling variable regions based on this.
-```{r, warning=F}
+
+```{r, warning=F, eval=F}
+#This is just looking at the distribution of values per sample. The average ploidy per sample is around 1.  Currently we're calling variable regions based on this.
 ks = list()
 for (pt in names(patient.data)) {
-  cols = intersect(arrange(patient.data[[pt]]$info, Pathology, Endoscopy.Year)$Samplename, colnames(patient.data[[pt]]$seg.vals[,-(1:5)]))
+  print(pt)
+  cols = intersect(arrange(patient.data[[pt]]$info, Pathology, Endoscopy.Year)$Samplename, grep('^D\\d+', colnames(patient.data[[pt]]$seg.vals), value=T))
+  if (length(cols) <= 1) next
+  
   segvals = patient.data[[pt]]$seg.vals[,cols]
   
   sdx = round(apply(segvals, 2, sd), 3)

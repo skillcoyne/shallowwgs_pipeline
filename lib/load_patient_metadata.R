@@ -4,18 +4,17 @@ suppressPackageStartupMessages( library(dplyr) )
 strip.whitespace <- function (x) gsub("\\s+|\\s+", "", x)
 
 summarise.patient.info<-function(df) {
-  sum.pt = (df %>% 
-              group_by(Patient, Status, Set) %>%
-              summarise(
-                start.year=range(Endoscopy.Year)[1],
-                end.year=range(Endoscopy.Year)[2],
-                total.samples=length(Samplename), 
-                total.endos=length(unique(Path.ID)),
-                highest.path=sort(Pathology, decreasing=T)[1],
-                first.batch=sort(Batch.Name)[1],
-                med.cellularity=median(Barretts.Cellularity,na.rm=T),
-                Initial.Analysis=(sort(Batch.Name)[1] %in% levels(patient.info$Batch.Name)[1:5])
-              ))
+  require(plyr)
+  
+  sum.pt = ddply(df, .(Patient, Status, Set), summarise, 
+        start.year=range(Endoscopy.Year)[1], 
+        end.year=range(Endoscopy.Year)[2],
+        total.samples=length(Samplename), 
+        total.endos=length(unique(Path.ID)),
+        highest.path=sort(Pathology, decreasing=T)[1],
+        first.batch=sort(Batch.Name)[1],
+        med.cellularity=median(Barretts.Cellularity,na.rm=T),
+        Initial.Analysis=(sort(Batch.Name)[1] %in% levels(patient.info$Batch.Name)[1:5]))
   return(arrange(sum.pt, Status, total.samples, highest.path))
 }
 
