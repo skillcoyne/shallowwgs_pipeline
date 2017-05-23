@@ -1,7 +1,7 @@
 ---
 title: "Scoring Patients"
 author: "Sarah Killcoyne"
-date: "15 November 2016"
+date: "23 May 2017"
 output:
   html_document: 
     toc: yes
@@ -13,10 +13,9 @@ output:
 library(ggplot2)
 library(GGally)
 library(plyr)
-#library(xlsx)
+library(RColorBrewer)
 library(dplyr)
 library(pander)
-#library(Hmisc)
 library(ggdendro)
 library(reshape2)
 library(GenomicRanges)
@@ -408,7 +407,7 @@ diffPNP = wilcox.test(unlist(lapply(cors[subset(sum.patient.data, Status == 'P')
 
 ## How do Cancer Gene Consensus genes map to the variable regions?
 
-```{r, hmm, echo=F, message=F, warning=F, fig.height=40, fig.width=10}
+```{r, hmm, echo=F, message=F, warning=F, fig.height=100, fig.width=10}
 ccgenes = read.table('~/Data/CosmicCensusGenes.tsv', sep='\t', header=T, stringsAsFactors=F)
 
 noLoc = grep(':-',ccgenes$Genome.Location)
@@ -499,27 +498,46 @@ gene.cnt = subset(gene.cnt, gene.cnt$Gene.Symbols != 'RAD51B')
 #gene.p = subset(gene.cnt, Progressors >= Non.Progressors)
 gene.p = gene.cnt
 
-m = melt(gene.p[,c(1:4)], id.vars=c('Gene.Symbols', 'CN'))
-m$Gene.Symbols = factor(m$Gene.Symbols, levels=unique(m$Gene.Symbols[c(nrow(m):1)]) ) # order
+
+gene.p = gene.p[,(1:4)]
+m = melt(gene.p, id.vars=c('Gene.Symbols', 'CN'))
+m = transform(m, Gene.Symbols = reorder(Gene.Symbols, value))
+
+#m$Gene.Symbols = factor(m$Gene.Symbols, levels=unique(m$Gene.Symbols[c(nrow(m):1)]) ) # order
 m$CN = factor(m$CN)
 
+m$brks <- cut(m$value, include.lowest=T, right=F,
+                   breaks=c(0, 1, 3, 5, 8, 10),
+                   labels=c('0','1-3', '4-5', '6-8','9-10'))
+m = transform(m, Gene.Symbols = reorder(Gene.Symbols, value))
+
+myP = c('white',brewer.pal(n = length(levels(m$brks)), name = "Reds"))
+
+
 ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
-  geom_tile(aes(fill=value), color='white') + 
-  scale_fill_gradient('n patients',low='white',high='red') + labs(x="",y='CGC Genes') +
-  geom_point(data=m[m$CN == 'gain' & m$value > 0,], aes(y=Gene.Symbols, x=variable), size=2, shape=24, fill='red', color='red') +
-  geom_point(data=m[m$CN == 'loss' & m$value > 0,], aes(y=Gene.Symbols, x=variable), color='green4', size=2, shape=25, fill='green4')
+  geom_tile(aes(fill=brks), color='white') + scale_fill_manual( values = myP, "Patient Counts") +
+  geom_point(data=subset(m, value > 0), aes(y=Gene.Symbols, x=variable, shape=CN, color=CN), size=3 ) +
+  scale_color_manual("CN", values=c("blue", "yellow")) + scale_shape_manual(values=c(17,20)) +
+  labs(title="All available COSMIC genes mapped", x='', y='')
 
+```
 
-gc = ddply(gene.cnt, .(Gene.Symbols), summarise, Progressors=sum(Progressors), Non.Progressors=sum(Non.Progressors))
-gc = arrange(subset(gc, Progressors >= Non.Progressors), -Progressors)
-gc = gc[1:60,]
-m = melt(gc, id.vars=c('Gene.Symbols'))
-#m$value = as.factor(m$value)
-m$Gene.Symbols = factor(m$Gene.Symbols, levels=unique(m$Gene.Symbols[c(nrow(m):1)]) ) # order
+Just the top 50 genes by the number of patients that share variants in these regions.
+
+```{r echo=F, warning=F, message=F, fig.height=12, fig.width=8}
+
+m = melt(gene.p[1:50,], id.vars=c('Gene.Symbols', 'CN'))
+m = transform(m, Gene.Symbols = reorder(Gene.Symbols, value))
+
+m$brks <- cut(m$value, include.lowest=T, right=F,
+                   breaks=c(0, 1, 3, 5, 8, 10),
+                   labels=c('0','1-3', '4-5', '6-8','9-10'))
+
 ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
-  geom_tile(aes(fill=value), color='white') + 
-  scale_fill_gradient('n patients',low='white',high='red') + labs(x="",y='CGC Genes') + ggtitle("Top 50 genes only")
-
+  geom_tile(aes(fill=brks), color='white') + scale_fill_manual( values = myP, "Patient Counts") +
+  geom_point(data=subset(m, value > 0), aes(y=Gene.Symbols, x=variable, shape=CN, color=CN), size=3 ) +
+  scale_color_manual("CN", values=c("blue", "yellow")) + scale_shape_manual(values=c(17,20)) +
+  labs(title="Top 50 genes by number of patients", x='', y='')
 ```
 
 
