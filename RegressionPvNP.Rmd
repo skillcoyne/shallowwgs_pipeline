@@ -70,8 +70,6 @@ pander(sum.patient.data[,c('Patient', 'Status', 'start.year', 'end.year','total.
 ```
 
 
-
-
 The previous analysis employed AP clustering on a per-patient basis to look for evidence that it was possible to see differences between the progressors and non-progressors, and to quantify that in some sort of complexity measure.  It was able to separate them, and continued to do so after removing HGD samples, but quickly failed to model any difference as I removed timepoints from the patient.  
 
 As suggested by Moritz it is possible to merge all of the patient samples and use GLMs to model the differences, and to select regions that may be most reflective of the differences. In this report that's what I've done, and it worked very well.  However, I'm a bit suspicious that it's worked too well.  I'm looking for biases in the data, or mistakes I might have made in setting up the model.
@@ -82,13 +80,15 @@ To use GLMs across the patients I merge all samples from all patients and overla
 
 
 ```{r tile, echo=F, message=F, warning=F, include=F}
-#tile.w=1e07
-tile.w=5e06
-tile.files = grep('tile_.*5e\\+06', analysis.files, value=T)
+tile.w=1e07
+#tile.w=5e06
+tile.files = grep('tile_.*1e\\+07', analysis.files, value=T)
+#tile.files = grep('tile_.*5e\\+06', analysis.files, value=T)
 load(tile.files[1], verbose=T)
 dim(mergedDf)
 
-cache.dir = paste(data, 'Analysis/5e06', sep='/')
+#cache.dir = paste(data, 'Analysis/5e06', sep='/')
+cache.dir = paste(data, 'Analysis/1e07', sep='/')
 if (!dir.exists(cache.dir)) dir.create(cache.dir)
 
 #validatioMergedDf = tile.sample.segments(paste(as.character(tile.w),'validation_tiledpts.Rdata', sep=''), validation.patient.data)
@@ -129,8 +129,6 @@ We have `r table(labels)[1]` samples from non-progressors and `r table(labels)[2
 
 Example subset of the data matrix:
 `r pander(dysplasia.df[1:5, 1:5], caption=paste("dimensions:", paste(dim(dysplasia.df), collapse=', ')), justify='left')`
-
-
 
 ```{r cvglmnetPNP, echo=F, warning=F, message=F, eval=F}
 ## cv.glmnet Ridge vs Lasso
@@ -357,6 +355,8 @@ plot.patient.cv<-function(df, fit=NULL) {
 
 
 ```{r xvalpt, message=F, warning=F, echo=T, fig.height=16, fig.width=16}
+nl = 3000
+
 coefs = list(); plots = list(); performance.at.1se = list()
 folds = 10; splits = 5
 alpha.values = c(0,0.5,0.7,0.8,0.9,1)
@@ -366,7 +366,7 @@ if (file.exists(file)) {
   load(file, verbose=T)
 } else {
   for (a in alpha.values) {
-    fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=1000, family='binomial') # all patients
+    fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial') # all patients
     #autoplot(fit0, xvar='lambda', main=paste('fit0, all samples, alpha=',a,sep='')) + theme(legend.position='none') 
     
     cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=fit0$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fit0)
@@ -388,19 +388,17 @@ do.call(grid.arrange, c(plots, top='All samples, 10fold, 5 splits'))
 
 
 ```{r xvalpt2, message=F, warning=F, echo=T}
-
 performance.at.1se = do.call(rbind, performance.at.1se)
 performance.at.1se$alpha = rownames(performance.at.1se)
 
 performance.at.1se = cbind(performance.at.1se, do.call(rbind, lapply(coefs, function(x) cbind('n.Coef'=nrow(x), '75%'=length(which(rowSums(x)/50 >= 0.75))))))
 
-ggplot(performance.at.1se, aes(alpha, mean)) + geom_point() + geom_text( aes(label=round(mean, 3)), hjust=-0.5) +
-  geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme)) + ylim(0.5,0.8) +
+ggplot(performance.at.1se, aes(alpha, mean)) + geom_text( aes(label=round(mean, 3)), hjust=-0.5) +
+  geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme), color='grey') + geom_point() + ylim(0.5,0.8) +
   geom_text(aes(label=n.Coef), nudge_y=0.03) +
   geom_text(aes(label=paste('(',`75%`,')',sep='')), nudge_y=0.02) +
   labs(x='Elasticnet penalty value', y='Model performance at lambda.1se', 
        title=paste('All samples,', folds, 'folds,', splits, 'patient splits'))
-
 
 ## check how often the feature(s) is selected at that lamda in each split. "stability selection"
 coef.stable = lapply( coefs[c('0.8','0.9','1')], function(cf) {
@@ -435,9 +433,24 @@ Values that are closer to full lasso (alpha=1) are pretty similar, however at fu
 
 `r length(unique(unlist(lapply(coef.stable, function(cf)  names(which(cf > 0.8)) ))))` features are shared at all values of alpha and were non-zero in at least 80% of the folds.
 
+### Features in samples
+
+```{r echo=F, warning=F, message=F}
+
+length(which( coef.stable[['1']] >= 0.5) )
+
+regions = rownames(coefs[['1']])
+
+dysplasia.df[ labels == 1 ,regions]
+
+dysplasia.df[ labels == 0 ,regions]
+
+```
+
+
 ### Feature Information 
 
-```{r, warning=F, message=F}
+```{r, warning=F, message=F, eval=F}
 #topF = do.call(rbind, strsplit( names(which((coef.stable[['1']]) >= 0.75)), ':|-'))
 #colnames(topF) = c('chr','start','end')
 #topF = apply(topF, 2, as.numeric)
@@ -487,7 +500,7 @@ if (file.exists(file)) {
   samples = intersect(rownames(dysplasia.df), subset(info, Pathology %nin% c('HGD', 'IMC'))$Samplename)
   for (a in alpha.values) {
     # all patients
-    fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=1000) 
+    fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl) 
     
     cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoHGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD)
     
@@ -565,7 +578,7 @@ if (file.exists(file)) {
   samples = intersect(rownames(dysplasia.df), subset(info, Pathology %nin% c('HGD', 'IMC', 'LGD'))$Samplename)
   
   for (a in alpha.values) {
-    fitNoLGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=1000) # all patients
+    fitNoLGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl) # all patients
     
     cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoLGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD)
     
@@ -583,7 +596,9 @@ do.call(grid.arrange, c(nolgd.plots, top="No HGD/IMC/LGD samples", ncol=2))
 ```
 
 ```{r noLGD2, echo=T, message=F, warning=F}
-performance.at.1se = do.call(rbind, performance.at.1se)
+if (class(performance.at.1se) == 'list')
+  performance.at.1se = do.call(rbind, performance.at.1se)
+
 performance.at.1se$alpha = rownames(performance.at.1se)
 
 performance.at.1se = cbind(performance.at.1se, do.call(rbind, lapply(coefs, function(x) cbind('n.Coef'=nrow(x), '75%'=length(which(rowSums(x)/50 >= 0.75))))))
@@ -640,7 +655,7 @@ if (file.exists(file)) {
   
   few.plots = list()
   for (a in alpha.values) {
-    fitF <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=500, family='binomial') # all patients
+    fitF <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=nl, family='binomial') # all patients
     cv.back.few = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitF$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fitF, minR=0.1)
     #few.plots[[as.character(a)]] = cv.back.few$plot + ggtitle(paste('alpha=',a,sep=''))
     
@@ -660,7 +675,7 @@ if (file.exists(file)) {
   
   many.plots = list()
   for (a in alpha.values) {
-    fitM <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=500, family='binomial') # all patients
+    fitM <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=nl, family='binomial') # all patients
     
     cv.back.many = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitM$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fitM)
     
@@ -677,12 +692,11 @@ do.call(grid.arrange, c(many.plots, ncol=2, top=paste(nrow(subset(sum.patient.da
 
 Leave out each patient (both P and NP) and run a new CV fit each time then predict the samples for the patient that was left out.  Fitted model includes HGD samples.
 
-```{r leaveoneout, echo=T, message=F, warning=T}
+```{r leaveoneout, echo=T, message=F, warning=F}
 
 info = do.call(rbind, lapply(patient.data, function(df) df$info))
 pg.samp = lapply(patient.data, function(pt) {
   info = pt$info
-  print(unique(info$Patient))
   info$SampleSD = NA
   info$SampleMEAN = NA
   if (length(info$Samplename) > 1) {
@@ -719,7 +733,7 @@ if (file.exists(file)) {
     
     # Fit generated on all samples, including HGD
     a = 1
-    fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=1000) # all patients
+    fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl) # all patients
     cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=fitLOO$lambda, 
                                   pts=subset(pts, Samplename %in% samples), a=a, nfolds=10, splits=5, fit=fitLOO)
     #plots[[pt]] = cv$plot + ggtitle(pt)
@@ -825,30 +839,24 @@ all.predictions$Status = ifelse (rownames(all.predictions) %in% subset(sum.patie
 #ggplot(melt(all.predictions, id.vars='Status'), aes(y=value, x=Status, fill=variable)) +
 #  geom_bar(stat='identity', position='dodge') + labs(x='', y='Sample Counts', main='Total Sample Predictions')
 
+all.predictions$pred.ratio = with(all.predictions, correctly.predicted/total.samples)
+all.predictions$Patient = rownames(all.predictions)
+all.predictions = transform(all.predictions, Patient=reorder(Patient, pred.ratio) ) 
 
-adj.pred = as.data.frame(all.predictions %>% rowwise() %>% summarise( 
-  'pred'=round(correctly.predicted/(sum(correctly.predicted, total.samples )),2),
-  'total'=round(total.samples/(sum(correctly.predicted, total.samples )),2),
-  'Status'=Status))
-adj.pred$Patient = rownames(all.predictions)                              
+m = melt(all.predictions, id.vars=c('Patient','Status'), measure.vars=c('pred.ratio'))
 
-
-adj.pred = transform(adj.pred, Patient=reorder(Patient, -total) ) 
-
-m = melt(adj.pred, id.vars=c('Status', 'Patient'))
-m = arrange(m, Status, variable, -value)
-m$Status = as.factor(m$Status)
 
 grid.arrange(
-  ggplot(subset(m, Status == 'P') , aes(x=Patient, y=value, fill=variable)) + geom_bar(stat = 'identity') +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + coord_flip() + labs(title='Progressors',x='', y='ratio'),
-  ggplot(subset(m, Status == 'NP') , aes(x=Patient, y=value, fill=variable)) + geom_bar(stat = 'identity') +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + coord_flip() + labs(title='Non-Progressors',x='', y='ratio')
-)
+  ggplot() + geom_bar(data=subset(m, Status == 'P'), aes(Patient, value), fill='darkblue', color='grey', stat='identity') +  
+    theme(legend.position='none', axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip() +
+    labs(title='Progressors', x='', y='Ratio predicted samples'),
+  ggplot() + geom_bar(data=subset(m, Status == 'NP'), aes(Patient, value), fill='darkgreen', color='grey', stat='identity') + 
+    theme(legend.position='none', axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip() +
+    labs(title='Non Progressors', x='', y='Ratio predicted samples'),
+  ncol=2)
 
-
-pg = subset(adj.pred, Status == 'P')
-np = subset(adj.pred, Status == 'NP')
+pg = subset(all.predictions, Status == 'P')
+np = subset(all.predictions, Status == 'NP')
 
 ```
 
@@ -856,22 +864,13 @@ np = subset(adj.pred, Status == 'NP')
 
 In progressors, `r round(sum(hgd$correctly.predicted)/sum(hgd$total.hgd.samples), 2)*100`% of the HGD samples were correctly predicted.
 
-When predicting each sample individually `r round(nrow(subset(pg, pred == 0.5))/nrow(pg), 2)*100`% patients were correctly predicted in all samples. `r round(nrow(subset(pg, pred < 0.5 & pred > 0))/nrow(pg),2)*100`% of patients were correctly predicted in some samples
+When predicting each sample individually `r round(nrow(subset(pg, pred.ratio == 1))/nrow(pg))*100`% patients were correctly predicted in all samples. `r round(nrow(subset(pg, pred.ratio < 1 & pred.ratio > 0))/nrow(pg),2)*100`% of patients were correctly predicted in some samples
 
-`r nrow(subset(pg, pred == 0))` patients had no correctly predicted samples, however, both had only two samples:
-```{r, echo=F, warning=F, message=F}
-x = do.call(rbind, lapply(pg.samp[subset(pg, pred == 0)$Patient], function(df) df[,c('Status','Patient','Path.ID','Endoscopy.Year', 'Pathology')] ))
-row.names(x) = NULL
-pander(x)
-```
-
+`r nrow(subset(pg, pred.ratio == 0))` patients had no correctly predicted samples.
 
 ### Non-Progressors
 
-In non-progressors `rnrow(subset(np, pred == 0.5))` patients were predicted to be non-progressors in _all_ of their samples, ranging from `r paste(range(all.predictions[subset(np, pred == 0.5)$Patient, 'total.samples']), collapse='-')`. `r nrow(subset(np, pred >= 0.3))` patients were predicted correctly in 70% or more of their samples. Only `r nrow(subset(np, pred < 0.3))` patients had fewer than 70% of their samples predicted correctly, and both of these have consistently been predicting _progression_ across multiple endoscopies.
-
-`r pander(all.predictions[subset(np, pred < 0.3)$Patient,], caption='Non-progressors that have consistently predicted progression')`
-
+In non-progressors `r round(nrow(subset(np, pred.ratio == 1))/nrow(np), 2)*100`% of patients were predicted to be non-progressors in _all_ of their samples. `r nrow(subset(np, pred.ratio >= 0.7))` patients were predicted correctly in 70% or more of their samples. Only `r nrow(subset(np, pred.ratio < 0.7 & pred.ratio > 0))` patients had fewer than 70% of their samples predicted correctly, and both of these have consistently been predicting _progression_ across multiple endoscopies.
 
 
 ```{r timepoints2, echo=T, message=F, warning=F}
@@ -958,24 +957,24 @@ ggplot(p.predictions, aes(y=`%.Predicted`,x=factor(n.Endoscopies))) +
 ```
 
 
-## What clinicicians really want 
+## Backwards from HGD
 
-Backwards from the final sample.
+Clinicians always ask to see the timepoints peeled backwards to see how early prediction is possible.
 
 ```{r, warning=F, message=F, echo=F, fig.width=16, fig.height=8}
 
 back = lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
-  pt = ddply(pt, .(PID, Endoscopy.Year), summarise, 'pred'=sum(as.integer(Prediction > 0.5)), 'samples'=length(PID), 
-        'final.endo'= length(which(grepl('HGD|IMC', Pathology))) > 0 )
+  pt = pt %>% group_by(PID, Endoscopy.Year) %>% summarise(
+                  'pred'=sum(as.integer(Prediction > 0.5)), 'samples'=length(PID), 
+                  'final.endo'= length(which(grepl('HGD|IMC', Pathology))) > 0,
+                  'months.before.final'= (max(pt$Endoscopy.Year) - unique(Endoscopy.Year))*12 )
   arrange(pt, -Endoscopy.Year, PID)
 })
-
-
 
 endos = do.call(rbind, lapply(1:max(sapply(back,nrow)), function(i) {
   df = do.call(rbind, lapply(back, function(x) {
     if (i > nrow(x)) return(NA)
-    cbind(x[i, c('Endoscopy.Year','pred','samples','final.endo')], i)
+    cbind(x[i, c('Endoscopy.Year','pred','samples','final.endo', 'months.before.final')], i)
   }))
   df$Patient = rownames(df)
   return(df)
@@ -985,25 +984,46 @@ endos = endos[complete.cases(endos),]
 endos$i = endos$i-1
 
 endos$pred.ratio = round(endos$pred/endos$samples, 2)
-endos$i = as.factor(endos$i)
+#endos$i = as.factor(endos$i)
 
-endos = arrange(endos, Patient)
-endos = endos %>% group_by(Patient) %>% mutate('n'=length(Patient))
-endos = transform(endos, Patient=reorder(Patient, -n) ) 
-endos$brks <- cut(endos$pred.ratio, include.lowest=T,
-                   breaks=c(0, 0.1, 0.25, 0.5, 0.75, 0.9, 1), 
-                   labels=c('0', '0.1-.25', '.25-.5', '.5-.75','.75-0.9', '1'))
+#endos$brks <- cut(endos$pred.ratio, include.lowest=T,
+#                   breaks=c(0, 0.1, 0.25, 0.5, 0.75, 0.9, 1), 
+#                   labels=c('0', '0.1-.25', '.25-.5', '.5-.75','.75-0.9', '1'))
                      
+endos = transform(endos, Patient=reorder(Patient, -months.before.final) ) 
+endos$months.before.final = endos$months.before.final*-1
 
-## TODO This doesn't seem like the most useful way to display this idea
-m = melt(endos[,c('Patient','pred.ratio', 'i','n', 'brks')], id.vars = c('Patient', 'i', 'n', 'brks'))
+plot.endo<-function(df, minM=NULL, maxM=NULL) {
+  if (is.null(minM)) minM = min(df$months.before.final)
+  if (is.null(maxM)) maxM = max(df$months.before.final)
 
-ggplot(m, aes(Patient, i, fill=brks)) + geom_bar(color='grey', stat='identity', position='dodge') + 
-  scale_fill_brewer(type='div', palette = "Set2", "Predicted Ratio") + labs(x='', y='Endoscopy from final') + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  df$i = as.factor(df$i)
+  ggplot(df, aes(months.before.final, pred.ratio, group=1,color=Patient)) + facet_grid(Patient ~., scales='fixed') + scale_x_continuous(breaks=seq(minM, maxM, by = 12)) +
+    geom_line() + geom_point() + labs(x='Months before diagnosis', y='Sample prediction ratio') + theme(legend.position='none') 
+}
+
+
+me = endos %>% group_by(Patient) %>% summarise('max.endo' = max(i))
+
+grid.arrange(
+  plot.endo( subset(endos, Patient %in% subset(me, max.endo >=5)$Patient), min(endos$months.before.final), max(endos$months.before.final) ),
+  plot.endo( subset(endos, Patient %in% subset(me, max.endo < 5 & max.endo > 2)$Patient),min(endos$months.before.final), max(endos$months.before.final)  ),
+  ncol=2)
 
 ```
 
+```{r, echo=F, warning=F, message=F, fig.height=8, fig.width=8}
+plot.endo( subset(endos, Patient %in% subset(me, max.endo <= 2 & max.endo > 0)$Patient), min(endos$months.before.final), max(endos$months.before.final)  )
+```
+
+
+```{r, echo=F, warning=F, message=F, fig.height=4, fig.width=4}
+plot.endo( subset(endos, Patient %in% subset(me, max.endo == 0)$Patient),min(endos$months.before.final), max(endos$months.before.final) )
+```
+
+### How many samples?  TBD
+
+Clinicians asked how many samples they needed to take.  
 
 
 ```{r, warning=F, message=F, fig.height=4, fig.width=4, eval=F}
@@ -1050,7 +1070,7 @@ if (file.exists(file)) {
   r.coefs = list(); r.plots = list()
   folds = 10; splits=5
   for (a in c(0,0.5,1)) {
-    fitR <- glmnet(r.dysplasia.df, r.labels, alpha=a, nlambda=1000, family='binomial') # all patients
+    fitR <- glmnet(r.dysplasia.df, r.labels, alpha=a, nlambda=nl, family='binomial') # all patients
     
     cv.R = crossvalidate.by.patient(x=r.dysplasia.df, y=r.labels, lambda=fitR$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fitR)
     

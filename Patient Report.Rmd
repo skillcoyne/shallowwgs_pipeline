@@ -38,7 +38,6 @@ if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
 
 dataset = 'Training'
-#dataset = 'Test'
 patient.info = read.patient.info(patient.file, set=dataset)
 head(patient.info)
 
@@ -59,17 +58,12 @@ table(sum.patient.data$Status)
 ## Cluster the samples by coverage then pull out regions
 
 ## Thresholds
-min.probes=67 # equiv to 1MB
 gamma2 = 250
+min.probes=67 # equiv to 1MB
 sd.threshold = 0.08  # cov by numbers of probes
+gain.threshold = 1.1; loss.threshold = 0.9
 
-gain.threshold = 1.1
-loss.threshold = 0.9
-
-
-
-
-cachefile = paste(dataset, '_patients.Rdata', sep='')
+cachefile = paste(data, '/Analysis/', dataset, '_patients.Rdata', sep='')
 if ( file.exists(cachefile) ) {
   load(cachefile, verbose=T)
 } else {
@@ -156,7 +150,7 @@ if ( file.exists(cachefile) ) {
       patient = arrange(subset(patient.info, Patient == patient.name),  Endoscopy.Year, Pathology, Samplename)
     }
   }
-save(patient.data, file=paste(dataset, '_patients.Rdata', sep=''))
+save(patient.data, file=cachefile)
 }
 print(paste("Missing patients:", paste(setdiff(sum.patient.data$Patient, names(patient.data)), collapse=', ')))
 
@@ -178,9 +172,6 @@ for (n in msgs) {
   if (!is.null(n))
     print(n)
 }
-
-
-
 
 example.pt = subset(sum.patient.data, Status == 'P' & total.samples > 2)$Patient[5]
 ## Note the number of probes per patient/sample
@@ -502,42 +493,46 @@ gene.p = gene.cnt
 gene.p = gene.p[,(1:4)]
 m = melt(gene.p, id.vars=c('Gene.Symbols', 'CN'))
 m = transform(m, Gene.Symbols = reorder(Gene.Symbols, value))
-
-#m$Gene.Symbols = factor(m$Gene.Symbols, levels=unique(m$Gene.Symbols[c(nrow(m):1)]) ) # order
 m$CN = factor(m$CN)
 
-m$brks <- cut(m$value, include.lowest=T, right=F,
+m$brks <- cut(m$value, include.lowest=T, right=F,ordered_result=T,
                    breaks=c(0, 1, 3, 5, 8, 10),
                    labels=c('0','1-3', '4-5', '6-8','9-10'))
-m = transform(m, Gene.Symbols = reorder(Gene.Symbols, value))
+
+## TODO: Tile the variables so that you can see the gains/losses per progressor/non
+subset(m, Gene.Symbols %in% c('CDKN2A', 'TBL1XR1'))
+m = transform(m, Gene.Symbols = reorder(Gene.Symbols, brks))
 
 myP = c('white',brewer.pal(n = length(levels(m$brks)), name = "Reds"))
 
-
-ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
-  geom_tile(aes(fill=brks), color='white') + scale_fill_manual( values = myP, "Patient Counts") +
-  geom_point(data=subset(m, value > 0), aes(y=Gene.Symbols, x=variable, shape=CN, color=CN), size=3 ) +
-  scale_color_manual("CN", values=c("blue", "yellow")) + scale_shape_manual(values=c(17,20)) +
-  labs(title="All available COSMIC genes mapped", x='', y='')
+ggplot(m,  aes(y=Gene.Symbols, x=CN, fill=brks)) + geom_tile() + facet_grid(.~variable) + 
+    scale_fill_manual(values = myP, 'Patient Counts') + labs(title="All available COSMIC genes", x='', y='')
 
 ```
 
 Just the top 50 genes by the number of patients that share variants in these regions.
 
 ```{r echo=F, warning=F, message=F, fig.height=12, fig.width=8}
+gc = as.data.frame(gene.p %>% group_by(Gene.Symbols) %>% summarise(total = sum(Progressors) + sum(Non.Progressors)))
+gc = transform(gc, Gene.Symbols = reorder(Gene.Symbols, total))
+gc = arrange(gc, -total)
 
-m = melt(gene.p[1:50,], id.vars=c('Gene.Symbols', 'CN'))
+m = melt(subset(gene.p, Gene.Symbols %in% gc[1:50, 'Gene.Symbols']), id.vars=c('Gene.Symbols', 'CN'))
 m = transform(m, Gene.Symbols = reorder(Gene.Symbols, value))
 
 m$brks <- cut(m$value, include.lowest=T, right=F,
                    breaks=c(0, 1, 3, 5, 8, 10),
                    labels=c('0','1-3', '4-5', '6-8','9-10'))
 
-ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
-  geom_tile(aes(fill=brks), color='white') + scale_fill_manual( values = myP, "Patient Counts") +
-  geom_point(data=subset(m, value > 0), aes(y=Gene.Symbols, x=variable, shape=CN, color=CN), size=3 ) +
-  scale_color_manual("CN", values=c("blue", "yellow")) + scale_shape_manual(values=c(17,20)) +
-  labs(title="Top 50 genes by number of patients", x='', y='')
+ggplot(m,  aes(y=Gene.Symbols, x=CN, fill=brks)) + geom_tile(color='white') + facet_grid(.~variable) + 
+    scale_fill_manual(values=myP, 'Patient Counts') + 
+    labs(title="Top 50 genes by number of patients", x='', y='')
+
+#ggplot(m, aes(y=Gene.Symbols, x=variable)) + 
+#  geom_tile(aes(fill=brks), color='white') + scale_fill_manual( values = myP, "Patient Counts") +
+#  geom_point(data=subset(m, value > 0), aes(y=Gene.Symbols, x=variable, shape=CN, color=CN), size=3 ) +
+#  scale_color_manual("CN", values=c("blue", "yellow")) + scale_shape_manual(values=c(17,20)) +
+#  labs(title="Top 50 genes by number of patients", x='', y='')
 ```
 
 
