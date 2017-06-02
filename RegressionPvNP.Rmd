@@ -9,8 +9,10 @@ output:
 ---
 
 ```{r setup, include=FALSE}
+library(biomaRt)
 library(ggplot2)
 library(ggfortify)
+library(GGally)
 library(plyr)
 library(pander)
 library(reshape2)
@@ -82,13 +84,11 @@ To use GLMs across the patients I merge all samples from all patients and overla
 ```{r tile, echo=F, message=F, warning=F, include=F}
 tile.w=1e07
 #tile.w=5e06
-tile.files = grep('tile_.*1e\\+07', analysis.files, value=T)
-#tile.files = grep('tile_.*5e\\+06', analysis.files, value=T)
+tile.files = grep(as.character(tile.w), analysis.files, value=T, fixed=T)
 load(tile.files[1], verbose=T)
 dim(mergedDf)
 
-#cache.dir = paste(data, 'Analysis/5e06', sep='/')
-cache.dir = paste(data, 'Analysis/1e07', sep='/')
+cache.dir = paste(data, 'Analysis',sub('\\+', '', tile.w), sep='/')
 if (!dir.exists(cache.dir)) dir.create(cache.dir)
 
 #validatioMergedDf = tile.sample.segments(paste(as.character(tile.w),'validation_tiledpts.Rdata', sep=''), validation.patient.data)
@@ -276,7 +276,10 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
                         'lambda.min' = F, 'lambda.1se' = F)
   
   if (select == 'classification') {
-    df$lambda.min = df$mean == max(df$mean)
+    # Minimize the classification mean error & select min lambda
+    df[which.max(subset(df, sme < median(sme) & sme > min(sme))$mean), 'lambda.min'] = T
+    
+    #df$lambda.min = df$mean == max(df$mean)
     se1 = df[df$lambda.min == T, 'mean'] - df[df$lambda.min == T, 'sme']
     
     arrange(subset(df, mean < se1 & !lambda.min & log.lambda > subset(df, lambda.min)$log.lambda ), -mean)[1:10,]
@@ -309,25 +312,26 @@ plot.patient.cv<-function(df, fit=NULL) {
     geom_point(data=subset(df, lambda.min == T), aes(y=mean, x=log.lambda, colour="lambda.min"), size=2 ) +  
     geom_vline(xintercept = subset(df, lambda.min == T)$log.lambda, colour='grey') +
     annotate("text", x=subset(df, lambda.min == T)$log.lambda, y=min(df$mean)+sd(df$mean), 
-             label=round(df[subset(df, lambda.min == T)$lambda.at,'mean'],3)) 
-  
+             label=paste(round(df[subset(df, lambda.min == T)$lambda.at,c('mean', 'sme')],3), collapse='\n+/-')) 
+
   gpD = ggplot(df, aes(y=mean.b.dev,x=log.lambda)) + geom_point() +
     geom_errorbar(aes(ymin=mean.b.dev-sme.b.dev, ymax=mean.b.dev+sme.b.dev)) + 
     geom_point(data=subset(df, lambda.min == T), aes(y=mean.b.dev, x=log.lambda, colour="lambda.min"), size=2 ) +          
     geom_vline(xintercept = subset(df, lambda.min == T)$log.lambda, colour='grey') +
     annotate("text", x=subset(df, lambda.min == T)$log.lambda, y=min(df$mean)+sd(df$mean), 
-             label=round(df[subset(df, lambda.min == T)$lambda.at,'mean'],3)) 
-  
+             label=paste(round(df[subset(df, lambda.min == T)$lambda.at,c('mean', 'sme')],3), collapse='\n+/-')) 
+      
+
   if (nrow(subset(df, lambda.1se == T)) > 0) {
     gp = gp + geom_point(data=subset(df, lambda.1se == T), aes(y=mean, x=log.lambda, colour="lambda.1se"), size=2 ) +
       geom_vline(xintercept = subset(df, lambda.1se == T)$log.lambda, colour='grey') +
       annotate("text", x=subset(df, lambda.1se == T)$log.lambda, y=min(df$mean)+sd(df$mean), 
-               label=round(df[subset(df, lambda.1se == T)$lambda.at,'mean'],3)) 
+               label=paste(round(df[subset(df, lambda.1se == T)$lambda.at,c('mean', 'sme')],3), collapse='\n+/-')) 
     
     gpD = gpD + geom_point(data=subset(df, lambda.1se == T), aes(y=mean.b.dev, x=log.lambda, colour="lambda.1se"), size=2 ) +
       geom_vline(xintercept = subset(df, lambda.1se == T)$log.lambda, colour='grey') +
       annotate("text", x=subset(df, lambda.1se == T)$log.lambda, y=min(df$mean)+sd(df$mean), 
-               label=round(df[subset(df, lambda.1se == T)$lambda.at,'mean'],3)) 
+               label=paste(round(df[subset(df, lambda.1se == T)$lambda.at,c('mean', 'sme')],3), collapse='\n+/-')) 
   }
   
   
@@ -355,7 +359,7 @@ plot.patient.cv<-function(df, fit=NULL) {
 
 
 ```{r xvalpt, message=F, warning=F, echo=T, fig.height=16, fig.width=16}
-nl = 3000
+nl = 1000
 
 coefs = list(); plots = list(); performance.at.1se = list()
 folds = 10; splits = 5
@@ -363,14 +367,21 @@ alpha.values = c(0,0.5,0.7,0.8,0.9,1)
 
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
+  message(paste("loading", file))
   load(file, verbose=T)
 } else {
   for (a in alpha.values) {
     fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial') # all patients
     #autoplot(fit0, xvar='lambda', main=paste('fit0, all samples, alpha=',a,sep='')) + theme(legend.position='none') 
     
-    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=fit0$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fit0)
-    
+    l = fit0$lambda
+    if (a == 0) {
+      l = sort(c(fit0$lambda, seq(exp(-5), exp(-10), -1e-6),
+            seq(exp(-10), exp(-15), -1e-8),
+            seq(exp(-15), exp(-20), -1e-9)), decreasing=T)
+    }
+    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=pts, a=a, nfolds=folds, splits=splits, fit=fit0)
+
     lambda.opt = ifelse( length(cv.patient$lambda.1se) > 0, cv.patient$lambda.1se, cv.patient$lambda.min )
     
     coef.opt = as.data.frame(non.zero.coef(fit0, lambda.opt))
@@ -441,44 +452,170 @@ length(which( coef.stable[['1']] >= 0.5) )
 
 regions = rownames(coefs[['1']])
 
-dysplasia.df[ labels == 1 ,regions]
+pg = dysplasia.df[ labels == 1 ,regions]
 
-dysplasia.df[ labels == 0 ,regions]
+nonpg = dysplasia.df[ labels == 0 ,regions]
+
+colnames(pg)
+
+meantests = sapply(regions, function(r)   t.test(pg[,r], nonpg[,r])$p.value )
+
+#which(meantests < 0.05)
+
+summary(pg[,'1:119640299-129610322'])
+summary(nonpg[,'1:119640299-129610322'])
 
 ```
 
 
 ### Feature Information 
 
-```{r, warning=F, message=F, eval=F}
-#topF = do.call(rbind, strsplit( names(which((coef.stable[['1']]) >= 0.75)), ':|-'))
-#colnames(topF) = c('chr','start','end')
-#topF = apply(topF, 2, as.numeric)
-
-topF = names(which((coef.stable[['1']]) >= 0.75))
-
-library(biomaRt)
-mart = biomaRt::useMart("ENSEMBL_MART_ENSEMBL", host="grch37.ensembl.org")
-biomart = useDataset("hsapiens_gene_ensembl", mart)
-
-attr = c('ensembl_gene_id','hgnc_symbol','start_position','end_position', 'chromosome_name', 'go_id', 'entrezgene')
-bm = getBM(mart=biomart, attributes=attr, filters=list('chromosomal_region' = topF))
-bm = bm[-which(bm$hgnc_symbol == ""),] 
-#head(bm)
-
-bm2 = ddply(bm, .(entrezgene, ensembl_gene_id, hgnc_symbol), summarise, 'chrom'=unique(chromosome_name), 'start'=min(start_position), 'end'=max(end_position), 'GO.IDs'=paste(go_id, collapse=','))
-
-ccgenes = read.table('~/Data/CosmicCensusGenes.tsv', sep='\t', header=T, stringsAsFactors=F)
-
-bm2 = subset(bm2, hgnc_symbol %in% ccgenes$Gene.Symbol)
+```{r, warning=F, message=F}
+#topF = names(which((coef.stable[['1']]) >= 0.75))
+topF = names(coef.stable[['1']])
 
 features.in.prog = dysplasia.df[names(which(labels == 1)),topF]
+features.nonprog = dysplasia.df[names(which(labels == 0)),topF]
 
-#features.in.prog <= 0.9
-#features.in.prog >= 1.1
+feat = which(colnames(dysplasia.df) %in% topF)
+
+# Gain or loss not correlated in prog or non
+
+gl = cbind.data.frame(
+  'P.gain' = apply(features.in.prog, 2, function(x) sum( as.integer(x >= 1.1) ) ), 
+  'P.loss' = apply(features.in.prog, 2, function(x) sum( as.integer(x <= 0.9) ) ),
+  'NP.gain' = apply(features.nonprog, 2, function(x) sum( as.integer(x >= 1.1) ) ),
+  'NP.loss' = apply(features.nonprog, 2, function(x) sum( as.integer(x <= 0.9) ) ) ) 
+
+
+allgl = cbind.data.frame(
+  'ALL.P.gain' = apply(dysplasia.df[names(which(labels == 1)),], 2, function(x) sum( as.integer(x >= 1.1) ) ), 
+  'ALL.P.loss' = apply(dysplasia.df[names(which(labels == 1)),], 2, function(x) sum( as.integer(x <= 0.9) ) ),
+  'ALL.NP.gain' = apply(dysplasia.df[names(which(labels == 0)),], 2, function(x) sum( as.integer(x >= 1.1) ) ), 
+  'ALL.NP.loss' = apply(dysplasia.df[names(which(labels == 0)),], 2, function(x) sum( as.integer(x <= 0.9) ) ) )
+
+grid.arrange(
+  ggcorr(gl, label=T) + ggtitle('Selected Features'),
+  ggcorr(allgl, label=T) + ggtitle('All regions'), 
+top='Gains vs Losses') 
+
+
+# Gains/losses enriched in the top features?
+fisher.test(rbind(colSums(gl[,c('P.gain','P.loss')]),colSums(allgl[-feat,c('ALL.P.gain','ALL.P.loss')])  )) 
+
+fisher.test(rbind(colSums(gl[,c('NP.gain','NP.loss')]),colSums(allgl[-feat,c('ALL.NP.gain','ALL.NP.loss')])  )) 
 
 ```
 
+#### bp Length
+
+
+
+```{r, echo=F, warning=F, message=F}
+chromInfo = read.table('hg19_genes.txt', sep='\t', header=T)
+chromInfo$chr = factor(chromInfo$chr, levels=c(1:22, 'X','Y'))
+
+topFSegments = do.call(rbind,  strsplit( topF, ':|-' ))
+colnames(topFSegments) = c('chr','start','end')
+topFSegments = as.data.frame(apply(topFSegments, 2, as.numeric))
+topFSegments$chr = factor(topFSegments$chr, levels=chromInfo$chr)
+topFSegments = arrange(topFSegments, chr, start)
+
+topFRegions = arrange(merge(chromInfo[,c('chr','length', 'protein_coding')], topFSegments %>% group_by(chr) %>% summarise('totalbp'=sum(end-start), 'n.segments'=length(chr)), all.x=T), -protein_coding)
+
+# Number of segments is strongly correlated with the length of the chromosome
+with(topFRegions, cor.test(length, n.segments))
+
+topFRegions$adj.info.content = topFRegions$protein_coding/(topFRegions$length^0.6)
+with(topFRegions, cor.test(length, adj.info.content))
+
+topFRegions = transform(topFRegions, ai.cut=cut(adj.info.content, 5, labels=c(5:1), include.lowest=T))           # bin data
+ggplot(topFRegions, aes(reorder(chr, -adj.info.content), totalbp/length, fill=ai.cut)) + ylim(0, 0.5) +
+  labs(y='Feature bp/total chr length', title='Ratio of covered base pairs', x='chr') +
+  geom_bar(stat='identity') +  geom_text(aes(label=round(totalbp/length, 2)), vjust=-0.5) +
+  scale_fill_discrete(name='Length adjusted information content') + theme(legend.position = 'bottom')
+
+ct = with(topFRegions, cor.test(adj.info.content, totalbp/length))
+
+bpCovered = with(topFRegions, sum(totalbp, na.rm=T)/sum(as.numeric(length)))
+```
+
+Strong correlation between the length adjusted information content (protein coding genes) and the covered bases in a chromosome r=`r round(ct$estimate, 2)` (p-value `r round(ct$p.value, 4)`). No features from chromosome 19 (the most gene dense chromosome) were selected.  
+
+`r round(bpCovered, 2)*100`% of the total bases are within the top selected features. 
+
+#### Genes?
+
+Using Biomart get all genes that are fully within the the segment boundaries.
+
+```{r, warning=F, message=F}
+mart = biomaRt::useMart("ENSEMBL_MART_ENSEMBL", host="grch37.ensembl.org")
+biomart = useDataset("hsapiens_gene_ensembl", mart)
+
+
+
+attr = c('ensembl_gene_id','hgnc_symbol','start_position','end_position', 'chromosome_name', 'ensembl_exon_id','percentage_gene_gc_content')
+
+bm = getBM(mart=biomart, attributes=attr, 
+           filters=list('chromosomal_region'=sub('-', ':',topF), "biotype"=c("IG_C_gene","IG_D_gene","IG_J_gene","IG_V_gene","protein_coding","TR_C_gene","TR_D_gene","TR_J_gene","TR_V_gene")))
+#head(bm)
+bm = bm[-which(bm$hgnc_symbol == ""),]
+bm = bm %>% group_by(hgnc_symbol, chromosome_name, start_position, end_position) %>% summarise('exon_count' = length(ensembl_exon_id)) 
+exons = bm %>% group_by(chromosome_name) %>% summarise('exons'=sum(exon_count))
+
+for (i in 1:nrow(topFSegments)) {
+  s = topFSegments[i,]
+  sbm = with(bm, which(chromosome_name == s[['chr']] & start_position >= s[['start']] & end_position <= s[['end']]))
+  
+  topFSegments[i,'genes'] = length(sbm)
+  topFSegments[i,'exons'] = sum(bm[sbm,'exon_count'])
+
+  bm[sbm, 'segment.index'] = i
+}
+
+# Not related to the length of the segment
+with(topFSegments, cor.test(genes, (end-start)))
+
+head(bm)
+
+topFRegions = merge(topFRegions, (bm %>% group_by(chromosome_name) %>% summarise('gene.cnt'=length(unique(hgnc_symbol)), 'exon.cnt'=sum(exon_count))), by.x='chr', by.y='chromosome_name', all.x=T)
+
+with(topFRegions, cor.test(protein_coding, exon.cnt))
+with(topFRegions, cor.test(gene.cnt, exon.cnt)) # expected
+
+# Exons correlate with the adjusted information content measure
+with(topFRegions, cor.test(exon.cnt, adj.info.content))
+  
+ggplot(topFRegions, aes(reorder(chr, -adj.info.content), gene.cnt/protein_coding, fill=ai.cut)) + geom_bar(stat='identity') +
+  labs(y='Gene Ratio', x='chr', title='Feature genes vs all protein coding genes') +
+  geom_text(aes(label=round(gene.cnt/protein_coding, 2)), vjust=-0.5) +
+  scale_fill_discrete(name='Length adjusted information content') + theme(legend.position = 'bottom')
+
+# Merge COSMIC genes
+ccgenes = read.table('~/Data/CosmicCensusGenes.tsv', sep='\t', header=T, stringsAsFactors=F)
+ccgenes = ccgenes[-grep('X,Y', ccgenes$Genome.Location),]
+
+# This is going to strip out some genes that don't appear in ensembl
+attr = c('ensembl_gene_id','hgnc_symbol','start_position','end_position', 'chromosome_name')
+ccbm = getBM(mart=biomart, attributes=attr, filters=list('external_gene_name'=ccgenes$Gene.Symbol, 'chromosome_name'=c(1:22,'X','Y')))
+ccbm = ccbm[-which(ccbm$hgnc_symbol == ""),]
+ccbm$chromosome_name = factor(ccbm$chromosome_name, levels=chromInfo$chr)
+
+topFRegions = merge(topFRegions, (ccbm %>% group_by(chromosome_name) %>% summarise('COSMIC.all'=length(unique(hgnc_symbol)))), by.x='chr',by.y='chromosome_name', all.x=T)
+
+containedCC = subset(bm, hgnc_symbol %in% ccbm$hgnc_symbol)
+
+topFRegions = merge(topFRegions, (containedCC %>% group_by(chromosome_name) %>% summarise('COSMIC.cont'=length(unique(hgnc_symbol)))), by.x='chr',by.y='chromosome_name', all.x=T)
+
+ggplot(topFRegions, aes(reorder(chr, -adj.info.content), COSMIC.cont/COSMIC.all, fill=ai.cut)) + geom_bar(stat='identity') +
+  labs(y='COSMIC Gene Ratio', x='chr', title='COSMIC genes: Feature vs all')+
+  geom_text(aes(label=round(COSMIC.cont/COSMIC.all, 2)), vjust=-0.5) +
+  scale_fill_discrete(name='Length adjusted information content') + theme(legend.position = 'bottom')
+```
+
+However, the `r round(bpCovered, 2)*100`% of bases appear to include `r round(length(unique(bm$hgnc_symbol))/sum(chromInfo$protein_coding), 2)*100`% (`r length(unique(bm$hgnc_symbol))`) of known protein-coding genes.  Similarly, `r round(length(unique(containedCC$hgnc_symbol))/length(ccgenes$Gene.Symbol),2)*100`% of the `r length(ccgenes$Gene.Symbol)` COSMIC genes are contained within these regions.
+
+This appears to be a fairly large enrichment.  
 
 
 ### Remove HGD/IMC Samples
@@ -494,6 +631,7 @@ no.hgd.plots = list(); coefs = list(); performance.at.1se = list()
 
 file = paste(cache.dir, 'nohgd.Rdata', sep='/')
 if (file.exists(file)) {
+  message(paste("loading file", file))
   load(file, verbose=T)
 } else {
   # No HGD/IMC
@@ -501,7 +639,6 @@ if (file.exists(file)) {
   for (a in alpha.values) {
     # all patients
     fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl) 
-    
     cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoHGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD)
     
     no.hgd.plots[[as.character(a)]] = arrangeGrob(cv.nohgd$plot+ggtitle('Classification'), cv.nohgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
@@ -688,7 +825,55 @@ do.call(grid.arrange, c(many.plots, ncol=2, top=paste(nrow(subset(sum.patient.da
 
 ```
 
-# Leave one out 
+## Randomize the labels
+
+By patient.  This should break the models...and as would be expected, the models are really poor with perfomance at 50% or less (coin toss).
+
+```{r, echo=T, warning=F, message=F, fig.height=10, fig.width=10}
+
+file = paste(cache.dir, 'rand.Rdata', sep='/')
+
+if (file.exists(file)) {
+  load(file, verbose=T)
+} else {
+  rand.patients = sum.patient.data
+  rand.patients$Status = sample( c('NP','P'), nrow(sum.patient.data), replace=T, prob=c(0.5,0.5))
+
+  r.labels = unlist(apply(rand.patients[,c('Patient','Status')],1, function(st) {
+    info = patient.data[[ st['Patient'] ]]$info
+    lbl = rep(as.integer( st['Status'] == 'P' ), nrow(info))
+    names(lbl) = info$Samplename
+    return(lbl)
+  }))
+  names(r.labels) = sub('.*\\.', '',  names(r.labels))
+  
+  # sort in label order
+  r.dysplasia.df = t(mergedDf[,names(r.labels)])
+
+  r.coefs = list(); r.plots = list()
+  folds = 10; splits=5
+  for (a in c(0,0.5,1)) {
+    fitR <- glmnet(r.dysplasia.df, r.labels, alpha=a, nlambda=nl, family='binomial') # all patients
+    
+    cv.R = crossvalidate.by.patient(x=r.dysplasia.df, y=r.labels, lambda=fitR$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fitR)
+    
+    lambda.opt = ifelse( length(cv.R$lambda.1se) > 0, cv.R$lambda.1se, cv.R$lambda.min )
+    
+    coef.opt = as.data.frame(non.zero.coef(fitR, lambda.opt))
+    r.coefs[[as.character(a)]] = coef.stability(coef.opt, cv.R$non.zero.cf)
+    
+    r.plots[[as.character(a)]] = arrangeGrob(cv.R$plot+ggtitle('Classification'), cv.R$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
+  }
+  save(r.plots, r.coefs, file=file) 
+}
+
+do.call(grid.arrange, c(r.plots, top='All samples, Randomized labels (by patient)'))
+
+
+```
+
+
+# Leave one out and evaluate predictions
 
 Leave out each patient (both P and NP) and run a new CV fit each time then predict the samples for the patient that was left out.  Fitted model includes HGD samples.
 
@@ -734,7 +919,11 @@ if (file.exists(file)) {
     # Fit generated on all samples, including HGD
     a = 1
     fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl) # all patients
-    cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=fitLOO$lambda, 
+    #l = sort(c(fitLOO$lambda, seq(exp(-5), exp(-10), -0.001),
+    #      seq(exp(-10), exp(-15), -1e-7), 
+    #      seq(exp(-15), exp(-20), -1e-9)), decreasing=T)
+    l = fitLOO$lambda
+    cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, 
                                   pts=subset(pts, Samplename %in% samples), a=a, nfolds=10, splits=5, fit=fitLOO)
     #plots[[pt]] = cv$plot + ggtitle(pt)
     
@@ -819,7 +1008,6 @@ ggplot(lgd[,c('total.lgd','pred.ratio', 'Patients')], aes(x=Patients, y=pred.rat
   geom_bar(stat='identity', fill='darkgreen', alpha=0.6) + geom_label( aes(label=total.lgd) ) +
   coord_flip() + labs(title='Correctly predicted LGD samples', y='Correct prediction ratio')
 
-
 # All samples
 all.predictions = sapply(pg.samp, function(pt) {
   if (unique(pt$Status) == 'NP') {
@@ -828,7 +1016,6 @@ all.predictions = sapply(pg.samp, function(pt) {
     as.integer(pt$Prediction > 0.5)
   }
 })
-
 
 all.predictions = do.call(rbind, lapply(all.predictions, function(x) {
   cbind.data.frame('correctly.predicted'=sum(x), 'total.samples'=length(x))
@@ -844,7 +1031,6 @@ all.predictions$Patient = rownames(all.predictions)
 all.predictions = transform(all.predictions, Patient=reorder(Patient, pred.ratio) ) 
 
 m = melt(all.predictions, id.vars=c('Patient','Status'), measure.vars=c('pred.ratio'))
-
 
 grid.arrange(
   ggplot() + geom_bar(data=subset(m, Status == 'P'), aes(Patient, value), fill='darkblue', color='grey', stat='identity') +  
@@ -918,7 +1104,6 @@ pred.by.endo<-function(pt, nyears) {
   return(p)
 }
 
-
 predicted.progression<-function(x, pos=1) { 
   if(length(which(is.na(x))) == length(x)) return(NA)
   as.integer(length(which(x == pos)) > 0)  
@@ -966,7 +1151,7 @@ Clinicians always ask to see the timepoints peeled backwards to see how early pr
 back = lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
   pt = pt %>% group_by(PID, Endoscopy.Year) %>% summarise(
                   'pred'=sum(as.integer(Prediction > 0.5)), 'samples'=length(PID), 
-                  'final.endo'= length(which(grepl('HGD|IMC', Pathology))) > 0,
+                  #'final.endo'= length(which(grepl('HGD|IMC', Pathology))) > 0,
                   'months.before.final'= (max(pt$Endoscopy.Year) - unique(Endoscopy.Year))*12 )
   arrange(pt, -Endoscopy.Year, PID)
 })
@@ -974,7 +1159,7 @@ back = lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function
 endos = do.call(rbind, lapply(1:max(sapply(back,nrow)), function(i) {
   df = do.call(rbind, lapply(back, function(x) {
     if (i > nrow(x)) return(NA)
-    cbind(x[i, c('Endoscopy.Year','pred','samples','final.endo', 'months.before.final')], i)
+    cbind(x[i, c('Endoscopy.Year','pred','samples', 'months.before.final')], i)
   }))
   df$Patient = rownames(df)
   return(df)
@@ -1012,12 +1197,12 @@ grid.arrange(
 
 ```
 
-```{r, echo=F, warning=F, message=F, fig.height=8, fig.width=8}
+```{r, echo=F, warning=F, message=F, fig.height=8, fig.width=8, eval=F}
 plot.endo( subset(endos, Patient %in% subset(me, max.endo <= 2 & max.endo > 0)$Patient), min(endos$months.before.final), max(endos$months.before.final)  )
 ```
 
 
-```{r, echo=F, warning=F, message=F, fig.height=4, fig.width=4}
+```{r, echo=F, warning=F, message=F, fig.height=4, fig.width=4, eval=F}
 plot.endo( subset(endos, Patient %in% subset(me, max.endo == 0)$Patient),min(endos$months.before.final), max(endos$months.before.final) )
 ```
 
@@ -1035,59 +1220,90 @@ all = do.call(rbind,lapply(pg.samp, function(df) {
   df[,c('Status','Prediction','Prediction.Dev.Resid')]
 }))
 
-binomial.deviance
-
 ggplot(all, aes(Prediction.Dev.Resid, Prediction, color=Status)) + geom_point()  + 
   labs(y='Predicted (response)', x='Binomial dev residual?')
 ```
 
 
-# Randomize the labels
+## Data Quality
 
-By patient.  This should break the models...and as would be expected, the models are really poor with perfomance at 50% or less (coin toss).
+### By Batch first
 
-```{r, echo=T, warning=F, message=F, fig.height=10, fig.width=10}
+```{r, echo=T, warning=F, message=F, eval=F}
+all = do.call(rbind, pg.samp)
 
-file = paste(cache.dir, 'rand.Rdata', sep='/')
+prog = do.call(rbind, pg.samp[subset(sum.patient.data, Status == 'P')$Patient])
+nonp = do.call(rbind, pg.samp[subset(sum.patient.data, Status == 'NP')$Patient])
 
-if (file.exists(file)) {
-  load(file, verbose=T)
-} else {
-  rand.patients = sum.patient.data
-  rand.patients$Status = sample( c('NP','P'), nrow(sum.patient.data), replace=T, prob=c(0.5,0.5))
-
-  r.labels = unlist(apply(rand.patients[,c('Patient','Status')],1, function(st) {
-    info = patient.data[[ st['Patient'] ]]$info
-    lbl = rep(as.integer( st['Status'] == 'P' ), nrow(info))
-    names(lbl) = info$Samplename
-    return(lbl)
-  }))
-  names(r.labels) = sub('.*\\.', '',  names(r.labels))
+## Similar numbers of each in these batches so how did we do?
+tfPR = sapply( c('Exome_subcohort','Batch_1','Batch_2','Batch_3','Batch_4'), function(b) {
+  pred = subset(prog, Batch.Name == b)$Prediction
+  predB = subset(nonp, Batch.Name == b)$Prediction
   
-  # sort in label order
-  r.dysplasia.df = t(mergedDf[,names(r.labels)])
+  tpr = length(which(pred > 0.5))/length(pred)
+  fpr = length(which(predB > 0.5))/length(predB)
+  cbind.data.frame('TPR'=tpr, 'FPR'=fpr)
+})
 
-  r.coefs = list(); r.plots = list()
-  folds = 10; splits=5
-  for (a in c(0,0.5,1)) {
-    fitR <- glmnet(r.dysplasia.df, r.labels, alpha=a, nlambda=nl, family='binomial') # all patients
-    
-    cv.R = crossvalidate.by.patient(x=r.dysplasia.df, y=r.labels, lambda=fitR$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fitR)
-    
-    lambda.opt = ifelse( length(cv.R$lambda.1se) > 0, cv.R$lambda.1se, cv.R$lambda.min )
-    
-    coef.opt = as.data.frame(non.zero.coef(fitR, lambda.opt))
-    r.coefs[[as.character(a)]] = coef.stability(coef.opt, cv.R$non.zero.cf)
-    
-    r.plots[[as.character(a)]] = arrangeGrob(cv.R$plot+ggtitle('Classification'), cv.R$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
-  }
-  save(r.plots, r.coefs, file=file) 
+tfPR
+
+## Exome_cohort fpr driven by the two patients that we predicted to be progressors in nearly every sample
+length(which(pg.samp$AD0591$Prediction > 0.5))
+length(which(pg.samp$AH0329$Prediction > 0.5))
+
+
+## Except the exome cohort, the TPR rate appears to be right around 48-68%
+## FPR is over 20% in Batch_4 though
+
+unique(subset(nonp, Batch.Name == 'Batch_4')$Patient)
+
+pg.samp$AHM0100$Prediction > 0.5
+pg.samp$AHM0121$Prediction > 0.5
+pg.samp$AD0644$Prediction > 0.5
+
+cb = combn( as.character(unique(all$Batch.Name)), 2)
+
+batch =  sapply(1:ncol(cb), function(i) {
+  sapply(c('SampleSD','SampleMEAN', 'Total.Reads'), function(x) {
+    tt = t.test(subset(all, Batch.Name == cb[1,i])[[x]], subset(all, Batch.Name == cb[2,i])[[x]])  
+    tt$p.value
+  })
+}) 
+```
+
+
+```{r, echo=T, warning=F, message=F, eval=F}
+smp<-function(df) {
+  df[,c('Prediction', 'Prediction.Dev.Resid', 'SampleMEAN', 'SampleSD', 'Barretts.Cellularity', 'Total.Reads', 'p53.Status', 'PID')]
 }
 
-do.call(grid.arrange, c(r.plots, top='All samples, Randomized labels (by patient)'))
+prog = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], smp) )
+nonp = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'NP')$Patient], smp) )
 
+GGally::ggcorr(data=prog, method=c('pairwise','pearson'), label=T) + labs(title='Pearson correlation for several QC measures') 
+
+
+# Compare poorly predicted to well predicted based on the sample SD measures
+ttfunc<-function(col, df=NULL) {
+  tt = t.test(subset(df, Prediction < 0.5)[[col]], subset(df, Prediction > 0.5)[[col]])
+  cbind.data.frame('p.val'=tt$p.value, 'statistic'=tt$statistic)
+}
 
 ```
 
 
+
+```{r, echo=T, warning=F, message=F, eval=F}
+ pander(sapply(colnames(prog)[-(1:2)], ttfunc, df=prog), caption='Progressor t-test stats for QC measures between predictions probabilies  >&< 0.5 ')
+
+ pander(sapply(colnames(nonp)[-(1:2)], ttfunc, df=nonp), caption='Non-progressor t-test stats for QC measures between predictions probabilies  >&< 0.5 ')
+
+
+hist(prog$SampleSD)
+
+
+subset(prog, SampleSD <= 0.025)
+
+
+```
 
