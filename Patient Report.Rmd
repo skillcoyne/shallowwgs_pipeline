@@ -37,7 +37,7 @@ patient.file = grep('/All_patient_info.txt', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
 
-dataset = 'Training'
+dataset = 'Test'
 patient.info = read.patient.info(patient.file, set=dataset)
 head(patient.info)
 
