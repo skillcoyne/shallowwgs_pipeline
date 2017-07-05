@@ -735,6 +735,76 @@ tryCatch({
 })
 ```
 
+#### Correlations
+
+```{r echo=F, message=F, warning=F}
+library(Hmisc)
+
+flattenCorrMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+    )
+}
+
+head(dysplasia.df)
+rc = rcorr(dysplasia.df)
+rc = flattenCorrMatrix(rc$r, rc$P)
+
+
+
+rc = subset(rc, row %in% rownames(coefs[[select.alpha]]) | column %in% rownames(coefs[[select.alpha]]))
+rc = subset(rc, p < 0.05)
+
+nrow(rc)
+head(rc)
+
+
+pos = do.call(rbind.data.frame, strsplit(as.character(rc$column), ':|-'))
+colnames(pos) = c('col.chr','col.start','col.end')
+pos[] = lapply(pos[], function(x) as.numeric(as.character(x)))
+rc = cbind(pos, rc)
+
+
+pos = do.call(rbind.data.frame, strsplit(as.character(rc$row), ':|-'))
+colnames(pos) = c('row.chr','row.start','row.end')
+pos[] = lapply(pos[], function(x) as.numeric(as.character(x)))
+rc = cbind(pos, rc)
+
+
+rc$r.coef = as.integer(rc$row %in% rownames(coefs[[select.alpha]]))
+
+head(rc)
+
+rc = subset(rc, cor >= 0.5)
+
+rc = arrange(rc, row.chr, col.chr, row.start, col.start)
+head(rc)
+
+#rc[sort(c(which(rc$r.coef == 1), which(rc$r.coef == 1)+1)),]
+
+
+rc1  = subset(rc, row.chr == 16 & col.chr == 16)
+
+rc1 = transform(rc1, row=reorder(row, -row.start) ) 
+rc1 = transform(rc1, column=reorder(column, col.start) ) 
+
+subset(rc1, column == '16:85599240-90354752' | row == '16:85599240-90354752')
+
+head(rc1)
+
+ggplot(rc1, aes(column, row, fill=cor)) + geom_tile()  +  #scale_fill_gradient(low = "white", high = "red") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+## closer regions are more liklye to be correlated
+cor.test(rc1$col.start - rc1$row.end , rc1$cor)
+
+
+```
+
 ### Hazards
 
 Using the model for alpha=`r select.alpha`.
