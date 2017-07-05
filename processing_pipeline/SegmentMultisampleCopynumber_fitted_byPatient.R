@@ -34,9 +34,11 @@ if (!dir.exists(plot.dir))
 filename = 'All_patient_info.txt'
 if (require(xlsx)) filename = 'All_patient_info.xlsx' 
   
+
 patient.file = grep(filename, list.files(data, full.names=T), value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing patient info file in", data))
+message(paste("Reading file", filename))
 
 all.patient.info = read.patient.info(patient.file, set='all')
 

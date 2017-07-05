@@ -7,10 +7,20 @@ summarise.patient.info<-function(df) {
   require(plyr)
   
   sum.pt = ddply(df, .(Patient, Status, Set), summarise, 
+        age.diagnosis = unique(Age.at.diagnosis),
+        wt = unique(Weight.kg.),
+        ht = unique(Height.cm.),
+        BMI = unique(BMI),
+        gender = unique(Sex),
+        smoking = unique(Smoking),
+        C = unique(Circumference),
+        M = unique(Maximal),
         start.year=range(Endoscopy.Year)[1], 
         end.year=range(Endoscopy.Year)[2],
         total.samples=length(Samplename), 
         total.endos=length(unique(Path.ID)),
+        initial.endo = unique(Initial.Endoscopy),
+        final.endo = unique(Final.Endoscopy),
         highest.path=sort(Pathology, decreasing=T)[1],
         first.batch=sort(Batch.Name)[1],
         med.cellularity=median(Barretts.Cellularity,na.rm=T),
@@ -18,7 +28,7 @@ summarise.patient.info<-function(df) {
   return(arrange(sum.pt, Status, total.samples, highest.path))
 }
 
-read.patient.info<-function(file, set='Training') {
+read.patient.info<-function(file, file2=NULL, set='Training') {
   if (!file.exists(file))
     stop(paste(file, "doesn't exist or is not readable."))
   
@@ -83,6 +93,7 @@ read.patient.info<-function(file, set='Training') {
     # Remove 'normal' samples
     patient.info = subset(patient.info, !grepl('D2', Pathology, ignore.case=T))
     patient.info = subset(patient.info, !grepl('Gastriccardia', Pathology, ignore.case=T))
+    patient.info = subset(patient.info, !grepl('normal', Pathology, ignore.case=T))
 
   } else {
     patient.info = read.table(file, header=T, sep='\t', stringsAsFactors=F)
@@ -146,8 +157,75 @@ read.patient.info<-function(file, set='Training') {
   }
 
   patient.info$Patient = gsub('/', '_',patient.info$Patient)
+  
+  if (!is.null(file2)) {
+    patient.info = add.demographics(file2, patient.info)
+  }
+  
   return(patient.info)
 }
+
+add.demographics<-function(file, patient.info) {
+  bmicalc<-function(x) {
+    ht = x[[1]]; wt = x[[2]]
+    
+    if (is.na(ht) || is.na(wt) || ht < 0 || wt < 0)
+      return(NA)
+    return( (wt/(ht/100))/(ht/100) ) 
+  }
+  
+  if (grepl('\\.xlsx$', basename(file))) {
+    require(xlsx)
+    demog = read.xlsx2(file, sheetIndex = 1, colIndex = c(1:21), endRow=91, stringsAsFactors=F)
+    colnames(demog) = sub('\\.\\.', '.',colnames(demog))
+  } else {
+    demog = read.table(file, header=T, sep='\t', quote="", stringsAsFactors=F)
+    demog = demog[1:91,1:21]
+    colnames(demog) = sub('\\.\\.', '\\.', colnames(demog))
+  }
+  demog[demog == ""] = NA
+  
+  demog$Study.Number = gsub('/', '_', demog$Study.Number)
+  demog$Patient.ID =  strip.whitespace( demog$Study.Number )
+  demog$Alternate.Study.Number = strip.whitespace( gsub('/', '_', demog$Alternate.Study.Number) )
+  
+  rows = with(demog, which(Alternate.Study.Number != ""))
+  demog$Patient.ID[rows] = demog$Alternate.Study.Number[rows]
+  
+  # good...
+  #length(which(unique(patient.info$Patient) %in% demog$Patient.ID))
+  
+  dates = grep('^date', colnames(demog), ignore.case = T, value=T)
+  demog[dates] = lapply(demog[dates], function(x) as.Date(gsub('/', '-', x), '%d-%M-%Y'))
+  
+  demog$Year.Birth = format(as.Date(demog$Date.of.birth), "%Y")
+  demog$Date.of.birth = NULL
+  
+  cols = grep('Year', colnames(demog), value=T)
+  demog[cols] = lapply(demog[cols], as.numeric)
+  
+  cols = grep('Weight|Height|Age|Circumference|Maximal', colnames(demog), value=T)
+  demog[cols] = lapply(demog[cols], as.numeric)
+  
+  demog = demog[,c('Patient.ID', grep('Sex|Circumference|Maximal|Date|Year|Age|Weight|Height|Smoking', colnames(demog), value=T))]
+  
+  colnames(demog)[grep('Smoking', colnames(demog))] = 'Smoking'
+  head(demog)
+  demog$BMI = apply(demog[c('Height.cm.', 'Weight.kg.')], 1, bmicalc)
+
+  if (!is.null(patient.info)) {
+    demog = merge(patient.info, demog, by.x='Patient', by.y='Patient.ID')
+    demog = ddply(demog, .(Patient), mutate, 
+                  'Initial.Endoscopy'=min(Endoscopy.Year, Year.of.1st.Endoscopy), 'Final.Endoscopy'=max(Endoscopy.Year, Year.of.Endpoint.) )
+  } else {
+    colnames(demog)[which(colnames(demog) == 'Patient.ID')] = 'Patient'
+  }
+
+  demog[c('Sex','Smoking')] = lapply(demog[c('Sex','Smoking')], as.factor)
+  
+  return(demog)
+}
+
 
 
 get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='hg19') {

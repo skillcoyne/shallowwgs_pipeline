@@ -30,6 +30,7 @@ source('lib/load_patient_metadata.R')
 data = '~/Data/Ellie'
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
+analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
 plot.dir = paste(data, 'Analysis/multipcf_plots_fitted_perPatient', sep='/')
 
 if (length(list.files(plot.dir)) <= 0)
@@ -39,11 +40,12 @@ if (length(list.files(plot.dir)) <= 0)
 patient.file = grep('All_patient_info.txt', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
+demo.file = grep('Demographics_full.txt', data.files, value=T)
 
-load('Training_patients.Rdata', verbose=T)
 
-patient.info = read.patient.info(patient.file)
-patient.info$Patient = gsub("/", "_", patient.info$Patient)
+load(grep('Training_patients.Rdata', analysis.files, value=T), verbose=T)
+
+patient.info = read.patient.info(patient.file, demo.file)
 #head(patient.info)
 
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
@@ -56,7 +58,6 @@ pander(sum.patient.data)
 for (pt in names(patient.data)) {
   patient.data[[pt]]$info= patient.data[[pt]]$info[patient.data[[pt]]$info$Samplename %in% colnames(patient.data[[pt]]$seg.vals)[-(1:5)],]
 }
-  
 
 ```
 
@@ -71,7 +72,7 @@ We have a few questions we needed to answer with this data.  The pairwise correl
 The first two questions were addressed with the clustering below.  The third is in progress currently.
 
 
-```{r global_pt, echo=F, message=F, warning=F, error=F}
+```{r global_pt, echo=F, message=F, warning=F, error=F, eval=F}
 be = subset(patient.info, Pathology == 'BE')
 lgd = subset(patient.info, Pathology <= 'LGD')
 
@@ -84,20 +85,22 @@ mtp1 = MTP(X=t(patient.info[,c('Barretts.Cellularity','Total.Reads')]), Y=as.int
            get.adjp=T, na.rm=T, test='t.twosamp.equalvar')
 mtp2 = MTP(X=t(patient.info[,c('Barretts.Cellularity','Total.Reads')]), Y=patient.info$Status, 
             get.adjp=T, na.rm=T, test='t.twosamp.equalvar')
+
+# Currently with multi test correction the samples for which cellularity and #of reads are available show no difference for either status (P vs NP)
+# `r pander(mtp2@adjp, justify='left', caption="Adjusted p-value")`
+# 
+# or for samples that are LGD/IMC/HGD vs BE
+# `r pander(mtp1@adjp, justify='left', caption="Adjusted p-value")`
+# 
+# However, it should be noted that pathologists do not like calling cellularity on Barrett's generally so it's a fairly inaccurate measure.
+# `r pander(table( patient.info[,c('Status','Barretts.Cellularity')]), caption="Numbers of cellularity calls by status")`
+# 
+# With regards to p53 staining, non-progressors have no p53 positive tests, while progressors had `r p53Status[2,2]` overall.
+# `r pander(p53Status, justify='left', caption="P53 staining status for progressors vs non")`
+# Of these `r table(be$p53.Status)[['1']]` were positive in a BE sample, and `r table(lgd$p53.Status)[['1']]` were positive when LGD samples were included.
+
 ```
 
-Currently with multi test correction the samples for which cellularity and #of reads are available show no difference for either status (P vs NP)
-`r pander(mtp2@adjp, justify='left', caption="Adjusted p-value")`
-
-or for samples that are LGD/IMC/HGD vs BE
-`r pander(mtp1@adjp, justify='left', caption="Adjusted p-value")`
-
-However, it should be noted that pathologists do not like calling cellularity on Barrett's generally so it's a fairly inaccurate measure.
-`r pander(table( patient.info[,c('Status','Barretts.Cellularity')]), caption="Numbers of cellularity calls by status")`
-
-With regards to p53 staining, non-progressors have no p53 positive tests, while progressors had `r p53Status[2,2]` overall.
-`r pander(p53Status, justify='left', caption="P53 staining status for progressors vs non")`
-Of these `r table(be$p53.Status)[['1']]` were positive in a BE sample, and `r table(lgd$p53.Status)[['1']]` were positive when LGD samples were included.
 
 ## How do the sample timepoints separate?
 
@@ -346,11 +349,12 @@ In neither the raw or normalized matrices could I reliably distinguish clusters 
 suppressPackageStartupMessages( library(apcluster) )
 
 apclust.data<-function(segdata, samples) {
-  x1 = segdata[,intersect(colnames(segdata), samples)]
+  x1 = as.matrix(segdata[,intersect(colnames(segdata), samples)])
   #x1 = x1[, samples]
   rownames(x1) = (segdata[,c(1:4)] %>%
     rowwise() %>%
     mutate(location=paste(paste(chrom, arm, sep=''), '.', start.pos, '-', end.pos, sep='')))$location
+  if (length(samples) == 1) colnames(x1) = samples
   return(x1)  
 }
 
@@ -406,17 +410,15 @@ sum.patient.data$years = with(sum.patient.data, paste(start.year, end.year, sep=
 sim = as.data.frame(sum.patient.data[,c('Status','years')])
 rownames(sim) = sum.patient.data$Patient
 for (pt in sum.patient.data$Patient) {
+  print(pt)
   patient.data[[pt]]$info = arrange(patient.data[[pt]]$info,  Pathology, Endoscopy.Year)
   x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
 
-  gg = ggplot(melt(x1), aes(x=variable, y=value, group=variable, fill=variable)) + 
+  gg = ggplot(melt(x1), aes(x=Var2, y=value, group=Var2, fill=Var2)) + 
     geom_boxplot(notch=T, show.legend=F) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position='none') +
-    labs(title=paste(pt, patient.data[[pt]]$info$Status[1], sep=' - ')) +   theme(axis.title.x=element_blank(),
-        axis.text.x=element_blank(),
-        axis.ticks.x=element_blank())
+    labs(title=paste(pt, patient.data[[pt]]$info$Status[1], sep=' - '), x='') 
 
-  
   sample.vals[[pt]] = gg
 
   info = patient.data[[pt]]$info[which(colnames(x1) %in% patient.data[[pt]]$info$Samplename),]
@@ -436,12 +438,12 @@ for (pt in sum.patient.data$Patient) {
   sim[pt, 'ns'] = net.similarity(ac)
   sim[pt, 'ss'] = sum.similarity(ac)
   sim[pt, 'clusters'] = length(clusters(ac))
-  sim[pt, 'max.sd'] = max(sapply(x1, sd))
+  sim[pt, 'max.sd'] = max(apply(x1, 2, sd))
   
   tmp = patient.data[[pt]]$variable.regions[,-(1:5)]
-  sim[pt, 'n.var'] = nrow(patient.data[[pt]]$variable.regions[,-(1:5)])
+  sim[pt, 'n.var'] = ifelse(!is.null(tmp) && nrow(tmp)>0, nrow(patient.data[[pt]]$variable.regions[,-(1:5)]), 0)
   
-  if (nrow(tmp) <= 0) {
+  if (is.null(tmp) || nrow(tmp) <= 0) {
     sim[pt,c('gains', 'loss')] = c(0,0)
   } else {
     sim[pt,'gains'] = length(tmp[tmp>=1.1])
@@ -451,7 +453,7 @@ for (pt in sum.patient.data$Patient) {
 sim$id = rownames(sim)
 rc = cor.test(sim$max.sd, sim$clusters)
 
-do.call(grid.arrange, c(sample.vals))
+#do.call(grid.arrange, c(sample.vals))
 
 # May be a difference
 ttps = wilcox.test( subset(sim, Status == 'NP')$ss, subset(sim, Status == 'P')$ss )$p.value
@@ -641,7 +643,9 @@ So what about using the normalized segmented values for AP clustering instead?
 sim3 = sum.patient.data[,c(2:4)]
 rownames(sim3) = sum.patient.data[,1]
 for (pt in sum.patient.data$Patient) {
+  print(pt)
   x1 = patient.data[[pt]]$norm.seg.vals
+  if (is.null(x1)) next
   ac = apcluster(negDistMat(x1, r=2), q=q, details=T, includeSim=T)
   #plot(ac)
   
