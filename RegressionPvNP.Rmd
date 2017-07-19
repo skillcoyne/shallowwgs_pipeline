@@ -13,9 +13,11 @@ output:
 ```{r setup, include=FALSE}
 library(biomaRt)
 library(ggplot2)
+library(ggrepel)
 library(ggfortify)
 library(GGally)
 library(plyr)
+library(dplyr)
 library(pander)
 library(reshape2)
 library(gridExtra)
@@ -26,10 +28,9 @@ library(mice)
 
 source('lib/load_patient_metadata.R')
 
-includeDemo = FALSE
+includeDemo = FALSE # demographics
 
 data = '~/Data/Ellie'
-
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
 analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
@@ -41,21 +42,20 @@ length(validation.patient.data)
 dataset = 'Training'
 load(grep('Training_patients.Rdata', analysis.files, value=T), verbose=T)
 
-## Patient info file
-patient.file = grep('All_patient_info.txt', data.files, value=T)
+## Hospital.Research.ID info file
+patient.file = grep('All_patient_info.xlsx', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
-demo.file = grep('Demographics_full.txt', data.files, value=T)
+demo.file = grep('Demographics_full.xlsx', data.files, value=T)
 
-patient.info = read.patient.info(patient.file, demo.file, set=dataset)
-patient.info$Patient = gsub("/", "_", patient.info$Patient)
+patient.info = read.patient.info(patient.file, demo.file, set=dataset)$info
 head(patient.info)
 
-validation.patient.info = read.patient.info(patient.file, demo.file, set='Test')
-validation.patient.info = arrange(validation.patient.info, Status, Patient, Endoscopy.Year, Pathology)
+validation.patient.info = read.patient.info(patient.file, demo.file, set='Test')$info
+validation.patient.info = arrange(validation.patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
 sum.validation.info = summarise.patient.info(validation.patient.info)
 
-patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
+patient.info = arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
 sum.patient.data = summarise.patient.info(patient.info)
 
 if (length(which(sapply(patient.data, function(df) nrow(df$seg.vals)) == 0)) > 0)
@@ -72,7 +72,7 @@ if (length(nor) > 0) patient.data[nor] = NULL
 nor = which(sapply(validation.patient.data, function(df) nrow(df$seg.vals)) == 0)
 if (length(nor) > 0) validation.patient.data[nor] = NULL
 
-sum.patient.data = as.data.frame(subset(sum.patient.data, Patient %in% names(patient.data))) ## For now
+sum.patient.data = as.data.frame(subset(sum.patient.data, Hospital.Research.ID %in% names(patient.data))) ## For now
 
 # Missing some of the samples as they aren't all sequenced yet
 for (pt in names(patient.data)) {
@@ -97,9 +97,9 @@ for (pt in names(validation.patient.data)) {
 #hist( vrs )
 #pd$seg.vals[,grep('^D', colnames(pd$seg.vals))] - apply(pd$seg.vals[,grep('^D', colnames(pd$seg.vals))], 2, mean)
 
-pander(sum.patient.data[,c('Patient', 'Status', 'start.year', 'end.year','total.samples','total.endos','highest.path')], justify='left', caption='Training patient set')
+pander(sum.patient.data[,c('Hospital.Research.ID', 'Status', 'start.year', 'end.year','total.samples','total.endos','highest.path')], justify='left', caption='Training patient set')
 
-pander(sum.validation.info[,c('Patient', 'Status', 'start.year', 'end.year','total.samples','total.endos','highest.path')], justify='left', caption='Validation patient set')
+pander(sum.validation.info[,c('Hospital.Research.ID', 'Status', 'start.year', 'end.year','total.samples','total.endos','highest.path')], justify='left', caption='Validation patient set')
 ```
 
 
@@ -108,7 +108,6 @@ The previous analysis employed AP clustering on a per-patient basis to look for 
 # Note about the data
 
 This report uses all of the genomic data as well as encoded demographic information for age at diagnosis, BMI, p53 staining status, smoking, gender, length and circumference of the Barrett's segment.  None of these appear to improve the model.  This may not be surprising as most of these were controlled for in generating the cohort.
-
 
 
 # Encode the large data matrix
@@ -136,7 +135,7 @@ Using a very large segment size for tiling across all patients (`r tile.w`) I ge
 
 The labels are split such that all samples from progressor patients are (1) and all samples from non-progressors are (0).
 
-```{r labelsPNP, echo=F, message=F, include=F}
+```{r labelsPNP, echo=F, message=F, include=T}
 ## binomial: dysplasia 1, BE 0
 labels = unlist(sapply(patient.data, function(df) {
   df$info = arrange(df$info, Endoscopy.Year, Pathology)
@@ -148,7 +147,7 @@ names(labels) = sub('.*\\.', '',  names(labels))
 
 pts = do.call(rbind, lapply(patient.data, function(df) {
   df$info = arrange(df$info, Endoscopy.Year, Pathology)
-  cbind(df$info[,c('Patient','Samplename')])
+  cbind(df$info[,c('Hospital.Research.ID','Samplename')])
 }))
 rownames(pts) = 1:nrow(pts)
 
@@ -159,8 +158,13 @@ if (length(setdiff(colnames(mergedDf), names(labels))) > 3)
 dysplasia.df = t(mergedDf[,names(labels)])
 dim(dysplasia.df)
 
-validation.df = t(mergedDfValidation[, grep('^D', colnames(mergedDfValidation))])
-dim(validation.df)
+unit.var <- function(x) {
+  if (sd(x) == 0) return(x)
+  return((x-mean(x))/sd(x) )
+}
+
+#dysplasia.df = apply(dysplasia.df, 2, function(x) x-median(x))
+dysplasia.df = apply(dysplasia.df, 2, unit.var)
 
 ```
 
@@ -169,40 +173,53 @@ dim(validation.df)
   ## Some sort of complexity score
   #plot(unlist(complexity.measures), col=sum.patient.data$Status)
   # t.test(
-  # complexity.measures[subset(sum.patient.data, Status == 'P')$Patient],
-  # complexity.measures[subset(sum.patient.data, Status == 'NP')$Patient]
+  # complexity.measures[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID],
+  # complexity.measures[subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID]
   # )
+
+
   score.cx <-function(pd) {
-  #  print(pd$info)
-    len.var = (var(pd$seg.vals$end.pos - pd$seg.vals$start.pos))/1e12
-    extreme.values = max( apply(as.matrix(pd$seg.vals[,grep('^D', colnames(pd$seg.vals))]), 2, function(col) {
-      length(which(col >= (median(col)+2*sd(col)))) + length(which(col <= (median(col)-2*sd(col)))) 
-    }) ) 
+    samples = grep('^D', colnames(pd$seg.vals), value=T)
+    len.var = var(pd$seg.vals$end.pos - pd$seg.vals$start.pos) # length won't vary between samples
+
+    #extremes = apply(as.matrix(pd$seg.vals[,samples]), 2, function(col) {
+    #  length(which(col >= (median(col)+2*sd(col)))) + length(which(col <= (median(col)-2*sd(col)))) 
+    #}) 
+
+    num.var.reg = vector(mode='integer', length=length(samples))
+    if (!is.null(pd$variable.regions) && nrow(pd$variable.regions) > 0) {
+      num.var.reg = apply(as.matrix(pd$variable.regions[,samples]), 2, function(col) {
+        length(which(col >= 1.1 | col <= 0.9))
+      })
+    }
+    
+    sample.var = apply(as.matrix(pd$seg.vals[, samples]), 2, var)
+    t(cbind(len.var, num.var.reg, sample.var))
+  }
+
+  complexity.measures = lapply(patient.data, score.cx)
+
+  dysplasia.df = cbind(dysplasia.df, 'segment.length'=0, 'num.var.regions'=0, 'sample.variance'=0)
+  for (pt in names(complexity.measures)) {
+    for (sample in colnames(complexity.measures[[pt]])) {
+      dysplasia.df[sample,c('segment.length', 'num.var.regions', 'sample.variance')] = as.numeric(complexity.measures[[pt]][,sample])
+    }
+    #for (sample in rownames(dysplasia.df)) {
+      #dysplasia.df[sample, ] = 
+        #complexity.measures[subset(patient.info, Samplename == sample)$Hospital.Research.ID]
+    #}
+  }
+  # norm to 1 to keep within the magnitude of the genomic data
+  scale.to.1<-function(x) {
+    (x-min(x))/(max(x)-min(x))
+  }
   
-    (len.var + extreme.values)
-  }
-
-  complexity.measures = sapply(patient.data, score.cx)
-
-  dysplasia.df = cbind(dysplasia.df, 'cx.measure'=NA)
-  for (sample in rownames(dysplasia.df)) {
-    dysplasia.df[sample, 'cx.measure'] = complexity.measures[subset(patient.info, Samplename == sample)$Patient]
-  }
-  # norm to 1 to keep within the magnitude of the genomic data
-  cx = dysplasia.df[,'cx.measure'] 
-  dysplasia.df[,'cx.measure'] = (log(cx)/log(max(cx)))
+  dysplasia.df[,c('segment.length', 'num.var.regions', 'sample.variance')] = apply(dysplasia.df[,c('segment.length', 'num.var.regions', 'sample.variance')], 2, scale)
+  
+  #cx = dysplasia.df[,'cx.measure'] 
+  #dysplasia.df[,'cx.measure'] = (log(cx)/log(max(cx)))
+  #dysplasia.df[,'cx.measure'] = dysplasia.df[,'cx.measure'] - median(dysplasia.df[,'cx.measure'])
   #dysplasia.df[,'cx.measure'] = ((cx - min(cx))/(max(cx)-min(cx)))
-
-
-  complexity.measures = sapply(validation.patient.data, score.cx)
-
-  validation.df = cbind(validation.df, 'cx.measure'=NA)
-  for (sample in rownames(validation.df)) {
-    validation.df[sample, 'cx.measure'] = complexity.measures[subset(validation.patient.info, Samplename == sample)$Patient]
-  }
-  # norm to 1 to keep within the magnitude of the genomic data
-  cx = validation.df[,'cx.measure'] 
-  validation.df[,'cx.measure'] = (log(cx)/log(max(cx)))
 
   
 if (includeDemo) {
@@ -285,22 +302,22 @@ create.patient.sets<-function(pts, n, splits, minR=0.2) {
     sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=labels[df$Samplename]))
     while ( (length(which(sets/rowSums(sets) < minR) ) >= 2 | length(which(sets/rowSums(sets) == 0)) > 0) ) {
       #print(sets/rowSums(sets))
-      s = sample(rep(seq(5), length = length(unique(df$Patient))))
-      df2 = merge(df, cbind('Patient'=unique(df$Patient), 'tmpgrp'=s), by="Patient")
+      s = sample(rep(seq(5), length = length(unique(df$Hospital.Research.ID))))
+      df2 = merge(df, cbind('Hospital.Research.ID'=unique(df$Hospital.Research.ID), 'tmpgrp'=s), by="Hospital.Research.ID")
       df[[grpCol]] = df2$tmpgrp
       sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=labels[df$Samplename]))
     }
     return(df[[grpCol]])
   }
   
-  s = sample(rep(seq(splits), length = length(unique(pts$Patient))))
-  patients = merge(pts, cbind('Patient'=unique(pts$Patient), 'group'=s), by="Patient")  
+  s = sample(rep(seq(splits), length = length(unique(pts$Hospital.Research.ID))))
+  patients = merge(pts, cbind('Hospital.Research.ID'=unique(pts$Hospital.Research.ID), 'group'=s), by="Hospital.Research.ID")  
   colnames(patients)[3] = c('fold.1')
   patients$fold.1 = check.sets(patients, 'fold.1', minR)
   
   for (i in 2:n) {
-    s = sample(rep(seq(5), length = length(unique(pts$Patient))))
-    patients = merge(patients, cbind('Patient'=unique(patients$Patient), 'group'=s), by="Patient")  
+    s = sample(rep(seq(5), length = length(unique(pts$Hospital.Research.ID))))
+    patients = merge(patients, cbind('Hospital.Research.ID'=unique(patients$Hospital.Research.ID), 'group'=s), by="Hospital.Research.ID")  
     foldcol = grep('group',colnames(patients))
     colnames(patients)[foldcol] = paste('fold',i,sep='.')
     patients[[paste('fold',i,sep='.')]] = check.sets(patients, paste('fold',i,sep='.'))
@@ -345,7 +362,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
       test = x[test.rows,]
       training = x[-test.rows,]
       # pre-spec lambda seq
-      fitCV <- glmnet(training, y[-test.rows], lambda=lambda, alpha=a, family='binomial', ...) 
+      fitCV = glmnet(training, y[-test.rows], lambda=lambda, alpha=a, family='binomial', ...) 
       # autoplot(fit) + theme(legend.position="none")
       
       # Confusion matrix: quantitiative, pos results + neg results / number of test rows
@@ -463,11 +480,24 @@ plot.patient.cv<-function(df, fit=NULL) {
 
 
 ```{r xvalpt, message=F, warning=F, echo=F, fig.height=16, fig.width=16}
+# dysplasia.df = cbind(dysplasia.df, 'sl.nvr'=0)
+# dysplasia.df[, 'sl.nvr'] = scale(dysplasia.df[, "segment.length"] + dysplasia.df[, 'num.var.regions'])
+# 
+# dysplasia.df = cbind(dysplasia.df, 'sl.nvr.sv'=0)
+# dysplasia.df[, 'sl.nvr.sv'] = scale(dysplasia.df[, "segment.length"] + dysplasia.df[, 'num.var.regions'] + dysplasia.df[, 'sample.variance'])
+# 
+# dysplasia.df = cbind(dysplasia.df, 'sl.sv'=0)
+# dysplasia.df[, 'sl.sv'] = scale(dysplasia.df[, "segment.length"] + dysplasia.df[, 'sample.variance'])
+# 
+# dysplasia.df = cbind(dysplasia.df, 'nvr.sv'=0)
+# dysplasia.df[, 'sl.sv'] = scale(dysplasia.df[, "num.var.regions"] + dysplasia.df[, 'sample.variance'])
+
+
 nl = 1000
 
-coefs = list(); plots = list(); performance.at.1se = list()
+coefs = list(); plots = list(); performance.at.1se = list(); models = list();
 folds = 10; splits = 5 
-alpha.values = c(0,0.5,0.7,0.8,0.9,1)
+alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
 
 file = paste(cache.dir, 'patient_folds.tsv', sep='/')
 if (file.exists(file)) {
@@ -477,14 +507,13 @@ if (file.exists(file)) {
   write.table(sets, quote=F, sep='\t', row.names=F, file=file)
 }
 
-
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
   message(paste("loading", file))
   load(file, verbose=T)
 } else {
   for (a in alpha.values) {
-    fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=T) # all patients
+    fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F) # all patients
     #autoplot(fit0, xvar='lambda', main=paste('fit0, all samples, alpha=',a,sep='')) + theme(legend.position='none') 
     
     l = fit0$lambda
@@ -493,7 +522,7 @@ if (file.exists(file)) {
             seq(exp(-10), exp(-15), -1e-8),
             seq(exp(-15), exp(-20), -1e-9)), decreasing=T)
     }
-    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', standardize=T)
+    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', standardize=F)
     
     lambda.opt = ifelse( length(cv.patient$lambda.1se) > 0, cv.patient$lambda.1se, cv.patient$lambda.min )
     
@@ -503,8 +532,9 @@ if (file.exists(file)) {
     plots[[as.character(a)]] = arrangeGrob(cv.patient$plot+ggtitle('Classification'), cv.patient$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
     performance.at.1se[[as.character(a)]] = subset(cv.patient$lambdas, lambda.1se == T)
+    models[[as.character(a)]] = fit0
   }
-  save(plots, coefs, performance.at.1se, dysplasia.df, file=file)
+  save(plots, coefs, performance.at.1se, dysplasia.df, models, file=file)
 }
 
 do.call(grid.arrange, c(plots, top='All samples, 10fold, 5 splits'))
@@ -568,6 +598,11 @@ Values that are closer to full lasso (alpha=1) are pretty similar, however at fu
 
 `r pander(colSums(cfs), caption="Number of features found in 1, 2, or all 3 models by alpha 0.8, 0.9 and 1. While there are fewer features for higher values of alpha, the features are the same across models.")`
 
+```{r echo=F, message=F, warning=F}
+featureStability = rowSums(coefs[[select.alpha]][,-1])/(splits*folds)
+```
+
+
 
 ```{r echo=F, warning=F, message=F, eval=F}
 ### Features in samples
@@ -618,7 +653,7 @@ which(meantests < 0.05)
 
 Using the features from the alpha=`r select.alpha` models
 
-```{r, warning=F, message=F}
+```{r, warning=F, message=F, eval=T}
 #topF = names(which((coef.stable[['1']]) >= 0.75))
 topF = names(coef.stable[[select.alpha]])
 
@@ -630,16 +665,16 @@ feat = which(colnames(dysplasia.df) %in% topF)
 # Gain or loss not correlated in prog or non
 genomeCols = grep('^\\d+:', colnames(dysplasia.df), value=T)
 gl = cbind.data.frame(
-  'P.gain' = apply(features.in.prog, 2, function(x) sum( as.integer(x >= 1.1) ) ), 
-  'P.loss' = apply(features.in.prog, 2, function(x) sum( as.integer(x <= 0.9) ) ),
-  'NP.gain' = apply(features.nonprog, 2, function(x) sum( as.integer(x >= 1.1) ) ),
-  'NP.loss' = apply(features.nonprog, 2, function(x) sum( as.integer(x <= 0.9) ) ) ) 
+  'P.gain' = apply(features.in.prog, 2, function(x) sum( as.integer(x > 0) ) ), 
+  'P.loss' = apply(features.in.prog, 2, function(x) sum( as.integer(x < 0) ) ),
+  'NP.gain' = apply(features.nonprog, 2, function(x) sum( as.integer(x > 0) ) ),
+  'NP.loss' = apply(features.nonprog, 2, function(x) sum( as.integer(x < 0) ) ) ) 
 
 allgl = cbind.data.frame(
-  'ALL.P.gain' = apply(dysplasia.df[names(which(labels == 1)), genomeCols], 2, function(x) sum( as.integer(x >= 1.1) ) ), 
-  'ALL.P.loss' = apply(dysplasia.df[names(which(labels == 1)),genomeCols], 2, function(x) sum( as.integer(x <= 0.9) ) ),
-  'ALL.NP.gain' = apply(dysplasia.df[names(which(labels == 0)),genomeCols], 2, function(x) sum( as.integer(x >= 1.1) ) ), 
-  'ALL.NP.loss' = apply(dysplasia.df[names(which(labels == 0)),genomeCols], 2, function(x) sum( as.integer(x <= 0.9) ) ) )
+  'ALL.P.gain' = apply(dysplasia.df[names(which(labels == 1)), genomeCols], 2, function(x) sum( as.integer(x > 0) ) ), 
+  'ALL.P.loss' = apply(dysplasia.df[names(which(labels == 1)),genomeCols], 2, function(x) sum( as.integer(x < 0) ) ),
+  'ALL.NP.gain' = apply(dysplasia.df[names(which(labels == 0)),genomeCols], 2, function(x) sum( as.integer(x > 0) ) ), 
+  'ALL.NP.loss' = apply(dysplasia.df[names(which(labels == 0)),genomeCols], 2, function(x) sum( as.integer(x < 0) ) ) )
 
 grid.arrange(
   ggcorr(gl, label=T) + ggtitle('Selected Features'),
@@ -647,7 +682,7 @@ grid.arrange(
 top='Gains vs Losses') 
 
 
-# Gains/losses enriched in the top features?  Appears so
+# Gains/losses enriched in the top features?  Appears not
 (fisher.test(rbind(colSums(gl[,c('P.gain','P.loss')]),colSums(allgl[-feat,c('ALL.P.gain','ALL.P.loss')])  )) )
 
 (fisher.test(rbind(colSums(gl[,c('NP.gain','NP.loss')]),colSums(allgl[-feat,c('ALL.NP.gain','ALL.NP.loss')])  )) )
@@ -664,7 +699,7 @@ chromInfo$chr = factor(chromInfo$chr, levels=c(1:22, 'X','Y'))
 topFSegments = do.call(rbind,  strsplit( topF[grep('^\\d+:', topF)], ':|-' ))
 colnames(topFSegments) = c('chr','start','end')
 topFSegments = as.data.frame(apply(topFSegments, 2, as.numeric))
-topFSegments$chr = factor(topFSegments$chr, levels=chromInfo$chr)
+topFSegments$chr = factor(topFSegments$chr, levels=droplevels(chromInfo$chr[1:22]), ordered=T)
 topFSegments = arrange(topFSegments, chr, start)
 
 topFRegions = arrange(merge(chromInfo[,c('chr','length', 'protein_coding')], topFSegments %>% group_by(chr) %>% summarise('totalbp'=sum(end-start), 'n.segments'=length(chr)), all.x=T), -protein_coding)
@@ -678,11 +713,13 @@ topFRegions$adj.info.content = topFRegions$protein_coding/(topFRegions$length^0.
 
 topFRegions = transform(topFRegions, ai.cut=cut(adj.info.content, 5, labels=c(5:1), include.lowest=T))           # bin data
 
-grid.arrange(ggplot(topFRegions, aes(reorder(chr, -adj.info.content), totalbp/length, fill=ai.cut)) + ylim(0, 0.5) +
-  labs(y='Feature bp/total chr length', title='Ratio of covered base pairs', x='chr') +
-  geom_bar(stat='identity') +  geom_text(aes(label=round(totalbp/length, 2)), vjust=-0.5) +
-  scale_fill_discrete(name='Length adjusted information content') + theme(legend.position = 'bottom'), 
-  bottom='Ratio of base pair coverage per chromosome in the top non-zero features\n selected from the model. Chromosomes are sorted\nand binned by their gene (e.g. information) content rather than by overall length.')
+grid.arrange(
+  #ggplot(topFRegions, aes(reorder(chr, -adj.info.content), totalbp/length, fill=ai.cut)) + ylim(0, 0.5) +
+  ggplot(topFRegions, aes(chr, totalbp/length, fill=ai.cut)) + ylim(0, 0.5) +
+    labs(y='Feature bp/total chr length', title='Ratio of covered base pairs', x='chr') +
+    geom_bar(stat='identity') +  geom_text(aes(label=round(totalbp/length, 2)), vjust=-0.5) +
+    scale_fill_discrete(name='Length adjusted information content') + theme(legend.position = 'bottom'), 
+      bottom='Ratio of base pair coverage per chromosome in the top non-zero features\n selected from the model. Chromosomes are sorted\nand binned by their gene (e.g. information) content rather than by overall length.')
 
 ct = with(topFRegions, cor.test(adj.info.content, totalbp/length))
 
@@ -729,15 +766,16 @@ tryCatch({
   }
   
   # Not related to the length of the segment
-  pander(with(topFSegments, cor.test(genes, (end-start))), caption="Number of genes per segment is not related to the segment length.")
+  pander(with(topFSegments, cor.test(genes, (end-start))), caption="Number of genes per segment may be related to the segment length.")
 }, error = function(e) {
   warning(paste("Failed to connect to Biomart service", e))
 })
 ```
 
-#### Correlations
 
-```{r echo=F, message=F, warning=F}
+
+```{r echo=F, message=F, warning=F, eval=F}
+#### Correlations
 library(Hmisc)
 
 flattenCorrMatrix <- function(cormat, pmat) {
@@ -754,13 +792,11 @@ head(dysplasia.df)
 rc = rcorr(dysplasia.df)
 rc = flattenCorrMatrix(rc$r, rc$P)
 
-
-
 rc = subset(rc, row %in% rownames(coefs[[select.alpha]]) | column %in% rownames(coefs[[select.alpha]]))
 rc = subset(rc, p < 0.05)
 
-nrow(rc)
-head(rc)
+#nrow(rc)
+#head(rc)
 
 
 pos = do.call(rbind.data.frame, strsplit(as.character(rc$column), ':|-'))
@@ -777,12 +813,12 @@ rc = cbind(pos, rc)
 
 rc$r.coef = as.integer(rc$row %in% rownames(coefs[[select.alpha]]))
 
-head(rc)
+#head(rc)
 
 rc = subset(rc, cor >= 0.5)
 
 rc = arrange(rc, row.chr, col.chr, row.start, col.start)
-head(rc)
+#head(rc)
 
 #rc[sort(c(which(rc$r.coef == 1), which(rc$r.coef == 1)+1)),]
 
@@ -794,7 +830,7 @@ rc1 = transform(rc1, column=reorder(column, col.start) )
 
 subset(rc1, column == '16:85599240-90354752' | row == '16:85599240-90354752')
 
-head(rc1)
+#head(rc1)
 
 ggplot(rc1, aes(column, row, fill=cor)) + geom_tile()  +  #scale_fill_gradient(low = "white", high = "red") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -810,32 +846,37 @@ cor.test(rc1$col.start - rc1$row.end , rc1$cor)
 Using the model for alpha=`r select.alpha`.
 
 ```{r echo=F, warning=F, message=F,eval=T, fig.height=8, fig.width=8}
+
 hazards = apply( exp(t(dysplasia.df[, rownames(coefs[[select.alpha]])]) *  coefs[[select.alpha]][,1]), 1, function(x) {
   sd(x)/mean(x)
 })
 ch = as.data.frame(hazards)
 ch$coef = coefs[[select.alpha]][,1]
 ch$label = rownames(ch)
-library(ggrepel)
+ch$stability = featureStability
+
 ggplot(ch, aes(coef, hazards, col=hazards > quantile(hazards)[['75%']])) + 
   #xlim(min(coefGR$coef)-5, max(coefGR$coef)+10) +
   geom_point(alpha=0.5) + 
-  geom_text_repel(aes(x=coef+10, label=ifelse(hazards > quantile(hazards)[['75%']], label, '')),show.legend=F) +
+  geom_text_repel(aes(x=coef, label=ifelse(hazards > quantile(hazards)[['75%']], label, '')),show.legend=F) +
   labs(title='Top features coef vs hazard') + theme(legend.position = 'bottom')
 ```
 
 
 
-```{r echo=F, warning=F, message=F,eval=T, fig.height=12, fig.width=8}
+```{r echo=F, warning=F, message=F,eval=F, fig.height=12, fig.width=8}
+ch = arrange(ch, -stability, -hazards, -coef)
+ch$hazards = round(ch$hazards, 3)
+ch$coef = round(ch$coef, 3)
+write.table(ch[c('label', 'stability','hazards','coef')], row.names = F, quote=F, sep="\t", file='features.txt')
+
 ch = arrange(ch, -hazards)
 
-ch$hazards = round(ch$hazards, 2)
-ch$coef = round(ch$coef, 2)
 
 melt.by.reg<-function(x) {
   r = x[['label']]
 
-  reg = cbind.data.frame( 'value'=dysplasia.df[ , r ], labels)
+  reg = cbind.data.frame( 'value'=dysplasia.df[ ,r], labels)
   reg$labels = factor(reg$labels)
   reg$labels = revalue(reg$labels, c("1"="P", "0"="NP"))
 
@@ -843,32 +884,56 @@ melt.by.reg<-function(x) {
 
   reg$pval = tt$p.value
   reg$region = r
-  reg$hazard = x[['hazards']]
-  reg$coef = x[['coef']]
+  reg$hazard = as.numeric(x[['hazards']])
+  reg$coef = as.numeric(x[['coef']])
   return(reg)
 }
 
 plot.reg<-function(x) {
   reg = melt.by.reg(x)
-  pv = ifelse(tt$p.value < .001, '< .001', format.pval(unique(reg$p.value)))
+  
+  pv = ifelse(reg$pval[1] < .001, '< .001', format.pval(unique(reg$pval[1])))
 
 #  ggplot(reg, aes(value, fill=labels) ) + geom_histogram(bins=50, color='grey') + 
 #    labs(x='seg. value', title=r, subtitle=paste('haz=',x[['hazards']], ' coef=', x[['coef']], ' MW pval: ',pv,sep=''))
-  ggplot(reg, aes(x=labels, y=value, group=labels, fill=labels) ) + geom_jitter(color='grey', show.legend = F) + geom_violin(show.legend = F, alpha=0.5) +  ylim(0.75, 1.2) +
+  ggplot(reg, aes(x=labels, y=value, group=labels, fill=labels) ) + geom_jitter(color='grey', show.legend = F) + geom_violin(show.legend = F, alpha=0.5) +
     geom_hline(yintercept = median(reg$value) + sd(reg$value)) + geom_hline(yintercept = median(reg$value) - sd(reg$value)) +
-    labs(x='', y='seg. value', title=r, subtitle=paste('haz=',x[['hazards']], ' coef=',x[['coef']], '\nMW pval ',pv,sep=''))
+    labs(x='', y='seg. value', title=x[['label']], subtitle=paste('haz= ',x[['hazards']], ' coef= ',x[['coef']], '\nMW pval ',pv,sep=''))
 }
 
+ch = arrange(ch, -hazards)
 
 regions = apply(ch, 1, melt.by.reg)
+names(regions) = ch$label
 
-do.call(grid.arrange, c(lapply(regions, function(reg) {
-  se = 2
-  x = rbind.data.frame('P'= cbind( 'gain' = length(which(with(subset(reg, labels == 'P'), value >= median(value) + sd(value)*se))),
-                               'loss' = length(which(with(subset(reg, labels == 'P'), value <= median(value) - sd(value)*se))) ),
+do.call(grid.arrange, c(lapply(regions[1:15], function(reg) {
+  print(reg$region[1])
+  cols = c('indianred3','slateblue2')
+  if ( as.numeric(reg$coef[1]) < 0) cols = c('green3', 'darkviolet')
 
-                  'NP' = cbind( 'gain' = length(which(with(subset(reg, labels == 'NP'), value >= median(value) + sd(value)*se))),
-                                'loss' = length(which(with(subset(reg, labels == 'NP'), value <= median(value) - sd(value)*se))) ) )
+  ggplot(reg, aes(labels, value*coef, fill=labels, color=labels)) + 
+    geom_jitter(aes(labels, value), width=0.05, color='yellow4', alpha=0.3) +
+    geom_jitter(aes(labels, value*coef, color=labels), width=0.05, alpha=0.5) +
+    geom_text_repel(data=subset(reg, value >= quantile(reg$value)[['100%']]), aes(labels, value, label=round(value, 3)), color='yellow4') +
+    geom_text_repel(data=subset(reg, value >= quantile(reg$value)[['100%']]), aes(labels, value*coef, label=round(value, 3),color=labels)) + geom_violin(alpha=0.2) + 
+    scale_fill_manual(values=cols) + scale_color_manual(values=cols) +
+    theme(legend.position = 'none') + labs(title=unique(reg$region)[1], x='')
+})))
+      
+    
+    #geom_violin(aes(labels, value, fill=labels), alpha=0.5) + theme(legend.position = 'none')
+  
+#  x = rbind.data.frame('P'= cbind( 'gain' = length(which(with(subset(reg, labels == 'P'), value > 0))),
+#                               'loss' = length(which(with(subset(reg, labels == 'P'), value < 0))) ),
+
+#                        'NP' = cbind( 'gain' = length(which(with(subset(reg, labels == 'NP'), value > 0))),
+#                                'loss' = length(which(with(subset(reg, labels == 'NP'), value < 0))) ) )
+
+    # x = rbind.data.frame('P'= cbind( 'gain' = length(which(with(subset(reg, labels == 'P'), value >= median(value) + sd(value)*se))),
+  #                              'loss' = length(which(with(subset(reg, labels == 'P'), value <= median(value) - sd(value)*se))) ),
+  # 
+  #                 'NP' = cbind( 'gain' = length(which(with(subset(reg, labels == 'NP'), value >= median(value) + sd(value)*se))),
+  #                               'loss' = length(which(with(subset(reg, labels == 'NP'), value <= median(value) - sd(value)*se))) ) )
   # x = rbind.data.frame('P'= cbind( 'high' = length(which(with(subset(reg, labels == 'P'), value >= 1.1))),
   #                                  'low' = length(which(with(subset(reg, labels == 'P'), value <= 0.9))) ),
   # 
@@ -877,13 +942,13 @@ do.call(grid.arrange, c(lapply(regions, function(reg) {
 
   
   
-  cols = c('indianred3','slateblue2')
-  if ( as.numeric(reg$coef[1]) < 0) cols = c('plum', 'skyblue3')
-  #ggplot(melt(as.matrix(x)), aes(Var1, value, fill=Var2) ) + geom_bar(stat='identity', position='dodge') + labs(x='', y='', title=unique(reg$region)[1]) + scale_fill_manual(values=cols)
+  #cols = c('indianred3','slateblue2')
+  #if ( as.numeric(reg$coef[1]) < 0) cols = c('plum', 'skyblue3')
+
+  #ggplot(melt(as.matrix(x)), aes(Var2, value, fill=Var1)) + facet_grid(~Var1) +
+  #  geom_col( show.legend = F) + labs(x='', y='', title=unique(reg$region)[1]) + scale_fill_manual(values=cols)
   
-  ggplot(melt(as.matrix(rowSums(x))), aes(Var1, value, fill=Var1)) + geom_bar(stat='identity', show.legend = F)+ labs(x='', y='', title=unique(reg$region)[1]) + scale_fill_manual(values=cols)
-  
-})))
+#})))
 
 ## Individual hazards vs CN values?  exp(coef) -- odds ratio
 # plot( exp( coefs[[select.alpha]][ch$label[1],1]  * dysplasia.df[,ch$label[1]]),  dysplasia.df[,ch$label[1]] )
@@ -906,8 +971,6 @@ do.call(grid.arrange, c(lapply(regions, function(reg) {
 #do.call(grid.arrange, c(apply(ch[21:30,],1, plot.reg), ncol=2))
 
 ```
-
-
 
 
 
@@ -995,7 +1058,7 @@ losses = pmin(0, x-median(x))
 run.cv<-function(x, y, alphas=c(0,0.2,0.5,1), ...) {
   plots = list(); coefs = list(); performance.at.1se = list()
   for (a in alphas) {
-    fitg <- glmnet(x, y, alpha=a, nlambda=nl, family='binomial') # all patients
+    fitg <- glmnet(x, y, alpha=a, nlambda=nl, family='binomial', standardize = F) # all patients
 
     l = fitg$lambda
     if (a == 0) {
@@ -1004,7 +1067,7 @@ run.cv<-function(x, y, alphas=c(0,0.2,0.5,1), ...) {
             seq(exp(-15), exp(-20), -1e-9)), decreasing=T)
     }
 
-    cvp = crossvalidate.by.patient(x, y, fit=fitg, lambda=l, a=a, ...)
+    cvp = crossvalidate.by.patient(x, y, fit=fitg, lambda=l, a=a, pts=sets, standardize=F)
     plots[[as.character(a)]] = arrangeGrob(cvp$plot+ggtitle('Classification'), cvp$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
     coef.1se = as.data.frame(non.zero.coef(fitg, cvp$lambda.1se))
@@ -1075,8 +1138,8 @@ if (file.exists(file)) {
   samples = intersect(rownames(dysplasia.df), subset(info, Pathology %nin% c('HGD', 'IMC'))$Samplename)
   for (a in alpha.values) {
     # all patients
-    fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl) 
-    cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoHGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD)
+    fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl, standardize = F) 
+    cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoHGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD, standardize = F)
     
     no.hgd.plots[[as.character(a)]] = arrangeGrob(cv.nohgd$plot+ggtitle('Classification'), cv.nohgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
@@ -1150,9 +1213,9 @@ if (file.exists(file)) {
   samples = intersect(rownames(dysplasia.df), subset(info, Pathology %nin% c('HGD', 'IMC', 'LGD'))$Samplename)
   
   for (a in alpha.values) {
-    fitNoLGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl) # all patients
+    fitNoLGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl, standardize = F) # all patients
     
-    cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoLGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD)
+    cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoLGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD, standardize = F)
     
     nolgd.plots[[as.character(a)]] = arrangeGrob(cv.nolgd$plot+ggtitle('Classification'), cv.nolgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
@@ -1208,24 +1271,22 @@ rownames(stability) = names(coef.stable)
 
 They also share all of the non-zero coefficients (`r which.max(sapply(coef.stable, length))` identifies the most non-zero coefs `r max(sapply(coef.stable, length))`).
 
-
+```{r manyfew, echo=T, message=F, warning=F, fig.height=16, fig.width=16, eval=F}
 ## Compare progressors with many samples vs few
-
-```{r manyfew, echo=T, message=F, warning=F, fig.height=16, fig.width=16}
 m = median(subset(sum.patient.data, Status == 'P')$total.samples)
-nonps = as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'NP')$Patient], function(df) df$info$Samplename)))
+nonps = as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID], function(df) df$info$Samplename)))
 
 file = paste(cache.dir, 'few.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
 } else {
   # Few
-  samples = c(nonps, as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'P' & total.samples < m)$Patient], function(pt) pt$info$Samplename))))
+  samples = c(nonps, as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'P' & total.samples < m)$Hospital.Research.ID], function(pt) pt$info$Samplename))))
   
   few.plots = list()
   for (a in alpha.values) {
-    fitF <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=nl, family='binomial') # all patients
-    cv.back.few = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitF$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fitF, minR=0.1)
+    fitF <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=nl, family='binomial', standardize = F) # all patients
+    cv.back.few = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitF$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=folds, a=a, fit=fitF, minR=0.1, standardize = F)
     #few.plots[[as.character(a)]] = cv.back.few$plot + ggtitle(paste('alpha=',a,sep=''))
     
     few.plots[[as.character(a)]] = arrangeGrob(cv.back.few$plot+ggtitle('Classification'), cv.back.few$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
@@ -1240,13 +1301,13 @@ file = paste(cache.dir, 'many.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
 } else {
-  samples = c(nonps, as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'P' & total.samples >= m)$Patient], function(pt) pt$info$Samplename))))
+  samples = c(nonps, as.vector(unlist(lapply(patient.data[subset(sum.patient.data, Status == 'P' & total.samples >= m)$Hospital.Research.ID], function(pt) pt$info$Samplename))))
   
   many.plots = list()
   for (a in alpha.values) {
-    fitM <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=nl, family='binomial') # all patients
+    fitM <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, nlambda=nl, family='binomial', standardize = F) # all patients
     
-    cv.back.many = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitM$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fitM)
+    cv.back.many = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitM$lambda, pts=subset(pts, Samplename %in% samples), splits=5, nfolds=20, a=a, fit=fitM, standardize = F)
     
     many.plots[[as.character(a)]] = arrangeGrob(cv.back.many$plot+ggtitle('Classification'), cv.back.many$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
   }
@@ -1271,8 +1332,8 @@ if (file.exists(file)) {
   rand.patients = sum.patient.data
   rand.patients$Status = sample( c('NP','P'), nrow(sum.patient.data), replace=T, prob=c(0.5,0.5))
 
-  r.labels = unlist(apply(rand.patients[,c('Patient','Status')],1, function(st) {
-    info = patient.data[[ st['Patient'] ]]$info
+  r.labels = unlist(apply(rand.patients[,c('Hospital.Research.ID','Status')],1, function(st) {
+    info = patient.data[[ st['Hospital.Research.ID'] ]]$info
     lbl = rep(as.integer( st['Status'] == 'P' ), nrow(info))
     names(lbl) = info$Samplename
     return(lbl)
@@ -1285,9 +1346,9 @@ if (file.exists(file)) {
   r.coefs = list(); r.plots = list()
   folds = 10; splits=5
   for (a in c(0,0.5,1)) {
-    fitR <- glmnet(r.dysplasia.df, r.labels, alpha=a, nlambda=nl, family='binomial') # all patients
+    fitR <- glmnet(r.dysplasia.df, r.labels, alpha=a, nlambda=nl, family='binomial', standardize = F) # all patients
     
-    cv.R = crossvalidate.by.patient(x=r.dysplasia.df, y=r.labels, lambda=fitR$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fitR)
+    cv.R = crossvalidate.by.patient(x=r.dysplasia.df, y=r.labels, lambda=fitR$lambda, pts=pts, a=a, nfolds=folds, splits=splits, fit=fitR, standardize = F)
     
     lambda.opt = ifelse( length(cv.R$lambda.1se) > 0, cv.R$lambda.1se, cv.R$lambda.min )
     
@@ -1335,7 +1396,7 @@ if (file.exists(file)) {
   # Remove each patient (LOO)
   for (pt in names(pg.samp)) {
     print(pt)
-    tmp.patient.data = patient.data[subset(sum.patient.data, Patient != pt)$Patient]
+    tmp.patient.data = patient.data[subset(sum.patient.data, Hospital.Research.ID != pt)$Hospital.Research.ID]
     samples = as.vector(unlist(sapply(tmp.patient.data, function(df) df$info$Samplename )))
     
     train.rows = which(rownames(dysplasia.df) %in% samples)
@@ -1350,13 +1411,13 @@ if (file.exists(file)) {
     
     # Fit generated on all samples, including HGD
     a = select.alpha
-    fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl) # all patients
+    fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
     #l = sort(c(fitLOO$lambda, seq(exp(-5), exp(-10), -0.001),
     #      seq(exp(-10), exp(-15), -1e-7), 
     #      seq(exp(-15), exp(-20), -1e-9)), decreasing=T)
     l = fitLOO$lambda
     cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, 
-                                  pts=subset(pts, Samplename %in% samples), a=a, nfolds=10, splits=5, fit=fitLOO)
+                                  pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitLOO, standardize=F)
     #plots[[pt]] = cv$plot + ggtitle(pt)
     
     plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
@@ -1383,7 +1444,7 @@ if (file.exists(file)) {
       pg.samp[[pt]]$Prediction.Dev.Resid = sy[,1] 
       
     } else {
-      warning(paste("Patient", pt, "did not have a 1se"))
+      warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
   }
   save(plots, performance.at.1se, coefs, fits, pg.samp, file=file)
@@ -1400,27 +1461,28 @@ ggplot(as.data.frame(performance.at.1se), aes(y=performance.at.1se, x='LOO')) + 
 Based on these curves we get our best AUC at ~0.36.  Currently we are using 0.5 by default.
 
 ```{r prediction_cutoff, echo=F, message=F, warning=F, fig.height=10, fig.width=6}
-preds = unlist(lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(df) df$Prediction))
-np.preds = unlist(lapply(pg.samp[subset(sum.patient.data, Status == 'NP')$Patient], function(df) df$Prediction))
+preds = unlist(lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(df) df$Prediction))
+np.preds = unlist(lapply(pg.samp[subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID], function(df) df$Prediction))
 
 roc50 = pROC::roc(as.integer(c(preds, np.preds) > 0.5), 
                 c(rep(1, length(preds)), rep(0, length(np.preds))),
                 main='Progressors & Non-progressors, cutoff 0.5')
                 
-df = cbind('Specificity'=rev(roc50$specificities), 'Sensitivity'=rev(roc50$sensitivities))
+df = cbind.data.frame('Specificity'=rev(roc50$specificities), 'Sensitivity'=rev(roc50$sensitivities))
 g1 = ggplot(df, aes(Specificity, Sensitivity)) + geom_line() +
   scale_x_reverse() + 
-  geom_label(data=t(as.data.frame(round(pROC::coords(roc50, "best"),2))), aes(x=specificity, y=sensitivity, label=paste('prob=',threshold, ' (', specificity*100, '%, ', sensitivity*100,'%)\nAUC:', sprintf("%.2f",roc50$auc*100), '%', sep='')), nudge_x=.25) +
+  geom_label(data=t(as.data.frame(round(pROC::coords(roc50, "best"),2))), 
+             aes(x=specificity, y=sensitivity, label=paste('prob=',threshold, ' (FPR ', specificity*100, '%, TPR ', sensitivity*100,'%)\nAUC:', sprintf("%.2f",roc50$auc*100), '%', sep='')), nudge_x=.25) +
   labs(title='Probability threshold = 0.5', x='Specificity (FPR)', y='Sensitivity (TPR)')  
 
 
 preds = do.call(rbind.data.frame, lapply(pg.samp, function(df) df[c('Status','Prediction')]))
 roc = pROC::roc(Status ~ Prediction, data=preds, ci=T, of='thresholds')
 
-df = cbind('Specificity'=rev(roc$specificities), 'Sensitivity'=rev(roc$sensitivities))
+df = cbind.data.frame('Specificity'=rev(roc$specificities), 'Sensitivity'=rev(roc$sensitivities))
 g2 = ggplot(df, aes(Specificity, Sensitivity)) + geom_line() +
   scale_x_reverse() + 
-  geom_label(data=t(as.data.frame(round(pROC::coords(roc, "best"),2))), aes(x=specificity, y=sensitivity, label=paste('prob=',threshold, ' (', specificity*100, '%, ', sensitivity*100,'%)\nAUC:', sprintf("%.2f",roc$auc*100), '%', sep='')), nudge_x=.25) +
+  geom_label(data=t(as.data.frame(round(pROC::coords(roc, "best"),2))), aes(x=specificity, y=sensitivity, label=paste('prob=',threshold, ' (FPR ', specificity*100, '%, TPR ', sensitivity*100,'%)\nAUC:', sprintf("%.2f",roc$auc*100), '%', sep='')), nudge_x=.25) +
   labs(title='Probability threshold calculated by ROC', x='Specificity (FPR)', y='Sensitivity (TPR)')  
   
 
@@ -1444,17 +1506,17 @@ Providing a single sample at a time to predict is unnecessary as each sample is 
 
 ```{r timepoints, echo=F, message=F, warning=F}
 # For HGD/IMC samples, progressors only
-hgd = sapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
+hgd = sapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(pt) {
   hgd = subset(pt, Pathology %in% c('HGD', 'IMC'))
   sum(as.integer(hgd$Prediction > cutoff))/nrow(hgd)
 })
 
-
-hgd = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
+hgd = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(pt) {
   hgd = subset(pt, Pathology %in% c('HGD', 'IMC'))
   cbind.data.frame('correctly.predicted'=sum(as.integer(hgd$Prediction > cutoff)), 'total.hgd.samples'=nrow(hgd))
 }))
-rownames(hgd) = subset(sum.patient.data, Status == 'P')$Patient
+rownames(hgd) = subset(sum.patient.data, Hospital.Research.ID %in% rownames(hgd))$Patient
+
 hgd = subset(hgd, total.hgd.samples > 0) # Some patients had no hgd samples
 
 hgd$pred.ratio = hgd$correctly.predicted/hgd$total.hgd.samples
@@ -1467,7 +1529,7 @@ ggplot(hgd[,c('total.hgd.samples','pred.ratio', 'Patients')], aes(x=Patients, y=
   coord_flip() + labs(title='Correctly predicted HGD samples', y='Correct prediction ratio')
 
 global.by.path = do.call(rbind.data.frame,
-                         lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
+                         lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(pt) {
   final.endo = subset(pt, Endoscopy.Year == max(Endoscopy.Year))
   final.endo = final.endo[nrow(final.endo),]
   
@@ -1487,6 +1549,7 @@ global.by.path = do.call(rbind.data.frame,
 )
 
 global.by.path = colSums(global.by.path)
+
 global.path = as.data.frame(matrix(global.by.path, byrow=T, nrow=4, dimnames=list(c('HGD','LGD','ID','NDBE'),c('pred', 'total'))))
 global.path$ratio = (global.path$pred/global.path$total)*100
 global.path$path = rownames(global.path)
@@ -1502,10 +1565,12 @@ ggplot(melt(global.path[,c('ratio','total','path')], measure.vars='ratio', id.va
 
 
 ```{r echo=F, message=F, warning=F}
-lgd = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
+lgd = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(pt) {
   e = subset(pt, Pathology  == 'LGD')
   cbind.data.frame('predicted'=sum(as.integer(e$Prediction > cutoff)), 'total.lgd'=nrow(e))
 }))
+rownames(lgd) = subset(sum.patient.data, Hospital.Research.ID %in% rownames(lgd))$Patient
+
 lgd = subset(lgd, total.lgd > 0)
 
 lgd$pred.ratio = round(lgd$predicted/lgd$total.lgd, 2)
@@ -1520,7 +1585,6 @@ ggplot(lgd[,c('total.lgd','pred.ratio', 'Patients')], aes(x=Patients, y=pred.rat
 
 ```{r, echo=F, warning=F, message=F, fig.width=10, fig.height=10}
 # All samples
-
 all.predictions = sapply(pg.samp, function(pt) {
   if (unique(pt$Status) == 'NP') {
     as.integer(pt$Prediction < cutoff)
@@ -1533,7 +1597,10 @@ all.predictions = do.call(rbind, lapply(all.predictions, function(x) {
   cbind.data.frame('correctly.predicted'=sum(x), 'total.samples'=length(x))
 }))
 
-all.predictions$Status = ifelse (rownames(all.predictions) %in% subset(sum.patient.data, Status == 'P')$Patient, 'P', 'NP')
+all.predictions$Status = ifelse (rownames(all.predictions) %in% subset(sum.patient.data, Status == 'P')$Hospital.Research.ID, 'P', 'NP')
+
+rownames(all.predictions) = subset(sum.patient.data, Hospital.Research.ID %in% rownames(all.predictions))$Patient
+
 
 #ggplot(melt(all.predictions, id.vars='Status'), aes(y=value, x=Status, fill=variable)) +
 #  geom_bar(stat='identity', position='dodge') + labs(x='', y='Sample Counts', main='Total Sample Predictions')
@@ -1587,7 +1654,7 @@ In non-progressors `r round(nrow(subset(np, pred.ratio == 1))/nrow(np), 2)*100`%
 
 ```{r timepoints2, echo=T, message=F, warning=F, fig.height=10, fig.width=8}
 # Only BE, Progressors
-ndbe.only = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
+ndbe.only = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(pt) {
   final.endo = subset(pt, Pathology %in% c('IMC','HGD'))
   e = subset(pt, Pathology %in% c('BE', '', '?'))
   if (nrow(final.endo) > 0) # exclude BE at the HGD endoscopy
@@ -1598,6 +1665,8 @@ ndbe.only = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P'
 ndbe.only = subset(ndbe.only, total.be > 0) # Exclude patients without any BE
 ndbe.only$pred.ratio = round(ndbe.only$predicted/ndbe.only$total.be, 2)
 
+rownames(ndbe.only) = subset(sum.patient.data, Hospital.Research.ID %in% rownames(ndbe.only))$Patient
+
 ndbe.only$Patients = rownames(ndbe.only)
 ndbe.only = transform(ndbe.only, Patients=reorder(Patients, -pred.ratio) ) 
 
@@ -1606,11 +1675,13 @@ ggplot(ndbe.only[,c('total.be','pred.ratio', 'Patients')], aes(x=Patients, y=pre
   coord_flip() + labs(title='Correctly predicted NDBE samples', subtitle='Excluding samples at HGD endoscopy', y='Correct prediction ratio')
 
 
-total = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
+total = do.call(rbind, lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(pt) {
     cbind.data.frame('predicted'=sum(as.integer(pt$Prediction > cutoff)), 'total'=nrow(pt))
 }))
 
 total$pred.ratio = round(total$predicted/total$total, 2)
+
+rownames(total) = subset(sum.patient.data, Hospital.Research.ID %in% rownames(total))$Patient
 
 total$Patients = rownames(total)
 total = transform(total, Patients=reorder(Patients, -pred.ratio) ) 
@@ -1620,7 +1691,7 @@ ggplot(total[,c('total','pred.ratio', 'Patients')], aes(x=Patients, y=pred.ratio
 
 
 # For all pre-HGD/IMC/LGD in progressors
-pre.hgd = sapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], function(pt) {
+pre.hgd = sapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(pt) {
   e = subset(pt, Pathology %nin% c('HGD', 'IMC', 'LGD'))
   e$Prediction
   sum(as.integer(e$Prediction > cutoff))/nrow(e)
@@ -1642,11 +1713,11 @@ predicted.progression<-function(x, pos=1) {
 cols = c('%.Predicted','n.Endoscopies','n.Patients', 'FNR','FPR', 'median.pred.samp','median.total.samp', 'max.samples', 'sd.samples')
 p.predictions = as.data.frame(matrix(data=0,nrow=6, ncol=length(cols), dimnames=list(c(), cols)))
 for (i in 1:nrow(p.predictions)) {
-  p = sapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], pred.by.endo, i)
+  p = sapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], pred.by.endo, i)
   pp = sapply(p, predicted.progression)
   pp = pp[!is.na(pp)]
   
-  fpr = sapply(pg.samp[subset(sum.patient.data, Status == 'NP')$Patient], pred.by.endo, i)
+  fpr = sapply(pg.samp[subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID], pred.by.endo, i)
   fpr = sapply(fpr, predicted.progression)
   fpr = fpr[!is.na(fpr)]
 
@@ -1686,13 +1757,15 @@ transform.pt.by.time<-function(pt) {
   arrange(pt, -Endoscopy.Year, PID)
 }
 
-back = lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Patient], transform.pt.by.time)
+back = lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], transform.pt.by.time)
 
 endos = do.call(rbind, lapply(1:max(sapply(back,nrow)), function(i) {
   df = do.call(rbind, lapply(back, function(x) {
     if (i > nrow(x)) return(NA)
     cbind(x[i, c('Endoscopy.Year','pred','samples', 'months.before.final', 'max.path')], i)
   }))
+  rownames(df) = subset(sum.patient.data, Hospital.Research.ID %in% rownames(df))$Patient
+
   df$Patient = rownames(df)
   return(df)
 }))
@@ -1721,8 +1794,6 @@ plot.endo<-function(df, minM=NULL, maxM=NULL, bin=F) {
   if (is.null(minM)) minM = min(df$months.before.final)
   if (is.null(maxM)) maxM = max(df$months.before.final)
 
-  #df$i = as.factor(df$i)
-  
   df = arrange(df %>% group_by(Patient) %>% mutate('overall.pred'=sum(as.integer(pred > 0))/length(Patient)), Patient)
   
   df = transform(df, Patient=reorder(Patient, -overall.pred) ) 
@@ -1732,13 +1803,17 @@ plot.endo<-function(df, minM=NULL, maxM=NULL, bin=F) {
     ggplot(df, aes(months.before.final, endo.pred, group=1,color=Patient)) + facet_grid(Patient ~.) + 
       scale_x_continuous(breaks=seq(minM, maxM, by = 12)) +
       geom_line() + geom_point() +
-      geom_label_repel(aes(label=max.path, fill=Patient, color=Patient), color='white', fontface='bold', size=3, label.size=0, label.r=unit(0.25, 'lines'), label.padding=unit(0.15, 'lines')) +
-      labs(x='Months before diagnosis', y='Predictive Endoscopy') + theme(legend.position='none') + theme(strip.text = element_text(face="bold", size=9))
+      geom_label_repel(aes(label=max.path, fill=Patient, color=Patient), color='white', fontface='bold', size=4, label.size=0, label.r=unit(0.25, 'lines'), label.padding=unit(0.15, 'lines')) +
+      labs(x='Months before diagnosis', y='Predictive Endoscopy') + 
+      theme(text=element_text(size=14, face="bold"), axis.title=element_text(size=16), legend.position='none')
   } else {
-  ggplot(df, aes(months.before.final, pred.ratio, group=1,color=Patient)) + facet_grid(Patient ~.) + scale_x_continuous(breaks=seq(minM, maxM, by = 12)) +
-    geom_line() + geom_point() +  
-      geom_label_repel(aes(label=max.path, fill=Patient), color='white', fontface='bold', size=3, label.size=0, label.r=unit(0.25, 'lines'), label.padding=unit(0.15, 'lines')) +
-      labs(x='Months before diagnosis', y='Sample prediction ratio') + theme(legend.position='none') 
+  ggplot(df, aes(months.before.final, pred.ratio, group=1, color=Patient, fill=Patient)) + facet_grid(Patient ~.) +
+      ylim(0,1) + geom_abline(slope=0, intercept=seq(.25,.75,.25), color='grey', linetype='dashed') +
+      geom_col(position='dodge', aes(y=pred.ratio)) + geom_line() +
+      scale_x_continuous(breaks=seq(minM, maxM, by = 12)) + 
+      geom_label(aes(y=ifelse(pred.ratio==1, 0.75, pred.ratio), label=max.path, fill=Patient), color='white', fontface='bold', size=4, label.size=0, label.r=unit(0.25, 'lines'), label.padding=unit(0.15, 'lines'), nudge_y=0.1) +
+      labs(x='Months before diagnosis', y='Sample prediction ratio') + 
+      theme(text=element_text(size=14, face="bold"), axis.title=element_text(size=16), legend.position='none')
   }
 }
 
@@ -1747,36 +1822,57 @@ me = endos %>% group_by(Patient) %>% summarise('max.endo' = max(i), 'months' = m
 ```
 
 ```{r, echo=F, warning=F, message=F, fig.height=22, fig.width=10}
-p = plot.endo( subset(endos, Patient %in% subset(me, months <= -72)$Patient), min(endos$months.before.final), max(endos$months.before.final), T)
+print.png<-function(p, name, ...) {
+  png(filename=name,...)
+  print(p)
+  dev.off()
+}
 
-png(filename='progressors_1.png', width=600, height=1050)
-print(p)
-dev.off()
-
+p = plot.endo( subset(endos, Patient %in% subset(me, months <= -72)$Patient), bin=T) + 
+  labs(title="Progressors", subtitle=paste(72/12, "years or more follow-up"))
+print.png(p, 'progressors_1.png', width=900, height=1200)
 grid.arrange(p)
+
+p1a = plot.endo( subset(endos, Patient %in% subset(me, months <= -96)$Patient), bin=T) + 
+  labs(title="Progressors", subtitle=paste(96/12, "years or more follow-up"))
+print.png(p1a, 'progressors_1a.png', width=600, height=800)
+
+p1b = plot.endo( subset(endos, Patient %in% subset(me, months <= -72 & months > -96)$Patient), bin=T) + 
+  labs(title="Progressors", subtitle=paste(72/12, "-",96/12,"years or more follow-up"))
+print.png(p1b, 'progressors_1b.png', width=600, height=800)
+
+p1 = plot.endo( subset(endos, Patient %in% subset(me, months <= -72)$Patient), bin=F) +
+  labs(title="Progressors", subtitle=paste(72/12, "years or more follow-up"))
+print.png(p1, 'progressors_1_bar.png', width=900, height=1200)
+
 ```
 
 ```{r, echo=F, warning=F, message=F, fig.height=22, fig.width=10}
-p1 = plot.endo( subset(endos, Patient %in% subset(me, months <= -48 & months > -72)$Patient), min(endos$months.before.final), max(endos$months.before.final), T) 
-p2 = plot.endo( subset(endos, Patient %in% subset(me, months <= -24 & months > -48)$Patient), min(endos$months.before.final), max(endos$months.before.final), T) 
-p3 = plot.endo( subset(endos, Patient %in% subset(me, months >= -12)$Patient), min(endos$months.before.final), max(endos$months.before.final), T)
+p1 = plot.endo( subset(endos, Patient %in% subset(me, months <= -48 & months > -72)$Patient), bin=T) +
+  labs(title="Progressors", subtitle=paste(48/12, "-",72/12,  "years or more follow-up"))
+print.png(p1, 'progressors_2.png', width=400, height=600)
+
+p1 = plot.endo( subset(endos, Patient %in% subset(me, months <= -48 & months > -72)$Patient), bin=F) +
+  labs(title="Progressors", subtitle=paste(48/12, "-",72/12,  "years or more follow-up"))
+print.png(p1, 'progressors_2_bar.png', width=400, height=600)
+
+p2 = plot.endo( subset(endos, Patient %in% subset(me, months <= -24 & months > -48)$Patient), bin=T) +
+  labs(title="Progressors", subtitle=paste(24/12, "-",48/12,  "years or more follow-up"))
+print.png(p2, 'progressors_3.png', width=400, height=600)
+
+p2 = plot.endo( subset(endos, Patient %in% subset(me, months <= -24 & months > -48)$Patient), bin=F) +
+  labs(title="Progressors", subtitle=paste(24/12, "-",48/12,  "years or more follow-up"))
+print.png(p2, 'progressors_3_bar.png', width=400, height=600)
+
+p3 = plot.endo( subset(endos, Patient %in% subset(me, months >= -12)$Patient), bin=T) + 
+  labs(title="Progressors", subtitle=paste("1 year follow-up"))
+print.png(p3, 'progressors_4.png', width=400, height=600)
+
+p3 = plot.endo( subset(endos, Patient %in% subset(me, months >= -12)$Patient), bin=F) +
+  labs(title="Progressors", subtitle=paste("1 year follow-up"))
+print.png(p3, 'progressors_4_bar.png', width=400, height=600)
 
 grid.arrange(p1,p2,p3,ncol=1, top='Progressor predictions prior to diagnosis')
-
-
-png(filename='progressors_2.png', width=400, height=600)
-print(p1)
-dev.off()
-
-png(filename='progressors_3.png', width=400, height=600)
-print(p2)
-dev.off()
-
-png(filename='progressors_4.png', width=400, height=600)
-print(p3)
-dev.off()
-
-
 
 ```
 
@@ -1784,18 +1880,21 @@ dev.off()
 Just for completeness, we can plot non-progressors similarly:
 
 ```{r echo=F, warning=F, message=F, fig.height=42, fig.width=10}
-nonp.back = lapply(pg.samp[subset(sum.patient.data, Status == 'NP')$Patient],transform.pt.by.time)
+nonp.back = lapply(pg.samp[subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID],transform.pt.by.time)
 
 nonp.endos = do.call(rbind, lapply(1:max(sapply(nonp.back,nrow)), function(i) {
   df = do.call(rbind, lapply(nonp.back, function(x) {
     if (i > nrow(x)) return(NA)
     cbind(x[i, c('Endoscopy.Year','pred','samples', 'months.before.final', 'max.path')], i)
   }))
+  rownames(df) = subset(sum.patient.data, Hospital.Research.ID %in% rownames(df))$Patient
+
   df$Patient = rownames(df)
+
   return(df)
 }))
 nonp.endos = nonp.endos[complete.cases(nonp.endos),]
-nonp.endos$i = nonp.endos$i-1
+#nonp.endos$i = nonp.endos$i-1
 
 nonp.endos$pred.ratio = round(nonp.endos$pred/nonp.endos$samples, 2)
 nonp.endos = transform(nonp.endos, Patient=reorder(Patient, -months.before.final) ) 
@@ -1803,26 +1902,17 @@ nonp.endos$months.before.final = nonp.endos$months.before.final*-1
 
 me = nonp.endos %>% group_by(Patient) %>% summarise('max.endo' = max(i), 'months' = min(months.before.final))
 
-nonp.endos$months.before.final
-p1 = plot.endo( subset(nonp.endos, Patient %in% subset(me, months <= -108)$Patient), min(nonp.endos$months.before.final), max(nonp.endos$months.before.final), T) 
+plot.endo(subset(nonp.endos, Patient %in% subset(nonp.endos, pred.ratio > 0)$Patient), bin=F)
 
-png(filename='nonprogressors_1.png', width=600, height=800)
-print(p1)
-dev.off()
+p = plot.endo( subset(nonp.endos, Patient %in% subset(nonp.endos, pred.ratio > 0)$Patient), bin=T) + 
+  labs(title="Non-Progressors", subtitle=paste("Patients with predictive endoscopies, max", abs(min(me$months)/12), 'years follow-up'))
+print.png(p, 'non-progressors.png', width=600, height=800)
 
-p2 = plot.endo( subset(nonp.endos, Patient %in% subset(me, months <= -72 & months > -108 )$Patient), min(nonp.endos$months.before.final), max(nonp.endos$months.before.final), T) 
+p1 = plot.endo( subset(nonp.endos, Patient %in% subset(nonp.endos, pred.ratio > 0)$Patient), bin=F) + 
+  labs(title="Non-Progressors", subtitle=paste("Patients with predictive endoscopies, max", abs(min(me$months)/12), 'years follow-up'))
+print.png(p1, 'non-progressors_bar.png', width=600, height=800)
 
-png(filename='nonprogressors_2.png', width=600, height=800)
-print(p2)
-dev.off()
-
-p3 = plot.endo( subset(nonp.endos, Patient %in% subset(me, months > -72  )$Patient), min(nonp.endos$months.before.final), max(nonp.endos$months.before.final), T) 
-
-png(filename='nonprogressors_3.png', width=600, height=800)
-print(p3)
-dev.off()
-
-grid.arrange(p1,p2,p3, ncol=1)
+grid.arrange(p)
 ```
 
 
@@ -1851,10 +1941,13 @@ ggplot(all, aes(Prediction.Dev.Resid, Prediction, color=Status)) + geom_point() 
 ### By Batch first
 
 ```{r dq_batch, echo=T, warning=F, message=F}
+pg.samp = lapply(pg.samp, function(df){ df$Batch.Name = sub('_', '', df$Batch.Name ); df })
+
+
 all = do.call(rbind, pg.samp)
 
-prog = do.call(rbind, pg.samp[subset(sum.patient.data, Status == 'P')$Patient])
-nonp = do.call(rbind, pg.samp[subset(sum.patient.data, Status == 'NP')$Patient])
+prog = do.call(rbind, pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID])
+nonp = do.call(rbind, pg.samp[subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID])
 
 ## Similar numbers of each in these batches so how did we do?
 tfPR = sapply(as.character(unique(patient.info$Batch.Name)), function(b) {
@@ -1870,11 +1963,11 @@ tfPR = sapply(as.character(unique(patient.info$Batch.Name)), function(b) {
 
 `r pander(t(tfPR), justify='left', caption=paste('True positive rate is between', paste(round(range(tfPR['TPR',], na.rm=T), 2), collapse='-')))`
 
-
-
 ```{r dq_batch2, echo=F, warning=F, message=F}
 
-pilot = lapply(pg.samp, function(df) subset(df, Batch.Name == 'NP_Pilot_Study'))
+
+
+pilot = pg.samp[subset(patient.info, grepl('nppilotstudy', Batch.Name, ignore.case=T))$Hospital.Research.ID]
 pilot = do.call(rbind, pilot[ which(sapply(pilot, nrow) > 0) ])
 pilot = subset(pilot, Status == 'NP')
 length(which(pilot$Prediction > cutoff))/nrow(pilot)
@@ -1882,7 +1975,7 @@ length(which(pilot$Prediction > cutoff))/nrow(pilot)
 p2 = subset(pilot, Patient %nin% c('AD0591', 'AH0329'))
 length(which(p2$Prediction > cutoff))/nrow(p2)
 
-exome = lapply(pg.samp, function(df) subset(df, Batch.Name == 'Exome_subcohort'))
+exome =  pg.samp[subset(patient.info, grepl('exomesubcohort', Batch.Name, ignore.case=T))$Hospital.Research.ID]
 exome = do.call(rbind, exome[ which(sapply(exome, nrow) > 0) ])
 exome = subset(exome, Status == 'NP')
 length(which(exome$Prediction > cutoff))/nrow(exome)
@@ -1979,9 +2072,40 @@ ggplot(prog, aes(x=SampleSD)) +
 20 Patients (10P, 10NP) set aside for validation purposes
 
 
-```{r, message=F, warning=F, echo=F, eval=T, fig.height=8, fig.width=6}
+```{r validation, message=F, warning=F, echo=F, fig.height=8, fig.width=6}
 
-fitV <- glmnet(dysplasia.df, labels, alpha=select.alpha, nlambda=nl, family='binomial') # all patients
+score.cx <-function(pd) { ## OLD method
+#  print(pd$info)
+  len.var = (var(pd$seg.vals$end.pos - pd$seg.vals$start.pos))/1e12
+  extreme.values = max( apply(as.matrix(pd$seg.vals[,grep('^D', colnames(pd$seg.vals))]), 2, function(col) {
+    length(which(col >= (median(col)+2*sd(col)))) + length(which(col <= (median(col)-2*sd(col)))) 
+  }) ) 
+  
+  (len.var + extreme.values)
+}
+
+
+validation.df = t(mergedDfValidation[, grep('^D', colnames(mergedDfValidation))])
+validation.df = apply(validation.df, 2, unit.var)
+
+complexity.measures = sapply(validation.patient.data, score.cx)
+validation.df = cbind(validation.df, 'cx.measure'=NA)
+for (sample in rownames(validation.df)) {
+  validation.df[sample, 'cx.measure'] = complexity.measures[subset(validation.patient.info, Samplename == sample)$Hospital.Research.ID]
+}
+# 
+# # norm to 1 to keep within the magnitude of the genomic data
+cx = validation.df[,'cx.measure']
+validation.df[,'cx.measure'] = (log(cx)/log(max(cx)))
+
+
+file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
+message(paste("loading", file))
+load(file, verbose=T)
+
+#fitV <- glmnet(dysplasia.df, labels, alpha=select.alpha, nlambda=nl, family='binomial') # all patients
+#autoplot(fitV)
+fitV = models[[select.alpha]]
 lambda.opt = performance[select.alpha, 'lambda']
 
 pred = predict(fitV, newx=validation.df, s=lambda.opt, type='response')
@@ -2008,6 +2132,9 @@ v.predictions = sapply(vpd, function(pt) {
   }
 })
 
+names(v.predictions) = subset(sum.validation.info, Hospital.Research.ID %in% names(v.predictions))$Patient
+
+
 v.predictions = do.call(rbind, lapply(v.predictions, function(x) {
   cbind.data.frame('correctly.predicted'=sum(x,na.rm=T), 'total.samples'=length(x))
 }))
@@ -2018,37 +2145,40 @@ v.predictions$pred.ratio = with(v.predictions, correctly.predicted/total.samples
 v.predictions$Patient = rownames(v.predictions)
 v.predictions = transform(v.predictions, Patient=reorder(Patient, pred.ratio) ) 
 
-p = subset(v.predictions, Status == 'P')
-np = subset(v.predictions, Status == 'NP')
+p = arrange(subset(v.predictions, Status == 'P'), -pred.ratio)
+np = arrange(subset(v.predictions, Status == 'NP'), -pred.ratio)
+
 
 m = melt(v.predictions, id.vars=c('Patient','Status'), measure.vars=c('pred.ratio'))
 
-grid.arrange(
-  ggplot() + geom_bar(data=subset(m, Status == 'P'), aes(Patient, value), fill='darkblue', color='grey', stat='identity') +  
-    geom_label( aes(x=nrow(p)/2+nrow(p)/3, y=0.5, label=paste(round(nrow(p[p$pred.ratio == 1,])/nrow(p),2)*100,'%',sep='')), size=8, fill='darkblue', color='white', fontface='bold' ) +
-    geom_label( aes(x=nrow(p)/3, y=0.5, label=paste(round(nrow(p[p$pred.ratio < 1 & p$pred.ratio > 0,])/nrow(p),2)*100,'%',sep='')), size=8, fill='darkblue', color='white', fontface='bold' ) +
-    geom_text( aes(x=2, y=0.5, label=paste(round(nrow(p[p$pred.ratio == 0,])/nrow(p),2)*100,'%',sep='')), size=8,  fontface='bold' ) +
-    theme(legend.position='none', axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip() +
-    labs(title='Progressors', x='', y='Ratio predicted samples'),
-  
-  ggplot() + geom_bar(data=subset(m, Status == 'NP'), aes(Patient, value), fill='darkgreen', color='grey', stat='identity') + 
-        geom_label( aes(x=nrow(np)/2+nrow(np)/4, y=0.5, label=paste(round(nrow(np[np$pred.ratio == 1,])/nrow(np),2)*100,'%',sep='')), size=8, fill='darkgreen', color='white', fontface='bold' ) +
-    geom_label( aes(x=nrow(np)/4, y=0.5, label=paste(round(nrow(np[np$pred.ratio < 1 & np$pred.ratio > 0,])/nrow(p),2)*100,'%',sep='')), size=8, fill='darkgreen', color='white', fontface='bold' ) +
-        #geom_text( aes(x=1.2, y=0.5, label=paste(round(nrow(np[np$pred.ratio == 0,])/nrow(np),2)*100,'%',sep='')), size=8,  fontface='bold' ) +
-    theme(legend.position='none', axis.text.x = element_text(angle = 45, hjust = 1)) + coord_flip() +
-    labs(title='Non Progressors', x='', y='Ratio predicted samples'),
-  ncol=2, top='Validation data set')
+
+p1 = ggplot(data=subset(v.predictions, Status == 'P'), aes(Patient, pred.ratio)) + geom_col(fill='darkblue', color='grey') + coord_flip() +
+    geom_label( aes(x=p[nrow(subset(p, pred.ratio == 1))/2,'Patient'], y=0.5, label=paste(round(nrow(p[p$pred.ratio == 1,])/nrow(p),2)*100,'%',sep='')), size=8, fill='darkblue', color='white', fontface='bold' ) +
+    geom_label( aes(x='77', y=0.5, label=paste(round(nrow(p[p$pred.ratio < 1 & p$pred.ratio > 0,])/nrow(p),3)*100,'%',sep='')), size=8, fill='darkblue', color='white', fontface='bold' ) +
+    theme(legend.position='none', axis.text.x = element_text(angle = 45, hjust = 1)) + 
+    labs(title='Progressors', x='', y='Ratio predicted samples')
+if (nrow(subset(p,pred.ratio == 0)) > 0) {
+  p1 = p1 +  geom_text( aes(x=subset(p,pred.ratio == 0)$Patient[1], y=0.5, label=paste(round(nrow(p[p$pred.ratio <= 0,])/nrow(p),3)*100,'%',sep='')), size=8, fontface='bold' ) 
+}
 
 
+p2 = ggplot(data=subset(v.predictions, Status == 'NP'), aes(Patient, pred.ratio)) + geom_col(fill='darkgreen', color='grey') + coord_flip() +
+    geom_label( aes(x=np[nrow(subset(np, pred.ratio == 1))/2,'Patient'], y=0.5, 
+                    label=paste(round(nrow(np[np$pred.ratio == 1,])/nrow(np),2)*100,'%',sep='')), size=8, fill='darkgreen', color='white', fontface='bold' ) +
+    geom_label( aes(x='41', y=0.5, label=paste(round(nrow(np[np$pred.ratio < 1 & np$pred.ratio > 0,])/nrow(np),3)*100,'%',sep='')), size=8, fill='darkgreen', color='white', fontface='bold' ) +
+    theme(legend.position='none', axis.text.x = element_text(angle = 45, hjust = 1)) + 
+    labs(title='Non Progressors', x='', y='Ratio predicted samples')
+if (nrow(subset(np,pred.ratio == 0)) > 0) {
+  p2 = p2 +  geom_text( aes(x=subset(np,pred.ratio == 0)$Patient[1], y=0.5, label=paste(round(nrow(pn[pn$pred.ratio <= 0,])/nrow(np),3)*100,'%',sep='')), size=8, fontface='bold' ) 
+}
+
+grid.arrange(p1, p2, ncol=2, top='Validation data set')
 
 ```
 
 
 
 ```{r, echo=F, message=F, warning=F, fig.width=8, fig.height=12}
-# sapply(vpd[subset(sum.validation.info, Status == 'P')$Patient], function(df) {
-#   length(which(df$Prediction > cutoff))/nrow(df)
-# })
 
 back = lapply(vpd, transform.pt.by.time)
 vpi = do.call(rbind, lapply(1:max(sapply(back,nrow)), function(i) {
@@ -2056,6 +2186,7 @@ vpi = do.call(rbind, lapply(1:max(sapply(back,nrow)), function(i) {
     if (i > nrow(x)) return(NA)
     cbind(x[i, c('Endoscopy.Year','pred','samples', 'months.before.final', 'max.path')], i)
   }))
+  rownames(df) = subset(sum.validation.info, Hospital.Research.ID %in% rownames(df))$Patient
   df$Patient = rownames(df)
   return(df)
 }))
@@ -2067,24 +2198,17 @@ vpi$months.before.final = vpi$months.before.final*-1
 
 me = vpi %>% group_by(Patient) %>% summarise('max.endo' = max(i), 'months' = min(months.before.final))
 
-#vpi[,c('Status','Endoscopy.Year','pred','samples', 'months.before.final', 'max.path')]
+p1 = plot.endo(subset(vpi, Patient %in% subset(sum.validation.info, Status == 'P')$Patient), bin=T) + labs(title="Validation - Progressors")
+print.png(p1, 'validation_progressors.png', width=600, height=800)
 
-p1 = plot.endo(subset(vpi, Patient %in% subset(sum.validation.info, Status == 'P')$Patient), min(vpi$months.before.final), max(vpi$months.before.final), T) +  labs(title="Validation - Progressors")
+print.png(plot.endo(subset(vpi, Patient %in% subset(sum.validation.info, Status == 'P')$Patient), bin=F) + labs(title="Validation - Progressors"), 'validation_progressors_bar.png', width=600, height=800)
 
-png(filename='validation_progressors.png', width=600, height=800)
-print(p1)
-dev.off()
+p2 = plot.endo(subset(vpi, Patient %in% subset(sum.validation.info, Status == 'NP')$Patient), bin=T) + labs(title="Validation - Non Progressors")
 
-grid.arrange(p1,ncol=1)
+print.png(p2,'validation_Nonprogressors.png', width=600, height=800)
+print.png(plot.endo(subset(vpi, Patient %in% subset(sum.validation.info, Status == 'NP')$Patient), bin=F) + labs(title="Validation - Non Progressors"),'validation_Nonprogressors_bar.png', width=600, height=800)
 
-p2 = plot.endo(subset(vpi, Patient %in% subset(sum.validation.info, Status == 'NP')$Patient), min(vpi$months.before.final), max(vpi$months.before.final), T) + labs(title="Validation - Non Progressors")
-
-png(filename='validation_Nonprogressors.png', width=600, height=800)
-print(p2)
-dev.off()
-
-
-grid.arrange(p2,ncol=1)
+grid.arrange(p1, p2,ncol=1)
 ```
 
 
@@ -2101,7 +2225,8 @@ fpr = round(length(which(subset(validation.patient.info, Status == 'NP')$Predict
 tnr = round(length(which(subset(validation.patient.info, Status == 'NP')$Prediction < cutoff))/nrow(subset(validation.patient.info, Status == 'NP')), 2)
 
 m = melt(validation.patient.info, id.vars = c('Status'), measure.vars = c('Prediction'))
-p3 = ggplot(m, aes(Status, value, fill=Status)) + geom_boxplot() + geom_jitter(color='darkgrey', show.legend = F) +
+p3 = ggplot(m, aes(Status, value, fill=Status)) + 
+  geom_jitter(aes(color=Status), width=0.2, show.legend = F) +  geom_violin(alpha=0.8) +
   geom_label(aes(x='P', y=0.75, label=paste('TPR=',tpr*100, '%', sep='')), fill='white') + 
   geom_label(aes(x='P', y=0.25, label=paste('FNR=',fnr*100, '%', sep='')), fill='white') + 
   geom_label(aes(x='NP', y=0.55, label=paste('FPR=',fpr*100, '%', sep='')), fill='white') + 
@@ -2111,9 +2236,7 @@ p3 = ggplot(m, aes(Status, value, fill=Status)) + geom_boxplot() + geom_jitter(c
 
 grid.arrange(p3)
 
-png(filename='validation_predictions.png', width=600, height=800)
-print(p3)
-dev.off()
+print.png(p3, 'validation_predictions.png', width=600, height=800)
 
 ```
 

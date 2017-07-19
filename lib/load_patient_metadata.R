@@ -6,10 +6,10 @@ strip.whitespace <- function (x) gsub("\\s+|\\s+", "", x)
 summarise.patient.info<-function(df) {
   require(plyr)
   
-  sum.pt = ddply(df, .(Patient, Status, Set), summarise, 
+  sum.pt = ddply(df, .(Patient, Hospital.Research.ID, Status, Set), summarise, 
         age.diagnosis = unique(Age.at.diagnosis),
-        wt = unique(Weight.kg.),
-        ht = unique(Height.cm.),
+        wt = unique(`Weight.(kg)`),
+        ht = unique(`Height.(cm)`),
         BMI = unique(BMI),
         gender = unique(Sex),
         smoking = unique(Smoking),
@@ -33,23 +33,28 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
     stop(paste(file, "doesn't exist or is not readable."))
   
   if (grepl('\\.xlsx$', basename(file))) {
-    library(xlsx)
+    library(readxl)
     
-    patient.info = NULL;  test.training = NULL
-    for (i in 1:length(getSheets(loadWorkbook(file)))) {
-      print(i)
-      if (names(getSheets(loadWorkbook(file))[i]) == 'Technical Repeats') next
+    patient.info = NULL;  #test.training = NULL
+    #for (sheet in excel_sheets(file)) {
+    #  print(sheet)
+    #for (i in 2:length(getSheets(loadWorkbook(file)))) {
+      #print(i)
+     # if (grepl('Technical Repeats|All_patient_info.txt', sheet)) next
+
+      #if (sheet == 'TrainingTest') {
+      #  test.training = read_excel(file, sheet = sheet)
+      #  next
+      #}
       
-      if (names(getSheets(loadWorkbook(file))[i]) == 'TrainingTest') {
-        test.training = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
-        next
-      }
+      #batch_name = gsub(' ', '_', sheet)
       
-      batch_name = gsub(' ', '_', (names(getSheets(loadWorkbook(file))[i])))
+      #ws = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
+      sheet = 'All combined'
+      ws = read_excel(file, sheet = sheet)
+
+      #ws = ws[which( ws$`Patient ID` != ""), grep('^Patient|Path ID|Endoscopy Year|Pathology$|Progressor|Plate Index|SLX|cellularity|p53|Number|Batch|Set', colnames(ws), value=T, ignore.case=T)]
       
-      ws = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
-      ws = ws[which( ws$Patient.ID != ""), grep('Patient|Path\\.ID|Endoscopy.Year|Pathology$|Progressor|Plate.Index|SLX|cellularity|p53|Number', colnames(ws), value=T, ignore.case=T)]
-      head(ws)
       #head(patient.info)
       
       slx.cols = grep('SLX', colnames(ws), value=T)
@@ -58,47 +63,45 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
       if (length(slx.cols) > 1) {
         slx.rows = ws[,slx.cols]
         ws[slx.cols] = lapply(ws[slx.cols], as.null)
-        ws$SLX.ID = strip.whitespace(apply(slx.rows, 1, function(x) paste(x, collapse='_')))
+        ws$SLX.ID = sub('_NA$', '', strip.whitespace(apply(slx.rows, 1, function(x) paste(x, collapse='_'))))
       }
       
       ## Order columns
       ws = ws[,c(grep('Patient',colnames(ws), ignore.case=T),
-                 grep('Path\\.ID',colnames(ws), ignore.case=T),
+                 grep('^Hospital', colnames(ws), ignore.case=T),
+                 grep('Path ID',colnames(ws), ignore.case=T),
                  grep('Progressor',colnames(ws), ignore.case=T),
-                 grep('Endoscopy.year',colnames(ws), ignore.case=T),
-                 grep('Pathology',colnames(ws),ignore.case=T),
-                 grep('Plate.Index',colnames(ws),ignore.case=T),
+                 grep('Endoscopy year',colnames(ws), ignore.case=T),
+                 grep('Pathology$',colnames(ws),ignore.case=T),
+                 grep('Plate Index',colnames(ws),ignore.case=T),
                  grep('SLX',colnames(ws),ignore.case=T),
                  grep('cellularity',colnames(ws),ignore.case=T),
-                 grep('p53.status', colnames(ws),ignore.case=F),
-                 grep('Number.of', colnames(ws), ignore.case=F)) ]
+                 grep('p53 status', colnames(ws),ignore.case=F),
+                 grep('Number of', colnames(ws), ignore.case=F),
+                 grep('Batch', colnames(ws), ignore.case=F), 
+                 grep('Set', colnames(ws), ignore.case=F)) ]
       
+      colnames(ws) = c('Patient', 'Hospital.Research.ID', 'Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set')
       
-      colnames(ws) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads')
+      #ws[ws$p53.Status == "", 'p53.Status'] = NA
+      #ws[ws$Barretts.Cellularity == "", 'Barretts.Cellularity'] = NA
       
-      ws[ws$p53.Status == "", 'p53.Status'] = NA
-      ws[ws$Barretts.Cellularity == "", 'Barretts.Cellularity'] = NA
+      #ws$Batch.Name = batch_name
       
-      ws$Batch.Name = batch_name
-      
-      if (is.null(patient.info)) {
+      #if (is.null(patient.info)) {
         patient.info = ws
-      } else {
+      #} else {
         #print(paste('binding', batch_name))
-        patient.info = rbind(patient.info, ws)
-      }
-    }
-    patient.info = merge(patient.info, test.training[,grep('Patient|Set|Analysis', colnames(test.training), value=T)], by.x='Patient', by.y='Patient', all=T)
-    
-    # Remove 'normal' samples
-    patient.info = subset(patient.info, !grepl('D2', Pathology, ignore.case=T))
-    patient.info = subset(patient.info, !grepl('Gastriccardia', Pathology, ignore.case=T))
-    patient.info = subset(patient.info, !grepl('normal', Pathology, ignore.case=T))
-
+      #  patient.info = rbind(patient.info, ws)
+      #}
+    #}
+    #patient.info = merge(patient.info, test.training[,grep('Patient|Set|Analysis', colnames(test.training), value=T)], by.x='Patient', by.y='Patient', all=T)
   } else {
-    patient.info = read.table(file, header=T, sep='\t', stringsAsFactors=F)
+    patient.info = read.table(file, header=T, sep='\t', stringsAsFactors=F, quote="")
+#    nacol = which(apply(patient.info, 2, function(x) length(which(is.na(x))) == length(x) ))
+#    patient.info = patient.info[,-nacol]
     
-    slx.cols = grep('SLX', colnames(patient.info), value=T)
+    slx.cols = grep('^SLX', colnames(patient.info), value=T)
     if (length(slx.cols) > 1) {
       slx.rows = patient.info[,slx.cols]
       patient.info[slx.cols] = lapply(patient.info[slx.cols], as.null)
@@ -106,10 +109,11 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
       patient.info$SLX.ID = sub('_$', '', patient.info$SLX.ID)
     }
     patient.info = patient.info[, c(grep('Patient',colnames(patient.info), ignore.case=T),
+                                    grep('Hospital.Research.ID', colnames(patient.info), ignore.case=T),
                                     grep('Path\\.ID',colnames(patient.info), ignore.case=T),
                                     grep('^(Progressor|Status)',colnames(patient.info), ignore.case=T),
                                     grep('Endoscopy.year',colnames(patient.info), ignore.case=T),
-                                    grep('Pathology',colnames(patient.info),ignore.case=T),
+                                    grep('^Pathology',colnames(patient.info),ignore.case=T),
                                     grep('Plate.Index',colnames(patient.info),ignore.case=T),
                                     grep('SLX',colnames(patient.info),ignore.case=T),
                                     grep('cellularity',colnames(patient.info),ignore.case=T),
@@ -117,7 +121,7 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
                                     grep('Number.of|Total.Reads', colnames(patient.info), ignore.case=F), 
                                     grep('Batch', colnames(patient.info), ignore.case=F),
                                     grep('Set', colnames(patient.info), ignore.case=F)) ]
-    colnames(patient.info) = c('Patient','Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set')
+    colnames(patient.info) = c('Patient','Hospital.Research.ID', 'Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set')
   }
   
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
@@ -132,22 +136,22 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
     lapply(patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads')], as.numeric)
   
   patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
-  ## TODO Mistake in earlier version of the patient file caused this will be fixed for the next run
+  ## TODO Mistake in earlier version of the patient file caused this
   snames = grep('_1072(5|9)$', patient.info$Samplename)
   if ( length(snames > 0) ) 
     patient.info$Samplename[snames] =  paste( sub('-','_', patient.info$Plate.Index[snames]), '10725_10729', sep='_' )
+
+  # Remove 'normal' samples
+  removed = subset(patient.info, grepl('D2|Gastriccardia|normal', Pathology, ignore.case=T))
   
+  patient.info = subset(patient.info, !grepl('D2|Gastriccardia|normal', Pathology, ignore.case=T))
+
   patient.info$Pathology = droplevels(patient.info$Pathology)
-  patient.info$Pathology = ordered( patient.info$Pathology, 
-                                    levels=c("normal","?","BE","ID","LGD", "IMC","HGD" ))
+  patient.info$Pathology = ordered( patient.info$Pathology, levels=c("BE","ID","LGD", "IMC","HGD" ))
   
-  patient.info$Batch.Name = ordered(patient.info$Batch.Name, 
-                                    levels=c("NP_Pilot_Study","Progressor_Pilot_Study", "Exome_subcohort", paste("Batch", c(1:10, '16S'), sep='_')))
+  patient.info$Batch.Name = as.factor(patient.info$Batch.Name)
   
   patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
-  
-  #if (is.null(test.training)) stop("No information on test/training sets")
-    
   
   if (!grepl('all', set, ignore.case = T)) {
     patient.info = subset(patient.info, Set == set)
@@ -156,13 +160,16 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
     message(paste("Returning all patient data."))
   }
 
-  patient.info$Patient = gsub('/', '_',patient.info$Patient)
+  patient.info$Hospital.Research.ID = gsub('/', '_',patient.info$Hospital.Research.ID)
+  removed$Hospital.Research.ID = gsub('/', '_',removed$Hospital.Research.ID)
+  
+  message(paste(length(unique(patient.info$Hospital.Research.ID)), 'unique patient IDs'))
   
   if (!is.null(file2)) {
     patient.info = add.demographics(file2, patient.info)
   }
   
-  return(patient.info)
+  return(list('info'=patient.info, 'removed'=removed))
 }
 
 add.demographics<-function(file, patient.info) {
@@ -175,22 +182,25 @@ add.demographics<-function(file, patient.info) {
   }
   
   if (grepl('\\.xlsx$', basename(file))) {
-    require(xlsx)
-    demog = read.xlsx2(file, sheetIndex = 1, colIndex = c(1:21), endRow=91, stringsAsFactors=F)
-    colnames(demog) = sub('\\.\\.', '.',colnames(demog))
+    require(readxl)
+    
+    demog = read_excel(file, sheet=1)
+    #demog = read.xlsx2(file, sheetIndex = 1, colIndex = c(1:21), endRow=91, stringsAsFactors=F)
+    colnames(demog) = gsub(' ', '.',colnames(demog))
   } else {
     demog = read.table(file, header=T, sep='\t', quote="", stringsAsFactors=F)
     demog = demog[1:91,1:21]
     colnames(demog) = sub('\\.\\.', '\\.', colnames(demog))
+    colnames(demog) = gsub(' ', '.',colnames(demog))
+    demog[demog == ""] = NA
   }
-  demog[demog == ""] = NA
-  
+
   demog$Study.Number = gsub('/', '_', demog$Study.Number)
-  demog$Patient.ID =  strip.whitespace( demog$Study.Number )
+  demog$Hospital.Research.ID =  strip.whitespace( demog$Study.Number )
   demog$Alternate.Study.Number = strip.whitespace( gsub('/', '_', demog$Alternate.Study.Number) )
   
   rows = with(demog, which(Alternate.Study.Number != ""))
-  demog$Patient.ID[rows] = demog$Alternate.Study.Number[rows]
+  demog$Hospital.Research.ID[rows] = demog$Alternate.Study.Number[rows]
   
   # good...
   #length(which(unique(patient.info$Patient) %in% demog$Patient.ID))
@@ -207,18 +217,19 @@ add.demographics<-function(file, patient.info) {
   cols = grep('Weight|Height|Age|Circumference|Maximal', colnames(demog), value=T)
   demog[cols] = lapply(demog[cols], as.numeric)
   
-  demog = demog[,c('Patient.ID', grep('Sex|Circumference|Maximal|Date|Year|Age|Weight|Height|Smoking', colnames(demog), value=T))]
-  
+  demog = demog[,c('Hospital.Research.ID', grep('Sex|Circumference|Maximal|Date|Year|Age|Weight|Height|Smoking', colnames(demog), value=T))]
+  colnames(demog) = gsub("'", '', colnames(demog))
+
   colnames(demog)[grep('Smoking', colnames(demog))] = 'Smoking'
-  head(demog)
-  demog$BMI = apply(demog[c('Height.cm.', 'Weight.kg.')], 1, bmicalc)
+  #head(demog)
+  demog$BMI = apply(demog[c('Height.(cm)', 'Weight.(kg)')], 1, bmicalc)
 
   if (!is.null(patient.info)) {
-    demog = merge(patient.info, demog, by.x='Patient', by.y='Patient.ID')
-    demog = ddply(demog, .(Patient), mutate, 
-                  'Initial.Endoscopy'=min(Endoscopy.Year, Year.of.1st.Endoscopy), 'Final.Endoscopy'=max(Endoscopy.Year, Year.of.Endpoint.) )
+    demog = merge(patient.info, demog, by='Hospital.Research.ID')
+    demog = ddply(demog, .(Hospital.Research.ID), mutate, 
+                  'Initial.Endoscopy'=min(Endoscopy.Year, Year.of.1st.Endoscopy), 'Final.Endoscopy'=max(Endoscopy.Year, Year.of.Endpoint) )
   } else {
-    colnames(demog)[which(colnames(demog) == 'Patient.ID')] = 'Patient'
+    colnames(demog)[which(colnames(demog) == 'Hospital.Research.ID')] = 'Hospital.Research.ID'
   }
 
   demog[c('Sex','Smoking')] = lapply(demog[c('Sex','Smoking')], as.factor)

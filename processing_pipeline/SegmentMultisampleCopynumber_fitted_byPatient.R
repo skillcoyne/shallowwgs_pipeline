@@ -31,8 +31,8 @@ if (!dir.exists(plot.dir))
   dir.create(plot.dir, recursive=T)
 
 ## Patient info file
-filename = 'All_patient_info.txt'
-if (require(xlsx)) filename = 'All_patient_info.xlsx' 
+filename = 'All_patient_info.xlsx'
+#if (require(xlsx)) filename = 'All_patient_info.xlsx' 
   
 
 patient.file = grep(filename, list.files(data, full.names=T), value=T)

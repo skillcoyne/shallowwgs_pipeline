@@ -37,27 +37,26 @@ if (length(list.files(plot.dir)) <= 0)
   stop(paste("No analysis files found in", plot.dir ))
 
 ## Patient info file
-patient.file = grep('All_patient_info.txt', data.files, value=T)
+patient.file = grep('All_patient_info.xlsx', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
-demo.file = grep('Demographics_full.txt', data.files, value=T)
-
+demo.file = grep('Demographics_full.xlsx', data.files, value=T)
 
 load(grep('Training_patients.Rdata', analysis.files, value=T), verbose=T)
 
-patient.info = read.patient.info(patient.file, demo.file)
+patient.info = read.patient.info(patient.file, demo.file)$info
 #head(patient.info)
 
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
+patient.info = patient.info[-which(patient.info$Hospital.Research.ID == 'AH0222'),]
 
 sum.patient.data = summarise.patient.info(patient.info)
-sum.patient.data = as.data.frame(subset(sum.patient.data, Patient %in% names(patient.data))) ## For now
 pander(sum.patient.data)
 
 # Missing some of the samples as they aren't all sequenced yet
-for (pt in names(patient.data)) {
-  patient.data[[pt]]$info= patient.data[[pt]]$info[patient.data[[pt]]$info$Samplename %in% colnames(patient.data[[pt]]$seg.vals)[-(1:5)],]
-}
+#for (pt in names(patient.data)) {
+#  patient.data[[pt]]$info= patient.data[[pt]]$info[patient.data[[pt]]$info$Samplename %in% colnames(patient.data[[pt]]$seg.vals)[-(1:5)],]
+#}
 
 ```
 
@@ -408,13 +407,13 @@ sum.patient.data = arrange(sum.patient.data, Status)
 ## Using the segmentation values
 sum.patient.data$years = with(sum.patient.data, paste(start.year, end.year, sep='-'))
 sim = as.data.frame(sum.patient.data[,c('Status','years')])
-rownames(sim) = sum.patient.data$Patient
-for (pt in sum.patient.data$Patient) {
+rownames(sim) = sum.patient.data$Hospital.Research.ID
+for (pt in sum.patient.data$Hospital.Research.ID) {
   print(pt)
   patient.data[[pt]]$info = arrange(patient.data[[pt]]$info,  Pathology, Endoscopy.Year)
   x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
 
-  gg = ggplot(melt(x1), aes(x=Var2, y=value, group=Var2, fill=Var2)) + 
+  gg = ggplot(melt(x1), aes(x=Var2, y=value, group=Var2, fill=Var2, color=Var2)) + 
     geom_boxplot(notch=T, show.legend=F) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position='none') +
     labs(title=paste(pt, patient.data[[pt]]$info$Status[1], sep=' - '), x='') 
@@ -482,6 +481,12 @@ This plot compares the two possible measures of overall complexity from AP. The 
 ```{r echo=F, message=F, warning=F, fig.width=5, fig.height=5}
 grid.arrange(g1, g2, top='Raw seg values')
 ```
+
+
+```{r echo=F, message=F, warning=F, fig.width=5, fig.height=5}
+g2 + labs(x='Status', y='Complexity (# clusters) per patient', title='AP Clustering', subtitle=paste("p-value", signif(ttpc, 3))) + theme(text=element_text(size=14, face='bold'), legend.position = 'non')
+```
+
 
 Based on the number of clusters in each patient, it appears that there are a higher number of clusters being selected by AP in the progressors vs the non, suggesting it may be able to relate it to diversity in the progressors CN. That metric appears to provide a good separation between the patients as well, though there's a suggestion of two different types of progressors.
 
@@ -634,15 +639,17 @@ In the purple cluster are those unique regions to the HGD sample. So just as an 
 
 `r pander( subset(hgmx, cluster==9 & x>0), caption="Cluster 9 probabilities are below 20%, or essentially random." )`
 
+
+```{r apclustN, echo=F, message=F, warning=F, fig.height=5, fig.width=5, fig.align='left', eval=F}
 ### Using the normalized values
 
-So what about using the normalized segmented values for AP clustering instead?
+#So what about using the normalized segmented values for AP clustering instead?
 
-```{r apclustN, echo=F, message=F, warning=F, fig.height=5, fig.width=5, fig.align='left'}
+
 # Should this be performed on the normalized seg values instead?
 sim3 = sum.patient.data[,c(2:4)]
 rownames(sim3) = sum.patient.data[,1]
-for (pt in sum.patient.data$Patient) {
+for (pt in sum.patient.data$Hospital.Research.ID) {
   print(pt)
   x1 = patient.data[[pt]]$norm.seg.vals
   if (is.null(x1)) next
@@ -706,7 +713,7 @@ for (i in 1:nrow(sum.patient.data)) {
   simL = sum.patient.data[-i,c(2:4)]
   rownames(simL) = sum.patient.data[-i,1]
 
-  for (pt in sum.patient.data$Patient[-i]) {
+  for (pt in sum.patient.data$Hospital.Research.ID[-i]) {
     x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
     ac = apcluster(negDistMat(x1, r=2), q=q)
   
@@ -732,14 +739,14 @@ ggplot(melt(data.frame(loo_xval[,c(3)])), aes(x=variable, y=value, fill=variable
 
 #### Single samples
 
-```{r xval_smp, echo=F, warning=F, message=F, fig.align='left', fig.height=4, fig.width=4}
+```{r xval_smp, echo=F, warning=F, message=F, fig.align='left', fig.height=4, fig.width=4, eval=F}
 # Leave out samples?
 looS_xval = matrix(ncol=3, nrow=0, dimnames=list(c(), c('net.similarity', 'sum.similarity', 'clusters')))
 for (i in 1:20) { 
   simX = sum.patient.data[,c('Status','years')]
-  rownames(simX) = sum.patient.data[,'Patient']
+  rownames(simX) = sum.patient.data[,'Hospital.Research.ID']
 
-  for (pt in sum.patient.data$Patient) {
+  for (pt in sum.patient.data$Hospital.Research.ID) {
       if (length(patient.data[[pt]]$info$Samplename) <= 2) next
       x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename[-sample(1:(length(patient.data[[pt]]$info$Samplename)), 1)])
       ac = apcluster(negDistMat(x1, r=2), q=q)
@@ -775,12 +782,12 @@ gain.threshold = 1.1
 loss.threshold = 0.9
 
 simX = sum.patient.data[,c('Status','years')]
-rownames(simX) = sum.patient.data[,'Patient']
+rownames(simX) = sum.patient.data[,'Hospital.Research.ID']
 # Leave out final sample on the progressors 
 
-for (pt in sum.patient.data$Patient) {
+for (pt in sum.patient.data$Hospital.Research.ID) {
   x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)
-  if (subset(sum.patient.data, Patient == pt)$Status == 'P' & length(which(grepl('HGD|IMC', patient.data[[pt]]$info$Pathology))) > 0) {
+  if (subset(sum.patient.data, Hospital.Research.ID == pt)$Status == 'P' & length(which(grepl('HGD|IMC', patient.data[[pt]]$info$Pathology))) > 0) {
     final = grep('HGD|IMC', patient.data[[pt]]$info$Pathology)
     
     if (length(patient.data[[pt]]$info$Samplename[-final]) <= 1) next
@@ -846,7 +853,7 @@ There do appear to be some patients that are more similar to non-progressors wit
 
 pts = rownames(subset(simX, Status == 'P' & clusters <= mean(subset(simX, Status == 'NP')$clusters)))
 
-subset(sum.patient.data, Patient %in% pts)
+subset(sum.patient.data, Hospital.Research.ID %in% pts)
 
 
 ```
@@ -865,7 +872,7 @@ for (qv in seq(0,0.9,0.1)) {
   ## Using the segmentation values
   simPC = sum.patient.data[,c(2:4)]
   rownames(simPC) = sum.patient.data[,1]
-  for (pt in sum.patient.data$Patient) {
+  for (pt in sum.patient.data$Hospital.Research.ID) {
     patient.data[[pt]]$info = arrange(patient.data[[pt]]$info, Endoscopy.Year, desc(Pathology))
   
     x1 = apclust.data(patient.data[[pt]]$seg.vals, patient.data[[pt]]$info$Samplename)

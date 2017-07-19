@@ -11,6 +11,8 @@ output:
 
 ```{r setup, include=FALSE}
 library(ggplot2)
+library(ggbio)
+library(scales)
 library(GGally)
 library(plyr)
 library(RColorBrewer)
@@ -33,14 +35,18 @@ if (length(list.files(plot.dir)) <= 0)
   stop(paste("No analysis files found in", plot.dir ))
 
 ## Patient info file
-patient.file = grep('/All_patient_info.txt', data.files, value=T)
+patient.file = grep('/All_patient_info.xlsx', data.files, value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
-demo.file = grep('/Demographics_full.txt', data.files, value=T)
+demo.file = grep('/Demographics_full.xlsx', data.files, value=T)
 
-dataset = 'Test'
-patient.info = read.patient.info(patient.file, demo.file, set=dataset)
-head(patient.info)
+dataset = 'All'
+info = read.patient.info(patient.file, demo.file, set=dataset)
+removed.samples = info$removed
+patient.info = info$info
+
+
+#head(patient.info)
 
 patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
 
@@ -70,7 +76,7 @@ if ( file.exists(cachefile) ) {
 } else {
   patient.data = list(); lowprobes = c()
   
-  for (patient.name in sum.patient.data$Patient  )  {
+  for (patient.name in sum.patient.data$Hospital.Research.ID  )  {
     message(patient.name)
     patient.plot.dir = paste(plot.dir, patient.name, sep='/')
   
@@ -80,11 +86,17 @@ if ( file.exists(cachefile) ) {
     }
     
     segvals = read.table(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
-    dim(segvals)
+    head(segvals)
   
-    missing = c(setdiff(colnames(segvals)[-(1:5)], subset(patient.info, Patient == patient.name)$Samplename),
-                      setdiff(subset(patient.info, Patient == patient.name)$Samplename, colnames(segvals)[-(1:5)]))
+    missing = c( setdiff(colnames(segvals)[-(1:5)], subset(patient.info, Hospital.Research.ID == patient.name)$Samplename),
+                 setdiff(subset(patient.info, Hospital.Research.ID == patient.name)$Samplename, colnames(segvals)[-(1:5)]) )
     
+    mr = with(removed.samples, which(Hospital.Research.ID == patient.name & Samplename %in% missing))
+    if (length(mr) > 0) {
+      missing = missing[-which(missing %in% removed.samples[mr,]$Samplename)]
+      segvals = segvals[,-which(colnames(segvals) %in% removed.samples[mr,]$Samplename) ]
+    }
+
     if (length(missing) > 0) {
       warning(paste("Missing", length(missing), "sample(s) of", length(subset(patient.info, Patient == patient.name)$Samplename), "in patient", patient.name))
       #next
@@ -98,7 +110,7 @@ if ( file.exists(cachefile) ) {
     dim(segvals)
   
     # ORDER segvals by endoscopy year etc
-    cur.pt = subset(patient.info, Patient == patient.name)
+    cur.pt =  arrange( subset(patient.info, Hospital.Research.ID == patient.name), Endoscopy.Year, Pathology)
     segvals = segvals[, c(colnames(segvals[1:5]), intersect(colnames(segvals), cur.pt$Samplename))]
       
     if (nrow(segvals) < 100) {
@@ -148,19 +160,19 @@ if ( file.exists(cachefile) ) {
         patient.data[[patient.name]][['variable.regions']] = cbind(segvals[variable.region.indices,c(1:5)],variable.regions )
       }
       
-      patient = arrange(subset(patient.info, Patient == patient.name),  Endoscopy.Year, Pathology, Samplename)
+      patient = arrange(subset(patient.info, Hospital.Research.ID == patient.name),  Endoscopy.Year, Pathology, Samplename)
     }
   }
 save(patient.data, file=cachefile)
 }
-print(paste("Missing patients:", paste(setdiff(sum.patient.data$Patient, names(patient.data)), collapse=', ')))
+print(paste("Missing patients:", paste(setdiff(sum.patient.data$Hospital.Research.ID, names(patient.data)), collapse=', ')))
 
-sum.patient.data = subset(sum.patient.data, Patient %in% names(patient.data))
+sum.patient.data = subset(sum.patient.data, Hospital.Research.ID %in% names(patient.data))
 table(sum.patient.data$Status)
 
 
 ## Check that all of the samples are there
-patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year,Samplename)
+patient.info = arrange(patient.info, Status, Patient, Hospital.Research.ID, Endoscopy.Year,Samplename)
 msgs = sapply(names(patient.data), function(pt) {
   missing = which(!patient.data[[pt]]$info$Samplename %in% colnames(patient.data[[pt]]$seg.vals))
   if (length(missing) > 0) {
@@ -174,7 +186,9 @@ for (n in msgs) {
     print(n)
 }
 
-example.pt = subset(sum.patient.data, Status == 'P' & total.samples > 2)$Patient[5]
+example.pt = which(with(sum.patient.data, Status == 'P' & total.samples > 2))[5]
+key =  sum.patient.data[example.pt, 'Hospital.Research.ID' ]
+example.pt.id = sum.patient.data[example.pt, 'Patient']
 ## Note the number of probes per patient/sample
 ```
 \pagebreak
@@ -189,24 +203,25 @@ The result looks like two data matrices:
 
 1. Segmented values (progressor): `r example.pt` 
 ```{r}
-head(patient.data[[example.pt]]$seg.vals)
+head(patient.data[[ key ]]$seg.vals)
 ```
 
 ```{r echo=F, warning=F, message=F, fig.height=10, fig.width=10}
-ggplot( melt(patient.data[[example.pt]]$seg.vals[,-(1:5)]), aes(x=value) ) + 
+ggplot( melt(patient.data[[key]]$seg.vals[,-(1:5)]), aes(x=value) ) + 
         facet_wrap(~variable,scales = "free_x") + 
-        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.03) + labs(title=paste(example.pt,' segmented value distribution'), x='', y='')
+        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.03) + 
+  labs(title=paste('Patient', example.pt.id,' segmented value distribution'), x='', y='')
 ```
 
 2. Row (e.g. per-region across timepoints) normalized values from the matrix above
 ```{r}
-head(patient.data[[example.pt]]$norm.seg.vals)
+head(patient.data[[key]]$norm.seg.vals)
 ```
 
 ```{r echo=F, warning=F, message=F, fig.height=10, fig.width=10}
-ggplot( melt(patient.data[[example.pt]]$norm.seg.vals), aes(x=value) ) + 
+ggplot( melt(patient.data[[key]]$norm.seg.vals), aes(x=value) ) + 
         facet_wrap(~variable,scales = "free_x") + 
-        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + labs(title=paste(example.pt,' normalized segmented value distribution'), x='', y='')
+        geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + labs(title=paste('Patient', example.pt.id,'normalized segmented value distribution'), x='', y='')
 
 ```
 
@@ -221,7 +236,7 @@ gen = do.call(rbind, lapply(patient.data, function(df) {
 }))
 rownames(gen)  = names(patient.data)
 
-sum.patient.data = merge(sum.patient.data, gen, by.x='Patient', by.y='row.names')
+sum.patient.data = merge(sum.patient.data, gen, by.x='Hospital.Research.ID', by.y='row.names')
 sum.patient.data = arrange(sum.patient.data, Status, total.samples)
 sum.patient.data$years = with(sum.patient.data, paste(start.year, end.year, sep='-'))
 
@@ -250,7 +265,7 @@ lapply(patient.data, function(pt) {
       geom_histogram( fill=I("blue"),col=I("lightblue"), binwidth=0.3) + 
       labs(title='normalized segmented value distribution', x='', y='')
 
-  do.call('grid.arrange', list(g1,g2, top=paste(name, status, sep=" - "), ncol=2))
+  do.call('grid.arrange', list(g1,g2, top=paste('Patient', name, status, sep=" - "), ncol=2))
 })
 
 ```
@@ -266,24 +281,26 @@ These are regions that are called as "variant" based on cutoffs derived from a s
 
 
 ```{r var_reg, echo=F, message=F, warning=F}
-prog.pt = subset(sum.patient.data, Status == 'P')$Patient
-np.pt = subset(sum.patient.data, Status == 'NP')$Patient
+prog.pt = subset(sum.patient.data, Status == 'P')$Hospital.Research.ID
+np.pt = subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID
 
 var.seg.lengths = lapply(patient.data, function(df) {
-  cbind('chr'=df$variable.regions$chrom, 'seg.len'=df$variable.regions$end.pos - df$variable.regions$start.pos)
+  cbind('chr'=df$variable.regions$chrom, 'start'=df$variable.regions$start.pos, 'end'=df$variable.regions$end.pos, 'seg.len'=df$variable.regions$end.pos - df$variable.regions$start.pos)
 })
 
 segment.lengths = lapply(patient.data, function(df) {
   cbind('chr'=df$seg.vals$chrom, 'seg.len'=df$seg.vals$end.pos - df$seg.vals$start.pos)
 })
 
-sum.var = rbind('Progressors'=do.call(rbind.data.frame, var.seg.lengths[prog.pt]) %>% summarize( 'n.segments' = length(seg.len), 'median.length'=median(seg.len), 'mean.length'=mean(seg.len), 'sd'=sd(seg.len)),
-  'Non-Progressors'=do.call(rbind.data.frame, var.seg.lengths[np.pt]) %>% summarize( 'n.segments' = length(seg.len), 'median.length'=median(seg.len), 'mean.length'=mean(seg.len), 'sd'=sd(seg.len)))
+sum.var = rbind(
+  'Progressors'=do.call(rbind.data.frame, var.seg.lengths[prog.pt]) %>% summarise( 'n.segments' = length(seg.len), 'median.length'=median(seg.len), 'mean.length'=mean(seg.len), 'sd'=sd(seg.len)),
+  'Non-Progressors'=do.call(rbind.data.frame, var.seg.lengths[np.pt]) %>% summarise( 'n.segments' = length(seg.len), 'median.length'=median(seg.len), 'mean.length'=mean(seg.len), 'sd'=sd(seg.len)))
 
 pander(sum.var, caption='Variable regions between progressors and non-progressors')
 
-sum.seg = rbind('Progressors'=do.call(rbind.data.frame, segment.lengths[prog.pt]) %>% summarize( 'n.segments' = length(seg.len), 'median.length'=median(seg.len), 'mean.length'=mean(seg.len), 'sd'=sd(seg.len)),
-  'Non-Progressors'=do.call(rbind.data.frame, segment.lengths[np.pt]) %>% summarize( 'n.segments' = length(seg.len), 'median.length'=median(seg.len), 'mean.length'=mean(seg.len), 'sd'=sd(seg.len)))
+sum.seg = rbind(
+  'Progressors'=do.call(rbind.data.frame, segment.lengths[prog.pt]) %>% summarise( 'n.segments' = length(seg.len), 'median.length'=median(seg.len), 'mean.length'=mean(seg.len), 'sd'=sd(seg.len)),
+  'Non-Progressors'=do.call(rbind.data.frame, segment.lengths[np.pt]) %>% summarise( 'n.segments' = length(seg.len), 'median.length'=median(seg.len), 'mean.length'=mean(seg.len), 'sd'=sd(seg.len)))
 
 
 pander(sum.var, caption='Segment stats between progressors and non-progressors')
@@ -293,47 +310,64 @@ pander(sum.var, caption='Segment stats between progressors and non-progressors')
 ```{r echo=F, message=F, warning=F}
 
 df = rbind(cbind(do.call(rbind.data.frame, var.seg.lengths[prog.pt]), 'status'='Progressor'), cbind(do.call(rbind.data.frame, var.seg.lengths[np.pt]), 'status'='Non-Progressor'))
-
 lenWT = wilcox.test(subset(df, status == 'Progressor')$seg.len, subset(df, status == 'Non-Progressor')$seg.len)
 
+ggplot(df, aes(status, seg.len)) + geom_jitter(aes(color=status), alpha=0.5, show.legend = F, width=.2) +
+  geom_boxplot(aes(group=status, fill=status), show.legend=F, outlier.colour = NA) + 
+  geom_label(data=subset(df, status == 'Progressor'), aes(status, max(seg.len)-2*sd(seg.len), label=paste('median\n',scientific(median(seg.len),3),sep='') )) +
+  geom_label(data=subset(df, status == 'Non-Progressor'), aes(status, max(seg.len), label=paste('median\n',scientific(median(seg.len),3),sep=''))) +
+  labs(y='Variable segment length', x='', title='Variable regions', caption=paste('Wilcox p-value', signif(lenWT$p.value, digits=3) ))
+
 ggplot(df, aes(status, seg.len)) + 
-  geom_boxplot(aes(group=status, fill=status), show.legend=F) + 
-  geom_label(data=subset(df, status == 'Progressor'), aes(status, max(seg.len)-2*sd(seg.len), label=paste('median\n',median(seg.len),sep='') )) +
-  geom_label(data=subset(df, status == 'Non-Progressor'), aes(status, max(seg.len), label=paste('median\n',median(seg.len),sep=''))) +
-  labs(y='Variable segment length', x='', title='Variable regions', caption=paste('Wilcox p-value', ifelse (lenWT$p.value < .001, '< .001', format.pval(lenWT$p.value)) ))
+  geom_jitter(aes(color=status), show.legend=F) + geom_violin(aes(group=status, fill=status), show.legend=F) +
+  geom_label(data=subset(df, status == 'Progressor'), aes(status, max(seg.len)-2*sd(seg.len),label=paste('median\n',scientific( median(seg.len) , 3),sep='') ))  +
+    geom_label(data=subset(df, status == 'Non-Progressor'), aes(status, max(seg.len), label=paste('median\n',scientific( median(seg.len) , 3),sep=''))) +
+    labs(y='Variable segment length', x='', title='Variable regions', caption=paste('Wilcox p-value', signif(lenWT$p.value, digits=3) ))
 
+```
 
-
+```{r, echo=F, warning=F, message=F}
 df = rbind(cbind.data.frame('n'=sapply(var.seg.lengths[prog.pt], nrow), 'status'='Progressor'), cbind.data.frame('n'=sapply(var.seg.lengths[np.pt], nrow), 'status'='Non-Progressor'))
-
 nWT = wilcox.test(subset(df, status == 'Progressor')$n, subset(df, status == 'Non-Progressor')$n)
 
-ggplot(df, aes(status, n, group=status)) + 
-  geom_boxplot(aes(fill=status), position = 'dodge', show.legend = F) + 
-  geom_label(data=subset(df, status == 'Progressor'), aes(status, max(n)-2*sd(n), label=paste('median\n',median(n),sep='') )) +
-  geom_label(data=subset(df, status == 'Non-Progressor'), aes(status, max(n), label=paste('median\n',median(n),sep=''))) +
-  labs(y='Number of segments', title="Total number of segments", caption=paste('Wilcox p-value', ifelse (lenWT$p.value < .001, '< .001', format.pval(nWT$p.value)) ))
+ggplot(df, aes(status, n, group=status)) + geom_jitter(aes(color=status), width=0.2) +
+  geom_boxplot(aes(fill=status), position = 'dodge', show.legend = F, outlier.colour = NA) +
+  geom_label(data=subset(df, status == 'Progressor'), 
+             aes(status, max(n)-2*sd(n), label=paste('median\n',sprintf("%.1f",median(n)),sep=''), fill=status ), color='white' ) +
+  geom_label(data=subset(df, status == 'Non-Progressor'), 
+             aes(status, max(n)+2*sd(n), label=paste('median\n',sprintf("%.1f",median(n)),sep=''), fill=status), color='white') +
+  labs(y='Number of segments', title="Total number of segments", caption=paste('Wilcox p-value', signif(nWT$p.value, digits=3)) ) +
+  theme(legend.position = 'none')
 
+
+ggplot(df, aes(status, n, group=status)) + geom_jitter(aes(color=status), width=0.2) +
+  geom_violin(aes(fill=status, group=status)) +
+  geom_label(data=subset(df, status == 'Progressor'), 
+             aes(status, max(n)-2*sd(n), label=paste('median\n',sprintf("%.1f",median(n)),sep=''), fill=status ), color='white' ) +
+  geom_label(data=subset(df, status == 'Non-Progressor'), 
+             aes(status, max(n)+2*sd(n), label=paste('median\n',sprintf("%.1f",median(n)),sep=''), fill=status), color='white') +
+  labs(y='Number of segments', title="Total number of segments", caption=paste('Wilcox p-value', signif(nWT$p.value, digits=3)) ) +
+  theme(legend.position = 'none')
 
 ```
 
 
 ### Check variable segment length vs chromosome length
 
-```{r echo=F, message=F, warning=F}
+```{r echo=F, message=F, warning=F, fig.height=8, fig.width=20}
 n.var.regions = sapply(var.seg.lengths, nrow)
 
-wilcox.test(n.var.regions[prog.pt], n.var.regions[np.pt])
+#wilcox.test(n.var.regions[prog.pt], n.var.regions[np.pt])
 
 sum.patient.data$Num.Var.Regions = as.vector(sapply(var.seg.lengths[sum.patient.data$Patient], nrow))
 
 chr.info = read.table('hg19_chrom.txt',sep='\t', header=T)
+chr.info$genome.length = cumsum(as.numeric(chr.info$length))
 
-# Segment lengths, variable regions
-var.seg.lengths = lapply(var.seg.lengths, function(x) merge(x, chr.info, by.x='chr', by.y='chr') )
+var.seg.lengths = lapply(var.seg.lengths, function(x) merge(x, chr.info, by='chr') )
 
 # All segments
-segment.lengths = lapply(segment.lengths, function(x) merge(x, chr.info, by.x='chr', by.y='chr') )
+segment.lengths = lapply(segment.lengths, function(x) merge(x, chr.info, by='chr') )
 
 # Genome coverage
 genome.coverage = sapply(segment.lengths, function(x) {
@@ -343,16 +377,64 @@ genome.coverage = sapply(segment.lengths, function(x) {
 # No difference in coverage
 covtt = wilcox.test(genome.coverage[prog.pt], genome.coverage[np.pt])
 
+var.seg.lengths = lapply(var.seg.lengths, function(x) cbind(x, 'chr.ratio'=x[['seg.len']]/x[['length']]))
+
+# Segment lengths, variable regions
+vsl = do.call(rbind.data.frame, lapply(patient.data, function(df) {
+  if (is.null(df$variable.regions) || nrow(df$variable.regions) <= 0) return(NULL)
+  
+  mc = grep('^D', colnames(df$variable.regions))
+
+  meanCN = sapply(apply(t(df$variable.regions[,mc]), 2, function(x) x[which(x >= 1.1 | x <= 0.9)]), mean)
+  meanCN[is.na(meanCN)] = 0
+
+    cbind.data.frame( 'chr'=df$variable.regions$chrom, 'start'=df$variable.regions$start.pos, 'end'=df$variable.regions$end.pos, meanCN, 'status'= df$info$Status[1])
+  }))
+vsl = vsl[-which(vsl$meanCN == 0),]
+
+vsl$meanCN = vsl$meanCN - mean(vsl$meanCN)
+
+vslm = melt(vsl, id.vars=c('chr','start','end','status'))
+
+chr.info = subset(chr.info, chr %in% c(1:22))
+chr.info$chr = ordered(chr.info$chr, levels=c(1:22))
+vslm$chr =  ordered(vslm$chr, levels=c(1:22))
+vslm = merge(chr.info, vslm, by='chr')
+vslm = vslm %>% rowwise() %>% mutate('genome.start'=genome.length+start, 'genome.end'=genome.length+end)
+
+vslm$status = ifelse(vslm$status == 'P', 'Progressor', 'Non Progressor')
+  
+
+ggplot(vslm, aes(x=length)) + 
+  facet_grid(status~chr) +
+  geom_rect(data=vslm, aes(xmin=start, xmax=end, ymin=0, ymax=value, fill=value)) +
+  scale_fill_gradient(low = "green3", high = "red3", name='') + 
+  labs(title="Variable region gains & losses", x='Chromosomes', y='Mean adjusted segmentation value') +
+  theme(axis.text.x=element_blank(),axis.ticks.x=element_blank(), legend.position='bottom')
+
+
+
+```
+
+```{r echo=F, message=F, warning=F}
 # Variable region length by ratio of chromosome
 chr.ratios = lapply(var.seg.lengths, function(x) x[['seg.len']]/x[['length']])
 
 melted = melt(chr.ratios)
-melted = merge(sum.patient.data[,c('Patient', 'Status')], melted, by.x='Patient', by.y='L1')
+melted = merge(sum.patient.data[,c('Hospital.Research.ID', 'Status')], melted, by.x='Hospital.Research.ID', by.y='L1')
 
 chr.ratio.tt = t.test(unlist(chr.ratios[prog.pt]), unlist(chr.ratios[np.pt]))
 
-ggplot(melted, aes(Status, value, fill=Status)) + geom_boxplot() + 
-  labs(title=paste("Variable region length, p-value", ifelse(chr.ratio.tt$p.value < 0.001, "<0.001", signif(chr.ratio.tt$p.value,2))),y='Segment Length/Chr length')
+ggplot(melted, aes(Status, value, fill=Status)) + geom_jitter(aes(color=Status), width=0.2) + geom_boxplot(outlier.colour = NA) + 
+  geom_label(data=subset(melted, Status == 'P'), aes(x=Status, y=max(value)-sd(value), label=scientific(median(value),3) ), color='white', show.legend = F ) +
+  geom_label(data=subset(melted, Status == 'NP'), aes(x=Status, y=max(value)-sd(value), label=scientific(median(value),3) ), color='white' , show.legend = F) +
+  labs(title="Variable region length",subtitle=paste("p-value", signif(chr.ratio.tt$p.value, digits=3)), y='Segment Length/Chr length')
+
+ggplot(melted, aes(Status, value, fill=Status)) + geom_jitter(aes(color=Status), width=0.2) + geom_violin() + 
+  geom_label(data=subset(melted, Status == 'P'), aes(x=Status, y=max(value)-sd(value), label=scientific(median(value),3) ), color='white' , show.legend = F) +
+  geom_label(data=subset(melted, Status == 'NP'), aes(x=Status, y=max(value)-sd(value), label=scientific(median(value),3) ), color='white' , show.legend = F) +
+  labs(title="Variable region length",subtitle=paste("p-value", signif(chr.ratio.tt$p.value, digits=3)), y='Segment Length/Chr length')
+
 
 var.seg.lengths =  lapply(var.seg.lengths, function(df) {
    ddply(df, .(chr, length), summarise, seg.lengths = sum(seg.len), chr.ratio = sum(seg.len)/length[1])
@@ -381,7 +463,7 @@ short.chr.tt = t.test(unlist(lapply(var.seg.lengths[prog.pt], get.chrs, chrs=c(1
 #ftL = fisher.test(df)
 ```
 
-So it appears that adjusting for chromosome length (looking at the ratio of the chromosome covered by segments rather than the raw bp) a significant difference in the coverage of the genome by CN segments that are variable between progressors and non: t-test p-value `r signif(chr.ratio.tt$p.value, 2)`.  Overall bp coverage of the sWGS is `r round(mean(genome.coverage), 2)*100`%  (P `r round(mean(genome.coverage[prog.pt]),2)`, NP `r round(mean(genome.coverage[np.pt]), 2)`).  
+So it appears that adjusting for chromosome length (looking at the ratio of the chromosome covered by segments rather than the raw bp) a significant difference in the coverage of the genome by CN segments that are variable between progressors and non: t-test p-value `r signif(chr.ratio.tt$p.value, 3)`.  Overall bp coverage of the sWGS is `r round(mean(genome.coverage), 2)*100`%  (P `r round(mean(genome.coverage[prog.pt]),2)`, NP `r round(mean(genome.coverage[np.pt]), 2)`).  
 
 Variable regions cover `r round(pcov, 2)*100`% of the the progressors genome, and `r round(npcov, 2)*100`% of non-progressor genomes.
 
@@ -460,18 +542,17 @@ head(df)
 ttg = t.test(subset(df, status == 'P')$gain, subset(df, status == 'NP')$gain)
 ttl = t.test(subset(df, status == 'P')$loss, subset(df, status == 'NP')$loss)
 
-ft = fisher.test((df %>% group_by(status) %>% summarize( 'gains'=sum(gain), 'losses'=sum(loss)))[,c('gains','losses')])
+ft = fisher.test((df %>% group_by(status) %>% summarise( 'gains'=sum(gain), 'losses'=sum(loss)))[,c('gains','losses')])
 
-ggplot(melt(df), aes(status, value)) + facet_grid(.~variable) + 
-  geom_bar(aes(fill=status),stat='identity') + 
-  labs(title='Total gains & Losses excluding HGD/IMC', y='counts', x='', caption=paste('Gains and losses are signficantly enriched in Progressors vs Non. Fisher odds ', round(ft$estimate,2), '(p=', format.pval(ft$p.value, digits=1), ')', sep='' )) 
+ggplot(melt(df), aes(status, value, fill=status)) + facet_grid(.~variable) + geom_bar(stat='identity') +
+  labs(title='Total gains & Losses excluding HGD/IMC', y='counts', x='', caption=paste('Gains and losses are signficantly enriched in Progressors vs Non.\nFisher odds ', round(ft$estimate,2), '(p=', signif(ft$p.value, digits=3), ')', sep='' )) 
 
 ```
 
 
 ## How do Cancer Gene Consensus genes map to the variable regions?
 
-```{r, hmm, echo=F, message=F, warning=F, fig.height=100, fig.width=10}
+```{r, hmm, echo=F, message=F, warning=F, fig.height=60, fig.width=10}
 ccgenes = read.table('~/Data/CosmicCensusGenes.tsv', sep='\t', header=T, stringsAsFactors=F)
 ccgenes = ccgenes[-which(ccgenes$Mutation.Types == 'T'),]
 
@@ -529,7 +610,7 @@ for (patient.name in names(patient.data)) {
   }
   reg = arrange(reg, chrom, arm, start.pos)
   
-  status = subset(sum.patient.data, Patient == patient.name)$Status
+  status = subset(sum.patient.data, Hospital.Research.ID == patient.name)$Status
   
   reg = cbind(patient.name, status, reg)
     
@@ -570,17 +651,29 @@ m = transform(m, Gene.Symbols = reorder(Gene.Symbols, value))
 m$CN = factor(m$CN)
 
 m$brks <- cut(m$value, include.lowest=T, right=F,ordered_result=T,
-                   breaks=c(0, 1, 3, 5, 8, 10, 12),
-                   labels=c('0','1-3', '4-5', '6-8','9-10', '10-12'))
+                   breaks=c(0, 1, 3, 5, 8, 10, 12, 15),
+                   labels=c('0','1-3', '4-5', '6-8','9-10', '10-12', '>12'))
 
 ## TODO: Tile the variables so that you can see the gains/losses per progressor/non
-subset(m, Gene.Symbols %in% c('CDKN2A', 'TBL1XR1'))
+#subset(m, Gene.Symbols %in% c('CDKN2A', 'TBL1XR1'))
 m = transform(m, Gene.Symbols = reorder(Gene.Symbols, brks))
 
 myP = c('white',brewer.pal(n = length(levels(m$brks)), name = "Reds"))
 
 ggplot(m,  aes(y=Gene.Symbols, x=CN, fill=brks)) + geom_tile() + facet_grid(.~variable) + 
     scale_fill_manual(values = myP, 'Patient Counts') + labs(title="All available COSMIC genes", x='', y='')
+
+m2 = melt(gene.p %>% group_by(Gene.Symbols) %>% summarise( 'Progressors' = sum(Progressors), 'Non.Progressors' = sum(Non.Progressors)), id.vars='Gene.Symbols')
+
+m2 = transform(m2, Gene.Symbols = reorder(Gene.Symbols, value))
+
+m2$brks <- cut(m2$value, include.lowest=T, right=F,ordered_result=T,
+                   breaks=c(0, 1, 3, 5, 8, 10, 12, 15),
+                   labels=c('0','1-3', '4-5', '6-8','9-10', '10-12', '>12'))
+
+ggplot(m2,  aes(y=Gene.Symbols, x=variable, fill=brks)) + geom_tile() + #facet_grid(.~variable) + 
+    scale_fill_manual(values = myP, 'Patient Counts') + labs(title="All available COSMIC genes", x='', y='')
+
 
 ```
 
@@ -595,10 +688,26 @@ m = melt(subset(gene.p, Gene.Symbols %in% gc[1:50, 'Gene.Symbols']), id.vars=c('
 m = transform(m, Gene.Symbols = reorder(Gene.Symbols, value))
 
 m$brks <- cut(m$value, include.lowest=T, right=F,
-                   breaks=c(0, 1, 3, 5, 8, 10, 12),
-                   labels=c('0','1-3', '4-5', '6-8','9-10', '10-12'))
+                   breaks=c(0, 1, 3, 5, 8, 10, 12, 15),
+                   labels=c('0','1-3', '4-5', '6-8','9-10', '10-12', '>12'))
 
 ggplot(m,  aes(y=Gene.Symbols, x=CN, fill=brks)) + geom_tile(color='white') + facet_grid(.~variable) + 
+    scale_fill_manual(values=myP, 'Patient Counts') + 
+    labs(title="Top 50 genes by number of patients", x='', y='')
+
+
+
+gene.p50 = gene.p %>% group_by(Gene.Symbols) %>% summarise( 'Progressors' = sum(Progressors), 'Non.Progressors' = sum(Non.Progressors))
+
+m2 = melt(subset(gene.p50, Gene.Symbols %in% gc[1:50, 'Gene.Symbols']), id.vars=c('Gene.Symbols'))
+
+m2 = transform(m2, Gene.Symbols = reorder(Gene.Symbols, value))
+
+m2$brks <- cut(m2$value, include.lowest=T, right=F, ordered_result=T,
+                   breaks=c(0, 1, 3, 5, 8, 10, 12, 15),
+                   labels=c('0','1-3', '4-5', '6-8','9-10', '10-12', '>12'))
+
+ggplot(m2,  aes(y=Gene.Symbols, x=variable, fill=brks)) + geom_tile(color='white') + 
     scale_fill_manual(values=myP, 'Patient Counts') + 
     labs(title="Top 50 genes by number of patients", x='', y='')
 
@@ -616,8 +725,8 @@ It's possible that the variable regions we find are entirely within the HGD/IMC 
 
 ```{r, hgd, echo=F, message=F, warning=F}
 
-pvnp = data.frame(matrix(nrow=length(subset(sum.patient.data, Status == 'P')$Patient), ncol=2, dimnames=list(subset(sum.patient.data, Status == 'P')$Patient, c('hgd','be'))))    
-for (name in subset(sum.patient.data, Status == 'P')$Patient) {
+pvnp = data.frame(matrix(nrow=length(subset(sum.patient.data, Status == 'P')$Hospital.Research.ID), ncol=2, dimnames=list(subset(sum.patient.data, Status == 'P')$Hospital.Research.ID, c('hgd','be'))))    
+for (name in subset(sum.patient.data, Status == 'P')$Hospital.Research.ID) {
   var.regions = patient.data[[name]]$variable.regions
   if ( is.null(var.regions) || nrow(var.regions) == 0 ) next
   
@@ -635,15 +744,15 @@ for (name in subset(sum.patient.data, Status == 'P')$Patient) {
 
 ## TODO Check enrichment of variable regions found in BE vs HGD 
 
-tt = t.test(pvnp$hgd, pvnp$be)
+#tt = t.test(pvnp$hgd, pvnp$be)
 pvnp = cbind(pvnp, (pvnp %>% rowwise() %>% mutate(total=hgd+be, hgd.ratio=round(hgd/(hgd+be),3) ))[c('total','hgd.ratio')])
 
-#fisher.test(p, simulate.p.value = T)
+ft = fisher.test( pvnp[complete.cases(pvnp[,c('hgd','be')]), c('hgd','be')], simulate.p.value = T)
 
 ct = cor.test(subset(sum.patient.data, Status == 'P')$total.samples, pvnp$hgd.ratio)
 
 pander(pvnp, justify='left', 
-       caption=paste("Number of variable regions found in HGD vs non-HGD samples of progessor patients.  There's no significant difference between them (t-test p=",signif(tt$p.value,2),').  Not all patients have HGD samples (NAs). There is also no significant inverse correlation (r= ',signif(ct$estimate, 2),') between the number/ratio of variable regions found in HGD samples vs non (Pearsons p=',signif(ct$p.value, 2),')',  sep=''))
+       caption=paste("Number of variable regions found in HGD vs non-HGD samples of progessor patients.  There's a significant difference between them (Fisher's p=",signif(ft$p.value,3),').  Not all patients have HGD samples (NAs). There is no significant correlation (r= ',signif(ct$estimate, 2),') between the number/ratio of variable regions found in HGD samples vs non (Pearsons p=',signif(ct$p.value, 3),')',  sep=''))
 
 ```
 
