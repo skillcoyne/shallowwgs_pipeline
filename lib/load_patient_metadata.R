@@ -35,21 +35,7 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
   if (grepl('\\.xlsx$', basename(file))) {
     library(readxl)
     
-    patient.info = NULL;  #test.training = NULL
-    #for (sheet in excel_sheets(file)) {
-    #  print(sheet)
-    #for (i in 2:length(getSheets(loadWorkbook(file)))) {
-      #print(i)
-     # if (grepl('Technical Repeats|All_patient_info.txt', sheet)) next
-
-      #if (sheet == 'TrainingTest') {
-      #  test.training = read_excel(file, sheet = sheet)
-      #  next
-      #}
-      
-      #batch_name = gsub(' ', '_', sheet)
-      
-      #ws = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
+    patient.info = NULL; 
       sheet = 'All combined'
       ws = read_excel(file, sheet = sheet)
 
@@ -83,24 +69,10 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
       
       colnames(ws) = c('Patient', 'Hospital.Research.ID', 'Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set')
       
-      #ws[ws$p53.Status == "", 'p53.Status'] = NA
-      #ws[ws$Barretts.Cellularity == "", 'Barretts.Cellularity'] = NA
-      
-      #ws$Batch.Name = batch_name
-      
-      #if (is.null(patient.info)) {
         patient.info = ws
-      #} else {
-        #print(paste('binding', batch_name))
-      #  patient.info = rbind(patient.info, ws)
-      #}
-    #}
-    #patient.info = merge(patient.info, test.training[,grep('Patient|Set|Analysis', colnames(test.training), value=T)], by.x='Patient', by.y='Patient', all=T)
   } else {
     patient.info = read.table(file, header=T, sep='\t', stringsAsFactors=F, quote="")
-#    nacol = which(apply(patient.info, 2, function(x) length(which(is.na(x))) == length(x) ))
-#    patient.info = patient.info[,-nacol]
-    
+
     slx.cols = grep('^SLX', colnames(patient.info), value=T)
     if (length(slx.cols) > 1) {
       slx.rows = patient.info[,slx.cols]

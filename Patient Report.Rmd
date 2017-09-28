@@ -672,8 +672,36 @@ m2$brks <- cut(m2$value, include.lowest=T, right=F,ordered_result=T,
                    labels=c('0','1-3', '4-5', '6-8','9-10', '10-12', '>12'))
 
 ggplot(m2,  aes(y=Gene.Symbols, x=variable, fill=brks)) + geom_tile() + #facet_grid(.~variable) + 
-    scale_fill_manual(values = myP, 'Patient Counts') + labs(title="All available COSMIC genes", x='', y='')
+    scale_fill_manual(values = myP, 'Patient Counts') + labs(title="All available COSMIC genes", x='', y='')  
+  
+head(m2)
+m2
 
+print.png<-function(p, name, ...) {
+  png(filename=name,...)
+  print(p)
+  dev.off()
+}
+
+
+pg_genes = subset(m2, variable == 'Progressors')
+pg_genes = pg_genes[order(-pg_genes$value),]
+
+limits = seq(1, 220, 50)
+for (i in limits) {
+  max = i+49
+  if (max > nrow(pg_genes) ) max = nrow(pg_genes)
+  
+  p = ggplot(subset(m2, Gene.Symbols %in% pg_genes$Gene.Symbols[c(i:max)]),  aes(y=Gene.Symbols, x=variable, fill=brks)) + geom_tile() +
+    scale_fill_manual(values = myP, 'Patient Counts') +
+    labs(title="All available COSMIC genes", x='', y='', subtitle=paste("genes ", i, "-", max, " by number of patients", sep='')) +
+    theme(text=element_text(size=16, face="bold"), axis.title=element_text(size=18))
+  
+  if (i != 1)
+    p = p + theme(legend.position = 'none')
+    
+  print.png(p, paste('cosmic_genes_', i, '-', max, '.png', sep=''), width=600, height=1000)
+}
 
 ```
 
