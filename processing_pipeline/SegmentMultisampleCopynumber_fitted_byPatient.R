@@ -9,6 +9,7 @@ suppressPackageStartupMessages( library(ggplot2) )
 suppressPackageStartupMessages( library(gridExtra) )
 suppressPackageStartupMessages( library(ggdendro) )
 suppressPackageStartupMessages( library(copynumber) )
+suppressPackageStartupMessages( library(dplyr) )
 
 source("../lib/fastPCF.R")
 source('../lib/load_patient_metadata.R')
@@ -25,6 +26,9 @@ outdir = args[3]
 data.dirs = list.dirs(data, full.names=T, recursive=F)
 data.files = list.files(data, full.names=T, recursive=T)
 
+patient.name = gsub('\\/', '_', patient.name )
+
+
 plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
 print(paste("Plot directory:", plot.dir))
 if (!dir.exists(plot.dir))  
@@ -32,20 +36,15 @@ if (!dir.exists(plot.dir))
 
 ## Patient info file
 filename = 'All_patient_info.xlsx'
-#if (require(xlsx)) filename = 'All_patient_info.xlsx' 
-  
 
 patient.file = grep(filename, list.files(data, full.names=T), value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing patient info file in", data))
-message(paste("Reading file", filename))
+message(paste("Reading file", patient.file))
 
-all.patient.info = read.patient.info(patient.file, set='all')
+all.patient.info = read.patient.info(patient.file, set='all')$info
 
-all.patient.info$Patient = gsub('\\/', '_', all.patient.info$Patient)
-patient.name = gsub('\\/', '_', patient.name)
-
-head(subset(all.patient.info, Patient == patient.name))
+head(subset(all.patient.info, Hospital.Research.ID == patient.name))
 #print(unique(all.patient.info$Patient))
 
 patient.plot.dir = paste(plot.dir,patient.name, sep='/')
@@ -53,7 +52,7 @@ if (!dir.exists(patient.plot.dir))
   dir.create(patient.plot.dir, recursive=T)
 
 print(patient.name)
-patient.info = subset(all.patient.info, Patient == patient.name)
+patient.info = subset(all.patient.info, Hospital.Research.ID == patient.name)
 if (nrow(patient.info) <= 0)
   stop(paste("No patient information on patient", patient.name))
 
@@ -87,11 +86,11 @@ window.depths.standardised = window.depths[!fit.data$in.blacklist,]
 fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
 
 # Some of the indicies were not run for various reasons. At the moment the patient file does not include that information
-missingIndicies = setdiff(patient.info$samplename, colnames(window.depths.standardised))
+missingIndicies = setdiff(patient.info$Samplename, colnames(window.depths.standardised))
 if (length(missingIndicies > 0))
   warning(paste("Missing several samples: ", paste(missingIndicies, collapse=', '), sep=''))
-# Grab just those specific samples
 
+# Grab just those specific samples
 window.depths.standardised = as.data.frame(window.depths.standardised[,na.omit( match(patient.info$Samplename, colnames(window.depths.standardised)) )])
 colnames(window.depths.standardised) = patient.info$Samplename
 

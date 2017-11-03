@@ -2,7 +2,6 @@
 library(ggplot2)
 library(GGally)
 library(plyr)
-library(xlsx)
 library(dplyr)
 
 source('lib/load_patient_metadata.R')
@@ -16,14 +15,11 @@ if (length(list.files(plot.dir)) <= 0)
   stop(paste("No analysis files found in", plot.dir ))
 
 ## Patient info file
-patient.file = grep('patient_info.xls', data.files, value=T)
+patient.file = grep('All_patient_info.xlsx', data.files, value=T)
 if (length(patient.file) <= 0)
   stop(paste("Missing patient info file in", data))
 
-patient.info = read.patient.info(patient.file)
-
-
-patient.info$Patient = gsub("/", "_", patient.info$Patient)
+patient.info = read.patient.info(patient.file)$info
 head(patient.info)
 
 
@@ -127,7 +123,8 @@ panel.hist <- function(x, ...) {
 }
 
 
-for (patient.name in unique(patient.info$Patient)  )  {
+for (patient.name in unique(patient.info$Hospital.Research.ID)  )  {
+  print(patient.name)
   patient.plot.dir = paste(plot.dir, patient.name, sep='/')
   
   existing.plots = list.files(patient.plot.dir, '*.png', recursive=T )
@@ -136,7 +133,9 @@ for (patient.name in unique(patient.info$Patient)  )  {
     next
   print(patient.name)
   
-  for(gamma2 in c(250,5,10,25,50,100,500,1000)) { 
+  #for(gamma2 in c(250,5,10,25,50,100,500,1000)) { 
+  gamma2 = 250 
+  {
     print(gamma2)
     pt.gamma.plot.dir = paste(patient.plot.dir, paste('gamma2',gamma2,sep='_'),sep='/')
     print(pt.gamma.plot.dir)
@@ -144,7 +143,7 @@ for (patient.name in unique(patient.info$Patient)  )  {
     segvals = read.table(paste(patient.plot.dir, "/",patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep=""),sep="\t",stringsAsFactors=F,header=T)
     segvals = segvals[segvals$n.probes>=min.probes,]
     
-    if(nrow(segvals)>0) {
+    if (nrow(segvals)>0) {
       HC = hclust(dist(t(segvals[,-(1:5)])))
       
       png(paste(pt.gamma.plot.dir,"/hierarchicalClustering_fromFittedSegments_gamma",gamma2,".png",sep=""),width=1000)
@@ -171,9 +170,9 @@ for (patient.name in unique(patient.info$Patient)  )  {
         hist(normalised.segvals[,s],col="blue",main=names(normalised.segvals)[s],xlab="normalised coverage")
       dev.off()
       
-      if(nrow(segvals)>=3) {
+      if (nrow(segvals)>=3) {
         # order by date of endoscopy
-        patient = subset(patient.info, Patient == patient.name)
+        patient = subset(patient.info, Hospital.Research.ID == patient.name)
         patient = arrange(patient, Endoscopy.Year, Pathology)
         
         ## TODO Mistake in earlier version of the patient file caused this will be fixed for the next run
