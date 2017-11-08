@@ -1,3 +1,56 @@
+require(mice)
+require(glmnet)
+require(ggplot2)
+require(plyr)
+
+
+
+add.demo.tocv <- function(patient.info, df) {
+
+  patient.info = patient.info[match(rownames(df), patient.info$Samplename),]
+  
+  patient.info[which(patient.info$BMI > 100), 'BMI'] = NA # I think this one is wrong
+  
+  demo.data = patient.info[,c('Sex','Circumference','Maximal', 'Age.at.diagnosis', 'BMI', 'p53.Status', 'Smoking')]
+  demo.data$Sex = as.integer(demo.data$Sex)-1
+  demo.data$Smoking = as.integer(demo.data$Smoking)-1
+  demo.data$p53.Status = as.integer(demo.data$p53.Status)-1
+  demo.cols = c('Sex','C','M','Age', 'BMI', 'p53.Status', 'Smoking')
+  
+  encode.age <- function(x) {
+    if (x > 70) { 
+      (x - 70)/6 
+    } else if (x < 50) {
+      (x -50)/6
+    } else {
+      0
+    }
+  }
+  #demo.data$Age.at.diagnosis = scale(demo.data$Age.at.diagnosis)
+  
+  # Encode based on presumed distributions or unit normalize
+  demo.data = demo.data %>% rowwise() %>% mutate( 'age.encoded'= encode.age(Age.at.diagnosis))
+  demo.data$Age.at.diagnosis = demo.data$age.encoded
+  demo.data$age.encoded = NULL
+  demo.data$BMI = unit.var(demo.data$BMI)
+  
+  demo.data[,c('Circumference','Maximal')] = apply(demo.data[,c('Circumference','Maximal')], 2, unit.var)
+  
+  ## Impute missing data
+  imp = mice(as.matrix(demo.data), diagnostics = F)
+  
+  df = cbind(df, 'Sex'=NA,'C'=NA,'M'=NA,'Age'=NA, 'BMI'=NA, 'p53.Status'=NA, 'Smoking'=NA)
+  df[,demo.cols] = as.matrix(complete(imp))
+  
+  return(df)
+}
+
+unit.var <- function(x) {
+  if (sd(x, na.rm=T) == 0) return(x)
+  return((x-mean(x,na.rm=T))/sd(x,na.rm=T) )
+}
+
+
 score.cx <- function(pt.d, df) {
   get.length.variance <- function(pd) {
     samples = grep('^D', colnames(pd$seg.vals), value=T)
@@ -12,15 +65,15 @@ score.cx <- function(pt.d, df) {
   df = cbind(df, 'cx' = apply(df, 1, function(x) length(which(x >= sd(x)*2 | x <= -sd(x)*2))))
   df[,'cx'] = unit.var(df[,'cx'])
   
-  df = cbind(df, 'segment.length'=0, 'sample.variance'=0)
-  for (pt in names(complexity.measures)) {
-    for (sample in colnames(complexity.measures[[pt]])) {
-      df[sample,c('segment.length', 'sample.variance')] = as.numeric(complexity.measures[[pt]][,sample])
-    }
-  }
+  #df = cbind(df, 'segment.length'=0, 'sample.variance'=0)
+  # for (pt in names(complexity.measures)) {
+  #   for (sample in colnames(complexity.measures[[pt]])) {
+  #     df[sample,c('segment.length', 'sample.variance')] = as.numeric(complexity.measures[[pt]][,sample])
+  #   }
+  # }
   
-  df[, 'segment.length'] = unit.var(df[, 'segment.length'])
-  df[, 'sample.variance'] = unit.var(df[, 'sample.variance'])
+  #df[, 'segment.length'] = unit.var(df[, 'segment.length'])
+  #df[, 'sample.variance'] = unit.var(df[, 'sample.variance'])
   
   return(df)
 }
@@ -148,19 +201,22 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
     lambdas[which.max(subset(lambdas, sme < median(sme) & sme > min(sme))$mean), 'lambda.min'] = T
     
     lmin = subset(lambdas, lambda.min)
-    se1 = lmin$mean + lmin$sme
+    se1 = lmin$mean + (sd(lambdas$mean)/sqrt(nrow(lambdas)))
     
-    lambda.1se.search = subset(lambdas, mean < se1 & !lambda.min & log.lambda > subset(lambdas, lambda.min)$log.lambda) 
-    if (nrow(lambda.1se.search) > 0) {
-      arrange(lambda.1se.search, -mean)[1:10,]
-      lambdas[arrange(subset(lambdas, mean < se1 & !lambda.min & log.lambda > subset(lambdas, lambda.min)$log.lambda ), -mean)[1, 'lambda.at'], 'lambda.1se'] = T
-    }
-    #df[df$log.lambda < subset(df, mean == max(mean))$log.lambda-sd(df$log.lambda),][1, 'lambda-1se'] = TRUE
+    
+    lambda.1se.search = subset(lambdas, mean >= se1 & !lambda.min & log.lambda > lmin$log.lambda) 
+    if (nrow(lambda.1se.search) > 0)
+      lambdas[arrange(lambda.1se.search, mean)[1,'lambda.at'], 'lambda+1se'] = T
+    
+    lambda.1se.search = subset(lambdas, mean <= se1 & !lambda.min & log.lambda < lmin$log.lambda) 
+    if (nrow(lambda.1se.search) > 0)
+      lambdas[arrange(lambda.1se.search, -mean)[1,'lambda.at'], 'lambda-1se'] = T
+    
   } else if (select == 'deviance') {
     lambdas[which.min(lambdas$mean.b.dev), 'lambda.min'] = T
     lmin = subset(lambdas, lambda.min)
     
-    se1 = lmin$mean.b.dev+lmin$sd.b.dev
+    se1 = lmin$mean.b.dev + (sd(lambdas$mean.b.dev)/sqrt(nrow(lambdas)))
     
     lambda.1se.search = subset(lambdas, mean.b.dev >= se1 & !lambda.min & log.lambda > lmin$log.lambda) 
     if (nrow(lambda.1se.search) > 0)

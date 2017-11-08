@@ -1,30 +1,40 @@
-library(ggplot2)
-library(plyr)
-library(dplyr)
-library(reshape2)
-library(gridExtra)
-library(GenomicRanges)
-library(glmnet)
-library(CoxHD)
-library(mice)
+#!/usr/bin/env Rscript
+
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(plyr))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(gridExtra))
+suppressPackageStartupMessages(library(glmnet))
+suppressPackageStartupMessages(library(mice))
+suppressPackageStartupMessages(library(reshape2))
+suppressPackageStartupMessages(library(GenomicRanges))
 
 source('lib/load_patient_metadata.R')
 source('lib/cv-pt-glm.R')
 
-
 args = commandArgs(trailingOnly=TRUE)
 
 data = args[1]
-tile.w = as.character(args[2])
+tile.w = as.numeric(args[2])
+if (is.na(tile.w)) tile.w = unlist(strsplit(args[2],','))
+
 includeDemo = args[3]
 
-
-data = '~/Data/Ellie'
-tile.w=10e6
-includeDemo = F # demographics
+print(args)
+#data = '~/Data/Ellie'
+#tile.w=5e6
+#tile.w=c(5e+06, 'arms')
+tileFile = paste('tile_patients_All_',as.character(tile.w),'.Rdata',sep='')
+message( paste(tileFile, collapse=' '))
+#includeDemo = T # demographics
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
 analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
+
+tile.files = sapply(tileFile, function(f) grep(f, analysis.files, value=T,fixed=T))
+
+if (length(tile.files) <= 0)
+  stop(paste("No file ", tileFile, " found in ", data, '/Analysis', sep=''))
 
 load(grep('All_patients.Rdata', analysis.files, value=T), verbose=T)
 
@@ -34,20 +44,12 @@ if (length(patient.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", data))
 demo.file = grep('Demographics_full.xlsx', data.files, value=T)
 
-
 all.patient.info = read.patient.info(patient.file, demo.file, set='all')$info
 
 patient.info = subset(all.patient.info, Set == 'Training')
 
-validation.patient.info =  subset(all.patient.info, Set == 'Test')
-validation.patient.info = arrange(validation.patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
-sum.validation.info = summarise.patient.info(validation.patient.info)
-
-patient.info = arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
+patient.info = plyr::arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
 sum.patient.data = summarise.patient.info(patient.info)
-
-validation.patient.data = patient.data[sum.validation.info$Hospital.Research.ID]
-length(validation.patient.data)
 
 patient.data = patient.data[sum.patient.data$Hospital.Research.ID]
 patient.data = patient.data[!is.na(names(patient.data))]
@@ -57,19 +59,26 @@ sum.patient.data = as.data.frame(subset(sum.patient.data, Hospital.Research.ID %
 nrow(sum.patient.data)
 
 
-tile.files = grep(as.character(tile.w), analysis.files, value=T, fixed=T)
-load(tile.files[grep('tile', tile.files)], verbose=T)
+message(paste("Loading df from", tile.files))
 
+if (length(tile.files) > 1) {
+  load(grep('arms',tile.files,value=T), verbose=T)
+  armsDf = mergedDf
+  armsDf = armsDf[grep('X|Y', rownames(armsDf), invert=T),]
+  armsDf = armsDf[, intersect(colnames(armsDf), patient.info$Samplename)]
+  dim(armsDf)
+}
+
+load(grep(tile.w[which(is.na(sapply(tile.w, function(x) as.numeric(x))))], tile.files, invert=T, value=T), verbose=T)
 mergedDf = mergedDf[grep('X|Y', rownames(mergedDf), invert=T),]
-
-
-mergedDfValidation = mergedDf[,validation.patient.info$Samplename]
-dim(mergedDfValidation)
-
 mergedDf = mergedDf[, intersect(colnames(mergedDf), patient.info$Samplename)]
 dim(mergedDf)
 
-cache.dir = paste(data, 'Analysis',sub('\\+', '', tile.w),   sep='/')
+
+cache.dir = paste(data, 'Analysis',sub('\\+', '', paste(tile.w, collapse='_')), sep='/')
+if (includeDemo)
+  cache.dir = paste(cache.dir, '_with-demo', sep='')
+message(paste("Writing to ", cache.dir))
 
 if (!dir.exists(cache.dir)) dir.create(cache.dir)
 
@@ -95,85 +104,49 @@ if (length(setdiff(colnames(mergedDf), names(labels))) > 3)
 dysplasia.df = t(mergedDf[,intersect(names(labels), colnames(mergedDf))])
 labels = labels[intersect(names(labels), colnames(mergedDf))]
 dim(dysplasia.df)
-
-unit.var <- function(x) {
-  if (sd(x, na.rm=T) == 0) return(x)
-  return((x-mean(x,na.rm=T))/sd(x,na.rm=T) )
-}
-
 dysplasia.df = apply(dysplasia.df, 2, unit.var)
 
+get.loc<-function(df) {
+  locs = do.call(rbind.data.frame, lapply(colnames(df), function(x) unlist(strsplit( x, ':|-'))))
+  colnames(locs) = c('chr','start','end')
+  locs[c('start','end')] = lapply(locs[c('start','end')], function(x) as.numeric(as.character(x)))
+  locs
+}
 
-score.cx <- function(pt.d, df) {
-  get.length.variance <- function(pd) {
-    samples = grep('^D', colnames(pd$seg.vals), value=T)
-    len.var = var(pd$seg.vals$end.pos - pd$seg.vals$start.pos) # length won't vary between samples
-    
-    sample.var = apply(as.matrix(pd$seg.vals[, samples]), 2, var)
-    t(cbind(len.var, sample.var))
-  }
+
+# Merge and subtract the average value of the arms from the segments
+if (exists('armsDf')) {
+  arms.df = t(armsDf[,intersect(names(labels), colnames(armsDf))])
+  labels = labels[intersect(names(labels), colnames(armsDf))]
+  dim(arms.df)
+  arms.df = apply(arms.df, 2, unit.var)
   
-  complexity.measures = lapply(pt.d, get.length.variance)
+  locs = get.loc(dysplasia.df)
+  arm.locs = get.loc(arms.df)
   
-  df = cbind(df, 'cx' = apply(df, 1, function(x) length(which(x >= sd(x)*2 | x <= -sd(x)*2))))
-  df[,'cx'] = unit.var(df[,'cx'])
+  arms = makeGRangesFromDataFrame(arm.locs)
+  locs = makeGRangesFromDataFrame(locs)
   
-  df = cbind(df, 'segment.length'=0, 'sample.variance'=0)
-  for (pt in names(complexity.measures)) {
-    for (sample in colnames(complexity.measures[[pt]])) {
-      df[sample,c('segment.length', 'sample.variance')] = as.numeric(complexity.measures[[pt]][,sample])
+  tmp = dysplasia.df
+  # subtract arms from 5e6 and merge both
+  ov = findOverlaps(arms, locs)
+  for (hit in unique(queryHits(ov))) {
+    print(hit)
+    cols = subjectHits(ov)[which(queryHits(ov) == hit)]
+    for (i in 1:nrow(tmp)) {
+      tmp[i,cols] = tmp[i,cols] - arms.df[i,hit]
     }
   }
-  
-  df[, 'segment.length'] = unit.var(df[, 'segment.length'])
-  df[, 'sample.variance'] = unit.var(df[, 'sample.variance'])
-  
-  return(df)
+  dysplasia.df = cbind(tmp, arms.df)
+  dim(dysplasia.df)
 }
 
 ## TODO score complexity on the seg.vals directly rather than merged data frame?
 dysplasia.df = score.cx(patient.data, dysplasia.df)
 
 if (includeDemo) {
-  
   ## Add in demographics
-  
-  # sort by samples in the order of the matrix
-  patient.info = patient.info[match(rownames(dysplasia.df), patient.info$Samplename),]
-  
-  patient.info[which(patient.info$BMI > 100), 'BMI'] = NA # I think this one is wrong
-  
-  demo.data = patient.info[,c('Sex','Circumference','Maximal', 'Age.at.diagnosis', 'BMI', 'p53.Status', 'Smoking')]
-  demo.data$Sex = as.integer(demo.data$Sex)-1
-  demo.data$Smoking = as.integer(demo.data$Smoking)-1
-  demo.data$p53.Status = as.integer(demo.data$p53.Status)-1
-  demo.cols = c('Sex','C','M','Age', 'BMI', 'p53.Status', 'Smoking')
-  
-  encode.age <- function(x) {
-    if (x > 70) { 
-      (x - 70)/6 
-    } else if (x < 50) {
-      (x -50)/6
-    } else {
-      0
-    }
-  }
-  #demo.data$Age.at.diagnosis = scale(demo.data$Age.at.diagnosis)
-  
-  # Encode based on presumed distributions or unit normalize
-  demo.data = demo.data %>% rowwise() %>% mutate( 'age.encoded'= encode.age(Age.at.diagnosis))
-  demo.data$Age.at.diagnosis = demo.data$age.encoded
-  demo.data$age.encoded = NULL
-  demo.data$BMI = unit.var(demo.data$BMI)
-  
-  demo.data[,c('Circumference','Maximal')] = apply(demo.data[,c('Circumference','Maximal')], 2, unit.var)
-  
-  ## Impute missing data
-  imp = mice(as.matrix(demo.data), diagnostics = F)
-  
-  dysplasia.df = cbind(dysplasia.df, 'Sex'=NA,'C'=NA,'M'=NA,'Age'=NA, 'BMI'=NA, 'p53.Status'=NA, 'Smoking'=NA)
-  dysplasia.df[,demo.cols] = as.matrix(complete(imp))
-  
+  dysplasia.df = add.demo.tocv(patient.info, dysplasia.df)
 }
 
 
@@ -217,7 +190,7 @@ if (file.exists(file)) {
   }
   save(plots, coefs, performance.at.1se, dysplasia.df, models, cv.patient, labels, file=file)
   p = do.call(grid.arrange, c(plots[ as.character(alpha.values) ], top='All samples, 10fold, 5 splits'))
-  ggsave(paste(cache.dir, '/', as.character(tile.w),'_all_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
+  ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
 
 
@@ -249,7 +222,7 @@ if (file.exists(file)) {
   }
   save(no.hgd.plots, coefs, performance.at.1se, file=file)
   p = do.call(grid.arrange, c(no.hgd.plots, top='No HGD/IMC samples, 10fold, 5 splits'))
-  ggsave(paste(cache.dir, '/', as.character(tile.w),'_nohgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
+  ggsave(paste(cache.dir, '/', 'nohgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
 
 # ----------------- #
@@ -281,7 +254,7 @@ if (file.exists(file)) {
   }
   save(nolgd.plots, coefs, performance.at.1se, file=file)
   p = do.call(grid.arrange, c(nolgd.plots, top='No HGD/IMC/LGD samples, 10fold, 5 splits'))
-  ggsave(paste(cache.dir, '/', as.character(tile.w),'_nolgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
+  ggsave(paste(cache.dir, '/', 'nolgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
 
 # LOO

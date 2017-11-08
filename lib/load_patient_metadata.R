@@ -235,8 +235,6 @@ add.demographics<-function(file, patient.info) {
   return(demog)
 }
 
-
-
 get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='hg19') {
   require(plyr)
   chr.lengths = read.table(paste('http://genome.ucsc.edu/goldenpath/help/', build, '.chrom.sizes',sep='') , sep='\t', header=F)
