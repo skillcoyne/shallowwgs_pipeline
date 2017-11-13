@@ -33,28 +33,10 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
   if (grepl('\\.xlsx$', basename(file))) {
     library(readxl)
     
-    patient.info = NULL;  #test.training = NULL
-    #for (sheet in excel_sheets(file)) {
-    #  print(sheet)
-    #for (i in 2:length(getSheets(loadWorkbook(file)))) {
-      #print(i)
-     # if (grepl('Technical Repeats|All_patient_info.txt', sheet)) next
-
-      #if (sheet == 'TrainingTest') {
-      #  test.training = read_excel(file, sheet = sheet)
-      #  next
-      #}
-      
-      #batch_name = gsub(' ', '_', sheet)
-      
-      #ws = read.xlsx2(file, sheetIndex=i, stringsAsFactors=F, header=T)
+    patient.info = NULL;  
       sheet = 'All combined'
       ws = read_excel(file, sheet = sheet)
 
-      #ws = ws[which( ws$`Patient ID` != ""), grep('^Patient|Path ID|Endoscopy Year|Pathology$|Progressor|Plate Index|SLX|cellularity|p53|Number|Batch|Set', colnames(ws), value=T, ignore.case=T)]
-      
-      #head(patient.info)
-      
       slx.cols = grep('SLX', colnames(ws), value=T)
       slx.cols = slx.cols[order(slx.cols)]
       
@@ -77,28 +59,15 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
                  grep('p53 status', colnames(ws),ignore.case=F),
                  grep('Number of', colnames(ws), ignore.case=F),
                  grep('Batch', colnames(ws), ignore.case=F), 
-                 grep('Set', colnames(ws), ignore.case=F)) ]
+                 grep('Set', colnames(ws), ignore.case=F),
+                 grep('Block',colnames(ws),ignore.case=T)) ]
       
-      colnames(ws) = c('Patient', 'Hospital.Research.ID', 'Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set')
+      colnames(ws) = c('Patient', 'Hospital.Research.ID', 'Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set', 'Block')
       
-      #ws[ws$p53.Status == "", 'p53.Status'] = NA
-      #ws[ws$Barretts.Cellularity == "", 'Barretts.Cellularity'] = NA
-      
-      #ws$Batch.Name = batch_name
-      
-      #if (is.null(patient.info)) {
         patient.info = ws
-      #} else {
-        #print(paste('binding', batch_name))
-      #  patient.info = rbind(patient.info, ws)
-      #}
-    #}
-    #patient.info = merge(patient.info, test.training[,grep('Patient|Set|Analysis', colnames(test.training), value=T)], by.x='Patient', by.y='Patient', all=T)
   } else {
     patient.info = read.table(file, header=T, sep='\t', stringsAsFactors=F, quote="")
-#    nacol = which(apply(patient.info, 2, function(x) length(which(is.na(x))) == length(x) ))
-#    patient.info = patient.info[,-nacol]
-    
+
     slx.cols = grep('^SLX', colnames(patient.info), value=T)
     if (length(slx.cols) > 1) {
       slx.rows = patient.info[,slx.cols]
@@ -118,8 +87,9 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
                                     grep('p53', colnames(patient.info),ignore.case=F),
                                     grep('Number.of|Total.Reads', colnames(patient.info), ignore.case=F), 
                                     grep('Batch', colnames(patient.info), ignore.case=F),
-                                    grep('Set', colnames(patient.info), ignore.case=F)) ]
-    colnames(patient.info) = c('Patient','Hospital.Research.ID', 'Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set')
+                                    grep('Set', colnames(patient.info), ignore.case=F),
+                                    grep('Block', colnames(patient.info), ignore.case=F)) ]
+    colnames(patient.info) = c('Patient','Hospital.Research.ID', 'Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set', 'Block')
   }
   
   patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
@@ -130,8 +100,8 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
   patient.info[c('Status','Pathology','p53.Status')] = 
     lapply(patient.info[c('Status','Pathology','p53.Status')], function(x) factor(strip.whitespace(x)))
   
-  patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads')] = 
-    lapply(patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads')], as.numeric)
+  patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads','Block')] = 
+    lapply(patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads','Block')], as.numeric)
   
   patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
   ## TODO Mistake in earlier version of the patient file caused this

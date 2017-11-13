@@ -14,6 +14,9 @@ source('lib/cv-pt-glm.R')
 
 args = commandArgs(trailingOnly=TRUE)
 
+if (length(args) < 3)
+  stop("Missing required params: <data dir> <tile size/list> <demo:T/F>")
+
 data = args[1]
 tile.w = as.numeric(args[2])
 if (is.na(tile.w)) tile.w = unlist(strsplit(args[2],','))
@@ -22,11 +25,11 @@ includeDemo = args[3]
 
 print(args)
 #data = '~/Data/Ellie'
-#tile.w=5e6
+
 #tile.w=c(5e+06, 'arms')
 tileFile = paste('tile_patients_All_',as.character(tile.w),'.Rdata',sep='')
 message( paste(tileFile, collapse=' '))
-#includeDemo = T # demographics
+#includeDemo = F # demographics
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
 analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
@@ -57,7 +60,6 @@ length(patient.data)
 
 sum.patient.data = as.data.frame(subset(sum.patient.data, Hospital.Research.ID %in% names(patient.data))) ## one patient was removed from the study
 nrow(sum.patient.data)
-
 
 message(paste("Loading df from", tile.files))
 
@@ -110,6 +112,7 @@ get.loc<-function(df) {
   locs = do.call(rbind.data.frame, lapply(colnames(df), function(x) unlist(strsplit( x, ':|-'))))
   colnames(locs) = c('chr','start','end')
   locs[c('start','end')] = lapply(locs[c('start','end')], function(x) as.numeric(as.character(x)))
+  locs$chr = factor(locs$chr, levels=c(1:22), ordered=T)
   locs
 }
 
@@ -138,6 +141,11 @@ if (exists('armsDf')) {
     }
   }
   dysplasia.df = cbind(tmp, arms.df)
+  
+  
+  loc = get.loc(dysplasia.df)
+  dysplasia.df = dysplasia.df[,order(loc$chr, loc$start)]
+
   dim(dysplasia.df)
 }
 
@@ -152,8 +160,6 @@ if (includeDemo) {
 
 nl = 1000;folds = 10; splits = 5 
 
-coefs = list(); plots = list(); performance.at.1se = list(); models = list(); cvs = list()
-alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
 file = paste(data, 'Analysis/patient_folds.tsv', sep='/')
 if (file.exists(file)) {
   message(paste("Reading folds file", file))
@@ -164,6 +170,10 @@ if (file.exists(file)) {
   stop("Missing patient folds file")
 }
 
+
+alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
+## ----- All ----- ##
+coefs = list(); plots = list(); performance.at.1se = list(); models = list(); cvs = list()
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
   message(paste("loading", file))
@@ -192,9 +202,9 @@ if (file.exists(file)) {
   p = do.call(grid.arrange, c(plots[ as.character(alpha.values) ], top='All samples, 10fold, 5 splits'))
   ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
+## --------------------- ##
 
-
-## No HGD
+## --------- No HGD --------- ##
 `%nin%` <- Negate(`%in%`)
 
 info = do.call(rbind, lapply(patient.data, function(df) df$info))
@@ -224,10 +234,9 @@ if (file.exists(file)) {
   p = do.call(grid.arrange, c(no.hgd.plots, top='No HGD/IMC samples, 10fold, 5 splits'))
   ggsave(paste(cache.dir, '/', 'nohgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
-
 # ----------------- #
 
-## No LGD
+## --------- No LGD ------------ ##
 file = paste(cache.dir, 'nolgd.Rdata', sep='/')
 message("No LGD")
 nolgd.plots = list(); coefs = list(); performance.at.1se = list()
@@ -256,8 +265,9 @@ if (file.exists(file)) {
   p = do.call(grid.arrange, c(nolgd.plots, top='No HGD/IMC/LGD samples, 10fold, 5 splits'))
   ggsave(paste(cache.dir, '/', 'nolgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
+## --------------------- ##
 
-# LOO
+## --------- LOO --------- ##
 message("LOO")
 info = do.call(rbind, lapply(patient.data, function(df) df$info))
 pg.samp = lapply(patient.data, function(pt) {
@@ -274,8 +284,17 @@ pg.samp = lapply(patient.data, function(pt) {
   return(info)
 })
 
-file = paste(cache.dir, 'loo.Rdata', sep='/')
 select.alpha = 0.9
+
+file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
+if (file.exists(file)) {
+  message(paste("loading", file))
+  load(file, verbose=T)
+} else {
+  stop(paste(file, "missing"))
+}
+  
+file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
   # Fix info
@@ -284,7 +303,7 @@ if (file.exists(file)) {
   })
   
 } else {
-  performance.at.1se = c(); coefs = list(); plots = list(); fits = list()
+  performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
   # Remove each patient (LOO)
   for (pt in names(pg.samp)) {
     print(pt)
@@ -306,9 +325,18 @@ if (file.exists(file)) {
     a = select.alpha
     fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
     l = fitLOO$lambda
-    cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, 
-                                  pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitLOO, standardize=F)
+    
+    secf = coefs[[select.alpha]]
+    
+    #pf = rep(1, ncol(dysplasia.df))
+    #pf[which(colnames(dysplasia.df) %in% rownames(secf))] = 0.01
+    
+    cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
+                                  pts=subset(pts, Samplename %in% samples), fit=fitLOO, standardize=F)
 
+    
+    
+    
     plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
     
     fits[[pt]] = cv  
@@ -316,8 +344,12 @@ if (file.exists(file)) {
     if ( length(cv$lambda.1se) > 0 ) {
       performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
       
-      coef.1se = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
-      coefs[[pt]] = coef.stability(coef.1se, cv$non.zero.cf)
+      #coef.1se = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
+        
+      nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
+
+      coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
+        #coef.stability(coef.1se, cv$non.zero.cf)
       
       logit <- function(p){log(p/(1-p))}
       inverse.logit <- function(or){1/(1 + exp(-or))}

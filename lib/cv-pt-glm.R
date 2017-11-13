@@ -165,7 +165,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
       test = x[test.rows,]
       training = x[-test.rows,]
       # pre-spec lambda seq
-      fitCV = glmnet(training, y[-test.rows], lambda=lambda, alpha=a, family='binomial', standardize = F) 
+      fitCV = glmnet(training, y[-test.rows], lambda=lambda, alpha=a, family='binomial',  ...) 
       # autoplot(fit) + theme(legend.position="none")
       
       # Confusion matrix: quantitiative, pos results + neg results / number of test rows
