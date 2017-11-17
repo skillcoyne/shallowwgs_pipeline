@@ -202,6 +202,7 @@ if (file.exists(file)) {
   p = do.call(grid.arrange, c(plots[ as.character(alpha.values) ], top='All samples, 10fold, 5 splits'))
   ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
+all.coefs = coefs
 ## --------------------- ##
 
 ## --------- No HGD --------- ##
@@ -286,14 +287,7 @@ pg.samp = lapply(patient.data, function(pt) {
 
 select.alpha = 0.9
 
-file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
-if (file.exists(file)) {
-  message(paste("loading", file))
-  load(file, verbose=T)
-} else {
-  stop(paste(file, "missing"))
-}
-  
+
 file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
@@ -301,8 +295,10 @@ if (file.exists(file)) {
   pg.samp = lapply(pg.samp, function(df) {
     merge(df[,c('Samplename',setdiff(colnames(df), colnames(patient.info))) ], subset(patient.info, Patient == unique(df$Patient)), by='Samplename')
   })
-  
 } else {
+  secf = all.coefs[[select.alpha]]
+  a = select.alpha
+  
   performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
   # Remove each patient (LOO)
   for (pt in names(pg.samp)) {
@@ -322,21 +318,16 @@ if (file.exists(file)) {
     for(i in colnames(dysplasia.df)) sparsed_test_data[,i] = test[,i]
     
     # Fit generated on all samples, including HGD
-    a = select.alpha
     fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
     l = fitLOO$lambda
-    
-    secf = coefs[[select.alpha]]
-    
+
     #pf = rep(1, ncol(dysplasia.df))
     #pf[which(colnames(dysplasia.df) %in% rownames(secf))] = 0.01
     
     cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
                                   pts=subset(pts, Samplename %in% samples), fit=fitLOO, standardize=F)
 
-    
-    
-    
+
     plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
     
     fits[[pt]] = cv  
@@ -364,7 +355,7 @@ if (file.exists(file)) {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
   }
-  save(plots, performance.at.1se, coefs, fits, pg.samp, file=file)
+  save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.samp, file=file)
 }
 
 message("Finished")
