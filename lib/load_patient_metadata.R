@@ -16,13 +16,13 @@ summarise.patient.info<-function(df) {
         start.year=range(Endoscopy.Year)[1], 
         end.year=range(Endoscopy.Year)[2],
         total.samples=length(Samplename), 
-        total.endos=length(unique(Path.ID)),
+        total.endos=length(unique(PID)),
         initial.endo = unique(Initial.Endoscopy),
         final.endo = unique(Final.Endoscopy),
         highest.path=sort(Pathology, decreasing=T)[1],
         first.batch=sort(Batch.Name)[1],
         med.cellularity=median(Barretts.Cellularity,na.rm=T),
-        Initial.Analysis=(sort(Batch.Name)[1] %in% levels(patient.info$Batch.Name)[1:5]))
+        Initial.Analysis=(sort(Batch.Name)[1] %in% levels(Batch.Name)[1:5]))
   return(arrange(sum.pt, Status, total.samples, highest.path))
 }
 
@@ -136,6 +136,8 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
   if (!is.null(file2)) {
     patient.info = add.demographics(file2, patient.info)
   }
+  
+  patient.info$PID = sub('_$', '', unlist(lapply(patient.info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1])))
   
   return(list('info'=patient.info, 'removed'=removed))
 }

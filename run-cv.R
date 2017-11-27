@@ -63,19 +63,6 @@ nrow(sum.patient.data)
 
 message(paste("Loading df from", tile.files))
 
-if (length(tile.files) > 1) {
-  load(grep('arms',tile.files,value=T), verbose=T)
-  armsDf = mergedDf
-  armsDf = armsDf[grep('X|Y', rownames(armsDf), invert=T),]
-  armsDf = armsDf[, intersect(colnames(armsDf), patient.info$Samplename)]
-  dim(armsDf)
-}
-
-load(grep(tile.w[which(is.na(sapply(tile.w, function(x) as.numeric(x))))], tile.files, invert=T, value=T), verbose=T)
-mergedDf = mergedDf[grep('X|Y', rownames(mergedDf), invert=T),]
-mergedDf = mergedDf[, intersect(colnames(mergedDf), patient.info$Samplename)]
-dim(mergedDf)
-
 
 cache.dir = paste(data, 'Analysis',sub('\\+', '', paste(tile.w, collapse='_')), sep='/')
 if (includeDemo)
@@ -99,58 +86,11 @@ pts = do.call(rbind, lapply(patient.data, function(df) {
 }))
 rownames(pts) = 1:nrow(pts)
 
-# sort in label order
-if (length(setdiff(colnames(mergedDf), names(labels))) > 3)
-  warning("Labels vector is missing samples")
+dysplasia.df = set.up.data(tile.files, patient.info$Samplename, labels)
 
-dysplasia.df = t(mergedDf[,intersect(names(labels), colnames(mergedDf))])
-labels = labels[intersect(names(labels), colnames(mergedDf))]
-dim(dysplasia.df)
-dysplasia.df = apply(dysplasia.df, 2, unit.var)
-
-get.loc<-function(df) {
-  locs = do.call(rbind.data.frame, lapply(colnames(df), function(x) unlist(strsplit( x, ':|-'))))
-  colnames(locs) = c('chr','start','end')
-  locs[c('start','end')] = lapply(locs[c('start','end')], function(x) as.numeric(as.character(x)))
-  locs$chr = factor(locs$chr, levels=c(1:22), ordered=T)
-  locs
-}
-
-
-# Merge and subtract the average value of the arms from the segments
-if (exists('armsDf')) {
-  arms.df = t(armsDf[,intersect(names(labels), colnames(armsDf))])
-  labels = labels[intersect(names(labels), colnames(armsDf))]
-  dim(arms.df)
-  arms.df = apply(arms.df, 2, unit.var)
-  
-  locs = get.loc(dysplasia.df)
-  arm.locs = get.loc(arms.df)
-  
-  arms = makeGRangesFromDataFrame(arm.locs)
-  locs = makeGRangesFromDataFrame(locs)
-  
-  tmp = dysplasia.df
-  # subtract arms from 5e6 and merge both
-  ov = findOverlaps(arms, locs)
-  for (hit in unique(queryHits(ov))) {
-    print(hit)
-    cols = subjectHits(ov)[which(queryHits(ov) == hit)]
-    for (i in 1:nrow(tmp)) {
-      tmp[i,cols] = tmp[i,cols] - arms.df[i,hit]
-    }
-  }
-  dysplasia.df = cbind(tmp, arms.df)
-  
-  
-  loc = get.loc(dysplasia.df)
-  dysplasia.df = dysplasia.df[,order(loc$chr, loc$start)]
-
-  dim(dysplasia.df)
-}
-
-## TODO score complexity on the seg.vals directly rather than merged data frame?
-dysplasia.df = score.cx(patient.data, dysplasia.df)
+nrow(dysplasia.df)  == length(labels)
+#dysplasia.df = t(mergedDf[,intersect(names(labels), colnames(mergedDf))])
+#labels = labels[intersect(names(labels), colnames(mergedDf))]
 
 if (includeDemo) {
   ## Add in demographics

@@ -2,6 +2,71 @@ require(mice)
 require(glmnet)
 require(ggplot2)
 require(plyr)
+require(GenomicRanges)
+
+
+set.up.data<-function(tile.files, samplenames, labels) {
+  get.loc<-function(df) {
+    locs = do.call(rbind.data.frame, lapply(colnames(df), function(x) unlist(strsplit( x, ':|-'))))
+    colnames(locs) = c('chr','start','end')
+    locs[c('start','end')] = lapply(locs[c('start','end')], function(x) as.numeric(as.character(x)))
+    locs$chr = factor(locs$chr, levels=c(1:22), ordered=T)
+    locs
+  }
+
+  if (length(tile.files) > 1) {
+    message('Loading arms')
+    load(grep('arms',tile.files,value=T), verbose=F)
+    armsDf = mergedDf
+    armsDf = armsDf[grep('X|Y', rownames(armsDf), invert=T),]
+    armsDf = armsDf[, intersect(colnames(armsDf), samplenames)]
+    print(dim(armsDf))
+  }
+
+  # tile
+  message("Loading tile")
+  load(grep('arms', tile.files, value=T, invert=T), verbose=F)
+  mergedDf = mergedDf[grep('X|Y', rownames(mergedDf), invert=T),]
+  mergedDf = mergedDf[, intersect(colnames(mergedDf), samplenames)]
+  print(dim(mergedDf))
+  
+  dysplasia.df = t(mergedDf[,intersect(names(labels), colnames(mergedDf))])
+  labels = labels[intersect(names(labels), colnames(mergedDf))]
+  
+  dysplasia.df = apply(dysplasia.df, 2, unit.var)
+  
+  if (exists('armsDf')) {
+    arms.df = t(armsDf[,intersect(names(labels), colnames(armsDf))])
+    labels = labels[intersect(names(labels), colnames(armsDf))]
+    arms.df = apply(arms.df, 2, unit.var)
+    
+    locs = get.loc(dysplasia.df)
+    arm.locs = get.loc(arms.df)
+    
+    arms = makeGRangesFromDataFrame(arm.locs)
+    locs = makeGRangesFromDataFrame(locs)
+    
+    tmp = dysplasia.df
+    # subtract arms from 5e6 and merge both
+    ov = findOverlaps(arms, locs)
+    for (hit in unique(queryHits(ov))) {
+      cols = subjectHits(ov)[which(queryHits(ov) == hit)]
+      for (i in 1:nrow(tmp)) {
+        tmp[i,cols] = tmp[i,cols] - arms.df[i,hit]
+      }
+    }
+    dysplasia.df = cbind(tmp, arms.df)
+
+    loc = get.loc(dysplasia.df)
+    dysplasia.df = dysplasia.df[,order(loc$chr, loc$start)]
+  }
+
+  dysplasia.df = score.cx(patient.data, dysplasia.df)
+  
+  return(dysplasia.df)
+}
+
+
 
 
 
