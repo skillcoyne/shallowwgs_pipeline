@@ -1,0 +1,136 @@
+---
+title: "coxRFX for SWGS"
+output: html_notebook
+---
+
+```{r, include=FALSE}
+
+library(ggplot2)
+library(ggrepel)
+library(CoxHD)
+library(plyr)
+
+
+plot.waldtest<-function(wt) {
+  p = ggplot(wt, aes(coef.x, coef.y, color=p.value<0.05))
+  if (length(grep('hazards', colnames(wt))) > 0) {
+      p = p + geom_point(alpha=0.5, aes(size=hazards)) + 
+        geom_point(aes(coef.x, coef.y, shape=gl, color=p.value<0.05, size=hazards), show.legend = F) +
+        #scale_shape_manual(values=c(17,18), na.value=21) +
+        scale_size(range=c(2, 10), breaks=c(0, 5, 10, 15)) +
+        #geom_text_repel( aes( label=label), show.legend=F) + 
+        geom_text_repel(data=subset(wt, p.value < 0.05 & !is.na(gl)), aes(coef.x,coef.y, label=label), show.legend=F) + 
+        geom_text_repel(data=subset(wt, is.na(stability)), aes(coef.x, coef.y, label=label, color=p.value<0.05), show.legend=F, color='grey39') 
+  } else {
+    p = p + geom_point(alpha=0.5) + 
+      geom_text_repel(data=subset(wt, p.value < 0.05), aes(coef.x,coef.y, label=label), show.legend=F)  
+  }
+  return(p + labs(title='Wald test'))
+}
+
+```
+
+
+```{r}
+load('swgs.Rdata', verbose=T)
+
+# limited to GLM coefs
+df = df[,c('tstart','tstop','Diagnosis','Pathology', ch$label)]
+df[1:4,1:8]
+```
+
+
+```{r}
+gcols = colnames(df)
+
+cols = grep('^\\d+', colnames(df))
+colnames(df)[cols] = paste('chr', gsub(':|-','.', grep('^\\d+', colnames(df), value=T)), sep='')
+
+
+pathology = do.call(cbind.data.frame, lapply(unique(df$Pathology), function(p) {
+  cbind( as.integer(df$Pathology == p))
+}))
+colnames(pathology) = unique(df$Pathology)
+
+# as an ordinal
+df$Pathology = as.integer(factor(df$Pathology))
+
+surv = with(df, Surv(tstart, tstop, Diagnosis))
+
+groups = factor(c('clinical',rep('genomic', length(grep('\\d+', colnames(df))))))
+rfx = CoxRFX(df[,-c(1:3)], surv, groups, verbose=F, nu=0.1)
+summary(rfx)
+```
+
+```{r}
+VarianceComponents(rfx)
+```
+
+
+```{r}
+plot(rfx)
+```
+
+
+```{r}
+wt = WaldTest(rfx)
+survConcordance(surv ~ predict(rfx))
+```
+
+```{r}
+## Compare to GLM selected features
+
+wt$label = sub('\\.', '-', sub('\\.', ':', sub('chr', '', rownames(wt))))
+
+wt = merge(wt, ch[,c('label','hazards','coef', 'stability','gl')], by='label', all=T) 
+
+wt[is.na(wt$hazards), c('hazards', 'coef.y')] = 0
+
+plot.waldtest(wt) + labs(x='RFX coef', y='GLM coef')
+```
+
+
+
+```{r}
+df2 = cbind(df, pathology[,c('BE','ID')])
+df2$Pathology = NULL
+
+surv = with(df, Surv(tstart, tstop, Diagnosis))
+
+groups = factor(c(rep('genomic', length(grep('\\d+', colnames(df)))),rep('clinical', (ncol(pathology)-1) ) ) )
+
+rfx2 = CoxRFX(df2[,-c(1:3)], surv, groups, verbose=F)
+summary(rfx2)
+```
+
+```{r}
+plot(rfx2)
+```
+
+
+```{r}
+VarianceComponents(rfx2)
+```
+
+
+```{r}
+survConcordance(surv ~ predict(rfx2))
+```
+
+
+```{r}
+wt = WaldTest(rfx2)
+wt$label = sub('\\.', '-', sub('\\.', ':', sub('chr', '', rownames(wt))))
+
+wt = merge(wt, ch[,c('label','hazards','coef', 'stability','gl')], by='label', all=T) 
+
+head(wt)
+
+wt[is.na(wt$hazards), c('hazards', 'coef.y')] = 0
+
+plot.waldtest(wt) + labs(x='RFX coef', y='GLM coef')
+
+
+```
+
+

@@ -61,7 +61,7 @@ length(patient.data)
 sum.patient.data = as.data.frame(subset(sum.patient.data, Hospital.Research.ID %in% names(patient.data))) ## one patient was removed from the study
 nrow(sum.patient.data)
 
-message(paste("Loading df from", tile.files))
+message(paste("Loading data from", tile.files))
 
 
 cache.dir = paste(data, 'Analysis',sub('\\+', '', paste(tile.w, collapse='_')), sep='/')
@@ -97,7 +97,6 @@ if (includeDemo) {
   dysplasia.df = add.demo.tocv(patient.info, dysplasia.df)
 }
 
-
 nl = 1000;folds = 10; splits = 5 
 
 file = paste(data, 'Analysis/patient_folds.tsv', sep='/')
@@ -120,11 +119,8 @@ if (file.exists(file)) {
   load(file, verbose=T)
 } else {
   for (a in alpha.values) {
-    fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F) # all patients
-    
-    l = fit0$lambda
-    #l = more.l(fit0$lambda)
-    
+    fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)     l = fit0$lambda
+
     cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
     lambda.opt = cv.patient$lambda.1se
@@ -138,7 +134,7 @@ if (file.exists(file)) {
     models[[as.character(a)]] = fit0
     cvs[[as.character(a)]] = cv.patient
   }
-  save(plots, coefs, performance.at.1se, dysplasia.df, models, cv.patient, labels, file=file)
+  save(plots, coefs, performance.at.1se, dysplasia.df, models, cvs, labels, file=file)
   p = do.call(grid.arrange, c(plots[ as.character(alpha.values) ], top='All samples, 10fold, 5 splits'))
   ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
@@ -150,7 +146,7 @@ all.coefs = coefs
 
 info = do.call(rbind, lapply(patient.data, function(df) df$info))
 
-no.hgd.plots = list(); coefs = list(); performance.at.1se = list()
+no.hgd.plots = list(); coefs = list(); performance.at.1se = list(); models = list()
 message("No HGD/IMC")
 file = paste(cache.dir, 'nohgd.Rdata', sep='/')
 if (file.exists(file)) {
@@ -162,7 +158,12 @@ if (file.exists(file)) {
   for (a in alpha.values) {
     # all patients
     fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl, standardize = F) 
-    cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoHGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD, standardize = F)
+    
+    l = fitNoHGD$lambda
+    if (a == 0)
+      l = more.l(fitNoHGD$lambda)
+    
+    cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD, standardize = F)
     
     no.hgd.plots[[as.character(a)]] = arrangeGrob(cv.nohgd$plot+ggtitle('Classification'), cv.nohgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
@@ -170,9 +171,11 @@ if (file.exists(file)) {
     coefs[[as.character(a)]] = coef.stability(coef.1se, cv.nohgd$non.zero.cf)
     
     performance.at.1se[[as.character(a)]] = subset(cv.nohgd$lambdas, lambda == cv.nohgd$lambda.1se)
+    
+    models[[as.character(a)]] = fitNoHGD
   }
-  save(no.hgd.plots, coefs, performance.at.1se, file=file)
-  p = do.call(grid.arrange, c(no.hgd.plots, top='No HGD/IMC samples, 10fold, 5 splits'))
+  save(no.hgd.plots, coefs, performance.at.1se, models, file=file)
+  p = do.call(grid.arrange, c(no.hgd.plots, top='No HGD/IMC samples'))
   ggsave(paste(cache.dir, '/', 'nohgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
 # ----------------- #
@@ -192,8 +195,12 @@ if (file.exists(file)) {
   
   for (a in alpha.values) {
     fitNoLGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl, standardize = F) # all patients
+  
+    l = fitNoLGD$lambda
+    if (a == 0)
+      l = more.l(fitNoLGD$lambda)
     
-    cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=fitNoLGD$lambda, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD, standardize = F)
+    cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(pts, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD, standardize = F)
     
     nolgd.plots[[as.character(a)]] = arrangeGrob(cv.nolgd$plot+ggtitle('Classification'), cv.nolgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
@@ -203,7 +210,7 @@ if (file.exists(file)) {
     performance.at.1se[[as.character(a)]] = subset(cv.nolgd$lambdas, lambda == cv.nolgd$lambda.1se)
   }
   save(nolgd.plots, coefs, performance.at.1se, file=file)
-  p = do.call(grid.arrange, c(nolgd.plots, top='No HGD/IMC/LGD samples, 10fold, 5 splits'))
+  p = do.call(grid.arrange, c(nolgd.plots, top='No LGD/HGD/IMC samples, 10fold, 5 splits'))
   ggsave(paste(cache.dir, '/', 'nolgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
 }
 ## --------------------- ##
@@ -221,12 +228,12 @@ pg.samp = lapply(patient.data, function(pt) {
   }
   info$Prediction = NA
   info$Prediction.Dev.Resid = NA
+  info$OR = NA
   info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
   return(info)
 })
 
 select.alpha = 0.9
-
 
 file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
@@ -261,12 +268,8 @@ if (file.exists(file)) {
     fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
     l = fitLOO$lambda
 
-    #pf = rep(1, ncol(dysplasia.df))
-    #pf[which(colnames(dysplasia.df) %in% rownames(secf))] = 0.01
-    
     cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
                                   pts=subset(pts, Samplename %in% samples), fit=fitLOO, standardize=F)
-
 
     plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
     
@@ -286,10 +289,12 @@ if (file.exists(file)) {
       inverse.logit <- function(or){1/(1 + exp(-or))}
       
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
+      or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
       sy = as.matrix(sqrt(binomial.deviance(pm, labels[pg.samp[[pt]]$Samplename])))
       
       pg.samp[[pt]]$Prediction = pm[,1]
       pg.samp[[pt]]$Prediction.Dev.Resid = sy[,1] 
+      pg.samp[[pt]]$OR = or[,1]
       
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
@@ -297,5 +302,138 @@ if (file.exists(file)) {
   }
   save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.samp, file=file)
 }
+
+
+
+## --------- LOO NO HGD--------- ##
+message("LOO NO HGD")
+#info = do.call(rbind, lapply(patient.data, function(df) df$info))
+#info = subset(info, Pathology %nin% c('HGD','IMC'))
+#info$Pathology = droplevels(info$Pathology)
+pg.sampNOHGD = lapply(patient.data, function(pt) {
+  info = subset(pt$info, Pathology %nin% c('HGD','IMC'))
+  if (nrow(info) <= 0) return(NA)
+  info$SampleSD = NA
+  info$SampleMEAN = NA
+  if (length(info$Samplename) > 1) {
+    info$SampleSD = apply(pt$seg.vals[,info$Samplename], 2, sd)
+    info$SampleMEAN =  apply(pt$seg.vals[,info$Samplename], 2, mean)
+  }
+  info$Prediction = NA
+  info$Prediction.Dev.Resid = NA
+  info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
+  return(info)
+})
+pg.sampNOHGD = pg.sampNOHGD[!is.na(pg.sampNOHGD)]
+
+select.alpha = 0.9
+
+file = paste(cache.dir, 'loonohgd.Rdata', sep='/')
+if (file.exists(file)) {
+  load(file, verbose=T)
+  # Fix info
+  pg.sampNOHGD = lapply(pg.sampNOHGD, function(df) {
+    merge(df[,c('Samplename',setdiff(colnames(df), colnames(patient.info))) ], subset(patient.info, Patient == unique(df$Patient)), by='Samplename')
+  })
+} else {
+  dysplasia.dfNOHGD = dysplasia.df[intersect(rownames(dysplasia.df),subset(patient.info, Pathology %nin% c('HGD','IMC'))$Samplename),]
+  
+  secf = all.coefs[[select.alpha]]
+  a = select.alpha
+  
+  performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
+  # Remove each patient (LOO)
+  for (pt in names(pg.sampNOHGD)) {
+    print(pt)
+    
+    tmp.patient.data = patient.data[subset(sum.patient.data, Hospital.Research.ID != pt)$Hospital.Research.ID]
+    samples = as.vector(unlist(sapply(tmp.patient.data, function(df) df$info$Samplename )))
+
+    samples = intersect(samples, subset(patient.info, Pathology %nin% c('HGD','IMC'))$Samplename)
+    
+    
+    train.rows = which(rownames(dysplasia.dfNOHGD) %in% samples)
+    training = dysplasia.df[train.rows,]
+    test = as.matrix(dysplasia.dfNOHGD[-train.rows,])
+    
+    
+    #if (ncol(test) <= 1) next
+    if ( nrow(test) == ncol(dysplasia.df) ) test = t(test)
+    
+    # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
+    sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(pg.sampNOHGD[[pt]]$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
+                                dimnames=list(pg.sampNOHGD[[pt]]$Samplename,colnames(training)), sparse=T)
+    for(i in colnames(dysplasia.dfNOHGD)) 
+      sparsed_test_data[,i] = test[,i]
+    
+    
+    # Fit generated on all samples, including HGD
+    fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
+    l = fitLOO$lambda
+    
+    #pf = rep(1, ncol(dysplasia.df))
+    #pf[which(colnames(dysplasia.df) %in% rownames(secf))] = 0.01
+    
+    cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
+                                  pts=subset(pts, Samplename %in% samples), fit=fitLOO, standardize=F)
+    
+    
+    plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
+    
+    fits[[pt]] = cv  
+    
+    if ( length(cv$lambda.1se) > 0 ) {
+      performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
+      
+      #coef.1se = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
+      
+      nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
+      
+      coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
+      #coef.stability(coef.1se, cv$non.zero.cf)
+      
+      logit <- function(p){log(p/(1-p))}
+      inverse.logit <- function(or){1/(1 + exp(-or))}
+      
+      pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
+      sy = as.matrix(sqrt(binomial.deviance(pm, labels[pg.sampNOHGD[[pt]]$Samplename])))
+      
+      pg.sampNOHGD[[pt]]$Prediction = pm[,1]
+      pg.sampNOHGD[[pt]]$Prediction.Dev.Resid = sy[,1] 
+      
+    } else {
+      warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
+    }
+  }
+  save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.sampNOHGD, file=file)
+}
+
+
+## ---------- Chr 17 ---------- ##
+file = paste(cache.dir, 'chr17.predictive.Rdata', sep='/')
+if (file.exists(file)) {
+  message(paste("loading", file))
+  load(file, verbose=T)
+} else {
+  performance.at.1se = list(); coefs = list()
+  for ( d in c(1:22) ) {
+    print(d)
+    df = dysplasia.df[,grep(paste('^',d,':',sep=''), colnames(dysplasia.df))]
+    fit = run.fit(df, labels)
+    performance.at.1se[[ paste('chr', d, sep='') ]] = fit$perf
+    coefs[[ paste('chr', d, sep='') ]] = fit$coefs
+  }
+  
+  ## No HGD
+  df17 = dysplasia.df[,grep('^17:', colnames(dysplasia.df))]
+  df17nohgd = df17[!is.na(match(rownames(dysplasia.df), subset(patient.info, Pathology %in% c('BE','ID','LGD'))$Samplename)),]
+  fit = run.fit(df17nohgd, labels[rownames(df17nohgd)])
+  performance.at.1se[['chr17.noHGD']] = fit$perf
+  coefs[['chr17.noHGD']] = fit$coefs
+  
+  save(performance.at.1se, coefs, file=file)
+}
+
+
 
 message("Finished")

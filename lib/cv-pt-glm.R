@@ -230,7 +230,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
       test = x[test.rows,]
       training = x[-test.rows,]
       # pre-spec lambda seq
-      fitCV = glmnet(training, y[-test.rows], lambda=lambda, alpha=a, family='binomial',  ...) 
+      fitCV = glmnet(training, y[-test.rows], lambda=lambda, alpha=a, family='binomial',  standardize=F) 
       # autoplot(fit) + theme(legend.position="none")
       
       # Confusion matrix: quantitiative, pos results + neg results / number of test rows
@@ -238,7 +238,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
       cv.class[i,] = apply(pred, 2, function(p) {
         (p%*%y[test.rows] + (1-p) %*% (1-y[test.rows]))/length(test.rows)
       })
-      
+
       # Binomial deviance, lifted from cv.lognet
       dev = binomial.deviance(predict(fitCV, test, type='response'), as.factor(y[test.rows]))
       deviance[i,] = apply(dev, 2, weighted.mean, w=rep(1, nrow(dev)), na.rm=T)
@@ -251,15 +251,15 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
   
   # Not really sure what to do with the binomial deviance now...
   lambdas = cbind.data.frame('lambda.at'=1:ncol(cv.pred),
-                        'mean'= colMeans(cv.pred), 
-                        'sme'= apply(cv.pred, 2, sd)/sqrt(nrow(cv.pred)), 
-                        'sd'= apply(cv.pred, 2, sd), 
-                        'lambda'= lambda,
-                        'log.lambda' = log(lambda),
-                        'mean.b.dev' = colMeans(cv.binomial.deviance),
-                        'sd.b.dev' = apply(cv.binomial.deviance, 2,sd),
-                        'sme.b.dev' = apply(cv.binomial.deviance, 2, sd)/sqrt(nrow(cv.binomial.deviance)),
-                        'lambda.min' = F, 'lambda+1se' = F, 'lambda-1se' = F) 
+                              'mean'= colMeans(cv.pred), 
+                              'sme'= apply(cv.pred, 2, sd)/sqrt(nrow(cv.pred)), 
+                              'sd'= apply(cv.pred, 2, sd), 
+                              'lambda'= lambda,
+                              'log.lambda' = log(lambda),
+                              'mean.b.dev' = colMeans(cv.binomial.deviance),
+                              'sd.b.dev' = apply(cv.binomial.deviance, 2,sd),
+                              'sme.b.dev' = apply(cv.binomial.deviance, 2, sd)/sqrt(nrow(cv.binomial.deviance)),
+                              'lambda.min' = F, 'lambda+1se' = F, 'lambda-1se' = F) 
   
   if (select == 'classification') {
     # Minimize the classification mean error & select min lambda
@@ -375,6 +375,9 @@ plot.cv<-function(cv, title='') {
 
 
 more.l<-function(lambda) {
+  if (min(lambda) > -5)
+    lambda = c(lambda, seq( min(lambda), exp(-5), -1e-3))
+               
   l = sort(c(lambda, seq(exp(-5), exp(-10), -1e-6),
              seq(exp(-10), exp(-15), -1e-8),
              seq(exp(-15), exp(-20), -1e-9)), decreasing=T)
@@ -390,7 +393,7 @@ run.fit<-function(df, labels, a=1, more.l=F, opt.lambda=-1) {
   
   cv = crossvalidate.by.patient(x=df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=opt.lambda, standardize=F)
   
-  opt.lambda = ifelse(opt.lambda > 0, `lambda+1se`, `lambda-1se`)
+  opt.lambda = ifelse(opt.lambda > 0, 'lambda+1se', 'lambda-1se')
   
   return( list('cv'=cv, 'perf'=cv$lambdas[which(cv$lambdas[[opt.lambda]]),], 'coefs'=coef.stability(as.data.frame(non.zero.coef(fit0, cv$lambda.1se)), cv$non.zero.cf), 'fit0'=fit0 ) )
 }
