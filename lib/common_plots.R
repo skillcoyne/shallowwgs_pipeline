@@ -15,7 +15,6 @@ plot.theme = theme(text=element_text(size=14, face='bold'), panel.background=ele
 cn.mtn.plot<-function(df, label, type='bar') {
   low = c( min(df$mean.value), quantile(subset(df, mean.value < -1)$mean.value, probs=c(0.25, 0.75)), -1)
   high = c(1, quantile(subset(df, mean.value > 1)$mean.value, probs=c(0.25, 0.75)), max(df$mean.value))
-  
   df$cuts = cut(df$mean.value, breaks=c(low,high), include.lowest = T, ordered_result = T)
   
   p = ggplot(df, aes(x=chr.length)) + facet_grid(Status~chr, scales='free_x', space='free_x', labeller=label) 
@@ -27,13 +26,15 @@ cn.mtn.plot<-function(df, label, type='bar') {
   if (type == 'bar') {
     highCol = rev(brewer.pal(6, "Purples"))[c(3,1,3)]
     lowCol = rev(rev(brewer.pal(6, "Greens"))[c(3,1,3)])
-
-    p = p + geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=T ) + 
-      scale_fill_manual(values=c(lowCol,'#F7F7F7',highCol),labels=c('<25%','25-75%','75%','0','<25%','25-75%','>75%'), name='') 
+    grey = brewer.pal(3,'Greys')[1]
+    
+    p = p + 
+      geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=T ) + 
+      scale_fill_manual(values=c(lowCol,grey,highCol),labels=c('<25%','25-75%','75%','0','<25%','25-75%','>75%'), limits=levels(df$cuts), name='') 
   }
   p + labs(x='', y='Mean adjusted segmentation value', title='All samples') +
     theme(text=element_text(face='bold', size=14), axis.text.x=element_blank(), legend.position='right', 
-          panel.grid = element_blank(), panel.background = element_blank(),strip.background =element_rect(fill="lightcyan2"),  
+          panel.grid = element_blank(), panel.background = element_blank(),strip.background =element_rect(fill="whitesmoke"),  
           panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing.x = unit(0, 'lines') )
 }
 
@@ -98,7 +99,7 @@ roc.plot <- function(roc,title="") {
     labs(title=title, x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme
 }
 
-multi.roc.plot <- function(rocList, title="ROC") {
+multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   aucs = do.call(rbind, lapply(rocList,function(r) 
     cbind.data.frame('AUC'=r$auc*100,'model'=r$model,'Specificity'=pROC::coords(r,'best')[['specificity']], 'Sensitivity'=pROC::coords(r,'best')[['sensitivity']])))
   aucs$y = aucs$Sensitivity
@@ -114,23 +115,37 @@ multi.roc.plot <- function(rocList, title="ROC") {
   df = do.call(rbind, lapply(rocList, function(r) 
     cbind.data.frame('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'model'=r$model) 
   ))
-  
-  ggplot(df, aes(Specificity, Sensitivity,color=model,fill=model)) + 
-    geom_line(show.legend = F, size=1.5) + scale_x_reverse() +
-    geom_label(data=aucs, aes(x=x, y=y, label=label), color='white', show.legend = F) +
-    labs(title=title, x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme
+
+  p = ggplot(df, aes(Specificity, Sensitivity,color=model,fill=model)) +
+        geom_line(show.legend = F, size=1.5) + scale_x_reverse() +
+        geom_label(data=aucs, aes(x=x, y=y, label=label), color='white', show.legend = F) +
+        labs(title=title, x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme
+  if (is.null(colors) & !is.null(palette)) {
+    colors = RColorBrewer::brewer.pal(length(rocList)+1, palette)
+  } else if (is.null(colors) & is.null(palette)) {
+    colors = RColorBrewer::brewer.pal(length(rocList)+1,'Set1')
+  }
+  p = p + scale_color_manual(values=colors) + scale_fill_manual(values=colors)
+ 
+  return(p)
 }
 
-pred.tiles <- function(df, probs=F, cols=c('green3','orange','red3'), ...) {
+pred.tiles <- function(df, probs=F, OR=F, cols=c('green3','orange','red3'), ...) {
   p = ggplot(df, aes(brks, nl))
 
-  if (probs) {
+  if (OR) {
+    p = p + geom_tile(aes(fill=OR), color='white') + scale_fill_gradientn(colors = myPal, limits=c(-9.3,15), name='RR') 
+  } else if (probs) {
     p = p + geom_tile(aes(fill=Prediction), color='white') + scale_fill_gradientn(colors = myPal, limits=c(0,1), name='P(P)') 
   } else {
     p = p + geom_tile(aes(fill=Risk)) + 
       scale_fill_manual(values=cols, limits=levels(df$Risk), name='Progression')
   }
-  p + geom_label(aes(label=Pathology), fill='white', show.legend=F) + 
+  p + 
+    geom_point(aes(shape=Pathology, color=Risk), fill='white', size=3) + scale_color_manual(values=c('white','black','white'), guide=F) +
+    scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='black', color='black'))) +
+    #scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') +  #scale_color_manual(values=cols, limits=levels(df$Risk),name='Progression') +
+    #geom_label(aes(label=Pathology), fill='white', show.legend=F) + 
     #scale_color_manual(values=c('white','black','white'), limits=levels(df$Risk)) +
     facet_wrap(~Patient, scales='free', labeller=label_both, ...) +
     labs(y='Oesophageal Location',x='Months Prior to Endpoint', title='') +
@@ -214,7 +229,7 @@ plot.endo<-function(df, minM=NULL, maxM=NULL, bin=F) {
   }
 }
 
-vig.plot<-function(df, info, cols=c('green3','orange','red3')) {
+vig.plot<-function(df, info, cols=c('green3','orange','red3'), pathology=F) {
   scale = seq(min(info$Endoscopy.Year), max(info$Endoscopy.Year), 1)
   subtitle = with(info, paste(unique(Age.at.diagnosis),unique(Sex),': ', sep=''))
   if (!is.na(unique(info$Smoking)))                             
@@ -230,14 +245,19 @@ vig.plot<-function(df, info, cols=c('green3','orange','red3')) {
   df$Risk = factor(df$Risk, levels=c('Low','Moderate','High'), ordered = T)
   df$p53.Status = factor(df$p53.Status, levels=c(0,1), ordered = T)
 
-  ggplot(df, aes(Endoscopy.Year, nl)) + geom_tile(aes(fill=Risk, color=p53.Status), size=1.5)  +
-    scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') + scale_color_manual(values=c('grey22','white'), limits=levels(df$p53.Status), drop=F, name='p53 IHC', labels=c('normal','aberrant')) +
-    geom_text(aes(label=Pathology), color='black', show.legend = F) +
-    #geom_text(aes(label=Pathology, color=Risk), show.legend=F) + #scale_color_manual(values=c('white','black','white')) +
-    labs(y='Oesophageal Location',x='Months Prior to Endpoint', title='') +
-    plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='none') + 
-    scale_x_continuous(breaks=scale) +
-    labs(title=paste('Patient',unique(info$Patient)), subtitle=subtitle) + theme(panel.background = element_rect(fill='grey60', color='grey60'), panel.grid.major = element_line(color='grey70'), panel.grid.minor = element_blank())
+  p = ggplot(df, aes(Endoscopy.Year, nl)) + 
+    geom_tile(aes(fill=Risk), color='white', size=1.5) + scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') 
+  
+  if (!pathology) {
+    p = p + geom_point(aes(shape=Pathology, color=Risk), fill='white', size=5) + scale_color_manual(values=c('white','black','white'), guide=F) + 
+    scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='black', color='black'))) 
+    #scale_shape_manual(values=c('B','I','L','H','C'), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='black', color='black'))) +
+  } else {
+    p = p + geom_text(aes(label=Pathology, color=Risk), show.legend=F) + scale_color_manual(values=c('white','black','white')) 
+  }
+    p = p + labs(y='Oesophageal Location',x='Months Prior to Endpoint', title=paste('Patient',unique(info$Patient)), subtitle=subtitle) + scale_x_continuous(breaks=scale) + 
+        plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='right') 
+    
 }
 
 

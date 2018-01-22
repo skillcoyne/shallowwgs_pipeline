@@ -86,23 +86,53 @@ all.info = rbind(sum.patient.data, sum.validation.info)
 # Segment size: `r as.character(tile.w)` with demographics: `r includeDemo`
 
 
+## Quick look at our demographic information
+
 ```{r echo=F}
 
-pander( 
-  as.data.frame(all.info %>% group_by(Status) %>% summarise(
+pander(
+  as.data.frame(all.info %>% summarise(
   'Total Patients'=length(unique(Patient)),
   'Total Samples'=sum(total.samples),
+  'Range'=paste(range(end.year-start.year), collapse='-'),
   'Median Years'=paste(median(end.year-start.year),'+/-',round(sd(end.year-start.year),1)),
   'Median Endoscopies'=paste(median(total.endos),'+/-',round(sd(total.endos),1)),
   'Median age'=paste(median(age.diagnosis),'+/-',round(sd(age.diagnosis),1)),
   'gender F:M'=paste(table(gender),collapse=':')
 ))
-, caption='Full cohort')
-
+, caption='full cohort')
 ```
 
 
-## Quick look at our demographic information
+```{r echo=F}
+cohortSummary = as.data.frame(all.info %>% group_by(Status) %>% summarise(
+  'Total Patients'=length(unique(Patient)),
+  'Total Samples'=sum(total.samples),
+  'Range follow-up (years)'=paste(range(end.year-start.year), collapse='-'),
+  'Mean follow-up (years)'=paste(round(mean(end.year-start.year), 1),'+/-',round(sd(end.year-start.year),1)),
+  'Range endoscopies'=paste(range(total.endos), collapse='-'),
+  'Mean Endoscopies'=paste(round(mean(total.endos), 1),'+/-',round(sd(total.endos),1)),
+  'Mean age'=paste(round(mean(age.diagnosis), 1),'+/-',round(sd(age.diagnosis),1)),
+  'gender F:M'=paste(table(gender),collapse=':'),
+  'Mean Length'=paste(round(mean(C,na.rm=T), 1),'+/-',round(sd(C,na.rm=T),1)),
+  'naC'=length(which(is.na(C)))
+))
+
+cohortSummary = cbind(cohortSummary,
+  rbind(table(subset(all.patient.info, Status == 'NP')$Pathology),
+        table(subset(all.patient.info, Status == 'P')$Pathology)))
+
+
+  rbind(table(subset(patient.info, Status == 'NP')$Pathology),
+        table(subset(patient.info, Status == 'P')$Pathology))
+  
+  rbind(table(subset(validation.patient.info, Status == 'NP')$Pathology),
+        table(subset(validation.patient.info, Status == 'P')$Pathology))
+
+```
+
+`r pander(t(cohortSummary), caption='Full cohort, split by status')`
+
 
 We tested models that included age, BMI, smoking status, sex, length & circumference of the BE segment, and p53 IHC status.  While none of these contributed we can report on some here.
 
@@ -178,8 +208,8 @@ Example subset of the data matrix:
 
 ## Global copy number plots
 
-```{r echo=F, warning=F, message=F, eval=T, fig.width=12, fig.height=8}
-
+```{r echo=F, warning=F, message=F, eval=T, fig.height=12, fig.width=20}
+ 
 chr.lengths = get.chr.lengths()
 chr.lengths$chrom = sub('chr','',chr.lengths$chrom)
 chr.lengths = subset(chr.lengths, chrom %in% c(1:22))
@@ -215,18 +245,25 @@ n.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCNd
 globalCNdf = globalCNdf %>% group_by(Status, start, end) %>% mutate( 'mean.value' = value/length(unique(variable)) )
 globalCNdf$mean.value = globalCNdf$value # but not going to use it 
 
-
+globalCNdf$Status = factor(globalCNdf$Status, levels=sort(unique(globalCNdf$Status), decreasing=T), ordered=T)
 globalCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms'), labeller(Status=n.status, chr=label_value))
 cnLegend = get.legend(globalCN.plot)
 #globalCN.plot = globalCN.plot + theme(legend.position = 'none')
 
+## Dysplasia only
+dys.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCNdf, Status == 'Progressor' & Pathology %in% c('LGD','HGD','IMC'))$variable)), ')', sep=''),
+              'Non-Progressor'=paste('Non-Progressor (n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor' & Pathology %in% c('LGD','HGD','IMC'))$variable)),')', sep=''))
+
+globalnHGDCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology %in% c('LGD','HGD','IMC')), labeller(Status=dys.status, chr=label_value)) + labs(title='LGD/HGD/IMC Only')
+
+
+
 ## No HGD
-`%nin%` = Negate(`%in%`)
-
-nhgd.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCNdf, Status == 'Progressor' & Pathology %nin% c('HGD','IMC'))$variable)), ')', sep=''),
-              'Non-Progressor'=paste('Non-Progressor (n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor' & Pathology %nin% c('HGD','IMC'))$variable)),')', sep=''))
-globalnHGDCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology %nin% c('HGD','IMC')), labeller(Status=nhgd.status, chr=label_value)) + labs(title='Excluding HGD/IMC')
-
+# `%nin%` = Negate(`%in%`)
+# 
+# nhgd.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCNdf, Status == 'Progressor' & Pathology %nin% c('HGD','IMC'))$variable)), ')', sep=''),
+#               'Non-Progressor'=paste('Non-Progressor (n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor' & Pathology %nin% c('HGD','IMC'))$variable)),')', sep=''))
+# globalnHGDCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology %nin% c('HGD','IMC')), labeller(Status=nhgd.status, chr=label_value)) + labs(title='Excluding HGD/IMC')
 
 
 ## NDBE
@@ -235,38 +272,74 @@ nb.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCN
 globalBECN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology == 'BE'), labeller(Status=nb.status, chr=label_value)) + labs(title='NDBE samples only')
 
 
-globalCN.plot 
-globalnHGDCN.plot
-globalBECN.plot
+globalCN.plot + theme(legend.position = 'none')
+
+globalnHGDCN.plot + theme(legend.position = 'none')
+
+globalBECN.plot + theme(legend.position = 'none')
 
 
-dfpts = subset(globalCNdf, Patient %in% c('57','76') & seg.type != 'arms')
-#dfpts = dfpts %>% group_by(Patient, start, end) %>% mutate( 'mean.value' = value/length(unique(variable)) )
-
-pt.status <- c('Non-Progressor'=paste('Patient 57 (n=',length(unique(subset(dfpts, Patient == 57)$variable)), ')', sep=''),
-              'Progressor'=paste('Patient 76 (n=',length(unique(subset(dfpts, Patient == 76)$variable)),')', sep=''))
-genomePtCN.plot = cn.mtn.plot(dfpts, labeller(Status = pt.status))
-
-dfpts = subset(globalCNdf, Patient %in% c('57','76') & Pathology == 'BE' & seg.type != 'arms')
-#dfpts = dfpts %>% group_by(Patient, start, end) %>% mutate( 'mean.value' = value/length(unique(variable)) )
-
-ptbe.status <- c('Non-Progressor'=paste('Patient 57 (n=',length(unique(subset(dfpts, Patient == 57)$variable)), ')', sep=''),
-              'Progressor'=paste('Patient 76 (n=',length(unique(subset(dfpts, Patient == 76)$variable)),')', sep=''))
-genomePtBECN.plot = cn.mtn.plot(dfpts,  labeller(Status = ptbe.status )) + labs(title='NDBE samples only')
-
-genomePtCN.plot 
-genomePtBECN.plot
+# dfpts = subset(globalCNdf, Patient %in% c('57','76') & seg.type != 'arms')
+# #dfpts = dfpts %>% group_by(Patient, start, end) %>% mutate( 'mean.value' = value/length(unique(variable)) )
+# 
+# pt.status <- c('Non-Progressor'=paste('Patient 57 (n=',length(unique(subset(dfpts, Patient == 57)$variable)), ')', sep=''),
+#               'Progressor'=paste('Patient 76 (n=',length(unique(subset(dfpts, Patient == 76)$variable)),')', sep=''))
+# genomePtCN.plot = cn.mtn.plot(dfpts, labeller(Status = pt.status))
+# 
+# dfpts = subset(globalCNdf, Patient %in% c('57','76') & Pathology == 'BE' & seg.type != 'arms')
+# #dfpts = dfpts %>% group_by(Patient, start, end) %>% mutate( 'mean.value' = value/length(unique(variable)) )
+# 
+# ptbe.status <- c('Non-Progressor'=paste('Patient 57 (n=',length(unique(subset(dfpts, Patient == 57)$variable)), ')', sep=''),
+#               'Progressor'=paste('Patient 76 (n=',length(unique(subset(dfpts, Patient == 76)$variable)),')', sep=''))
+# genomePtBECN.plot = cn.mtn.plot(dfpts,  labeller(Status = ptbe.status )) + labs(title='NDBE samples only')
+# 
+# genomePtCN.plot + theme(legend.position = 'none')
+# genomePtBECN.plot + theme(legend.position = 'none')
 
 #cn.mtn.plot(dfpts,  labeller(Status = ptbe.status ), type='bar') + labs(title='NDBE samples only')
 
-a = sample( subset(subset(patient.info, Patient == 57),  Endoscopy.Year == min(Endoscopy.Year) )$Samplename, 1)
-b = sample( subset(subset(patient.info, Patient == 76), Endoscopy.Year == min(Endoscopy.Year) & Pathology %nin% c('HGD','IMC'))$Samplename, 1)
+#a = sample( subset(subset(patient.info, Patient == 57),  Endoscopy.Year == min(Endoscopy.Year) )$Samplename, 1)
+#b = sample( subset(subset(patient.info, Patient == 76), Endoscopy.Year == min(Endoscopy.Year) & Pathology %nin% c('HGD','IMC'))$Samplename, 1)
 
-ind.status <- c('Non-Progressor'='Patient 57 (n=1)',
-              'Progressor'='Patient 76 (n=1), excl. HGD/IMC')
-cn.mtn.plot(subset(globalCNdf, variable %in% c(a,b) & seg.type != 'arms'), labeller(Status = ind.status), type='bar') + labs(title="Individual samples")
+#ind.status <- c('Non-Progressor'='Patient 57 (n=1)','Progressor'='Patient 76 (n=1), excl. HGD/IMC')
+#cn.mtn.plot(subset(globalCNdf, variable %in% c(a,b) & seg.type != 'arms'), labeller(Status = ind.status), type='bar') + labs(title="Individual samples")
 ```
 
+```{r loaddata, message=F, warning=F, echo=F}
+
+file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
+if (file.exists(file)) {
+  message(paste("loading", file))
+  load(file, verbose=T)
+} else {
+  stop(paste("No model file", file, "found"))
+}
+
+
+# cx was generated on raw seg values
+plot(dysplasia.df[names(labels) ,'cx'], col=labels+1)
+
+# remove old cx...see what new one would look like
+dysplasia.df = dysplasia.df[,-grep('cx',colnames(dysplasia.df))] 
+
+# general variance per sample after the samples have been mean normalized, ignores segment length
+cx = apply(dysplasia.df, 1, function(x) var(x))
+
+x = cbind.data.frame('Status'=labels, 'cx'=cx[names(labels)])
+x$Status = factor(x$Status, labels = c('Non-Progressor','Progressor'))
+x = merge(x,patient.info[,c('Samplename','Pathology','Patient')],by.x='row.names',by.y='Samplename')
+
+tt = t.test(subset(x, Status == 'Progressor')$cx, subset(x, Status == 'Non-Progressor')$cx)
+ggplot(x, aes(Status, cx, fill=Status)) + 
+  geom_jitter(width=0.2, color='grey39') + 
+  geom_violin(outlier.colour = NA, alpha=0.8) +
+  labs(x='', y='Variance', title='Per sample variance', subtitle=paste('p-value=', format.pval(tt$p.value, digits=2))) + theme(legend.position = 'none') +
+  plot.theme
+
+rocX = pROC::roc(Status ~ cx, data=x, auc=T, ci=T, of='thresholds')
+roc.plot(rocX, title='Per sample variance') + plot.theme
+
+```
 
 # Building the model
 
@@ -575,11 +648,11 @@ globalCN.plot + geom_rect(data=subset(chh, gl == 'gain'), aes(xmin=start, xmax=e
 
 globalBECN.plot +  geom_rect(data=subset(chh, gl == 'gain'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='goldenrod2', alpha=0, show.legend=F) + geom_rect(data=subset(chh, gl == 'loss'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='blue3', alpha=0, show.legend=F)
 
-ch$ymax = ifelse(ch$coef > 0, max(genomePtCN.plot$data$value), min(genomePtCN.plot$data$value))
-chh = chh %>% rowwise() %>% mutate('max'=custom.max(coef, hazards, ymax))
-genomePtCN.plot +  geom_rect(data=subset(chh, gl == 'gain'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='goldenrod2', alpha=0, show.legend=F) + geom_rect(data=subset(chh, gl == 'loss'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='blue3', alpha=0, show.legend=F)
+# ch$ymax = ifelse(ch$coef > 0, max(genomePtCN.plot$data$value), min(genomePtCN.plot$data$value))
+# chh = chh %>% rowwise() %>% mutate('max'=custom.max(coef, hazards, ymax))
+# genomePtCN.plot +  geom_rect(data=subset(chh, gl == 'gain'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='goldenrod2', alpha=0, show.legend=F) + geom_rect(data=subset(chh, gl == 'loss'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='blue3', alpha=0, show.legend=F)
 
-genomePtBECN.plot +  geom_rect(data=subset(chh, gl == 'gain'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='goldenrod2', alpha=0, show.legend=F) + geom_rect(data=subset(chh, gl == 'loss'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='blue3', alpha=0, show.legend=F)
+# genomePtBECN.plot +  geom_rect(data=subset(chh, gl == 'gain'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='goldenrod2', alpha=0, show.legend=F) + geom_rect(data=subset(chh, gl == 'loss'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='blue3', alpha=0, show.legend=F)
 
 ```
 
@@ -677,17 +750,36 @@ plot(t,  bg=colorRampPalette(c('green','grey','red'))(10)[cut(p, breaks = seq(0,
 
 Based on these curves we get our best AUC at ~0.36.  Currently we are using 0.5 by default.
 
-```{r prediction_cutoff, echo=F, message=F, warning=F, fig.height=5, fig.width=5}
-preds = unlist(lapply(pg.samp[subset(sum.patient.data, Status == 'P')$Hospital.Research.ID], function(df) df$Prediction))
-np.preds = unlist(lapply(pg.samp[subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID], function(df) df$Prediction))
+```{r insilico_rocs, echo=F, message=F, warning=F, fig.height=8, fig.width=8}
 
-roc50 = pROC::roc(as.integer(c(preds, np.preds) > 0.5), c(rep(1, length(preds)), rep(0, length(np.preds))), main='Progressors & Non-progressors, cutoff 0.5')
-roc50$model = 'CN Model 0.5'
+load(file=paste(cache.dir, 'insilico_splits.Rdata', sep='/'), verbose=T)
 
+# m = melt(insilico.rocs, measure.vars = 'auc')
+# ggplot(m, aes(variable,value)) + ylim(0,1) +
+#   geom_boxplot(fill='mintcream', color='grey55') + geom_jitter(width=0.2, color='darkblue', size=1.5, show.legend = F) + 
+#   geom_text(data=subset(m, value %in% range(value)), aes(label=round(value,2)), vjust=0.02, hjust=0.2) +
+#   plot.theme + labs(x='',y='AUC',title='AUC', subtitle='20 insilico 20:69 splits')
 
+```
+
+```{r prediction_cutoff, echo=F, message=F, warning=F, fig.height=7, fig.width=7}
 preds = do.call(rbind.data.frame, lapply(pg.samp, function(df) df[c('Status','Prediction')]))
 roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
 roc$model = 'CN Model'
+
+multi.roc.plot(list(roc), colors=brewer.pal(3,'Greys')[3]) + labs(title='Discovery cohort ROC')
+
+
+insilico.rocs = rbind(insilico.rocs, c(pROC::ci.auc(roc), pROC::coords(roc, 'best')))
+
+insilico.rocs[1:20,'split'] = paste('in-silico', 1:20)
+insilico.rocs[21,'split'] = 'discovery'
+
+ggplot(insilico.rocs, aes(split, auc)) + geom_point() + ylim(0,1) +
+  geom_errorbar(aes(ymin=auc.ci.min, ymax=auc.ci.max), width=0.2) + 
+  coord_flip() + plot.theme + labs(y='AUC', x='', title='AUC per split', subtitle='20 insilico 20:69 splits')
+
+
 
 # To find the auc at a given spec or sens
 #pROC::auc(roc, partial.auc=c(0.99,1), partial.acu.focus="sp", partial.auc.correct=T)
@@ -703,13 +795,12 @@ thresholds =
 )
 thresholds$label=rownames(thresholds)
 
-ggplot() + geom_line(data=df, aes(specificity, sensitivity)) + scale_x_reverse() + 
+ggplot() + geom_line(data=df, aes(specificity, sensitivity), color='darkblue', size=1.5) + scale_x_reverse() + 
   geom_point(data=thresholds, aes(x=specificity,y=sensitivity,color=label), size=3,shape=8, show.legend = T) +
   geom_label_repel(data=thresholds, aes(x=specificity,y=sensitivity,fill=label,label=
     paste('Threshold ', round(threshold,2), '\n(FPR ', round((1-specificity),2)*100, '%, TPR ', round(sensitivity,2)*100,'%)\nAUC:',round(roc$auc, 2)*100, '%', sep='')),show.legend = F, color='white',nudge_x=0.05) + scale_fill_manual(values=brewer.pal(3,'Dark2')) + scale_color_manual(values=brewer.pal(3,'Dark2')) +
   labs(title='CN Model ROC', x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme
 
-roc.plot(roc, 'Probability threshold calculated by ROC')
 
 roc.plot(rocNOHGD, 'Model excluding HGD/IMC')
 pROC::coords(rocNOHGD, "best")
@@ -808,10 +899,6 @@ rocPtA$model = 'Per Patient Avg'
 
 ### Compare ROCs
 
-```{r echo=F, fig.height=6, fig.width=8}
-roc$model = "Per Sample"
-multi.roc.plot(list(roc, rocEndoM, rocEndoA, rocPtM, rocPtA,rocFirstEndo,rocLastEndo), 'ROC Comparisons')
-```
 
 ```{r echo=F, fig.height=8, fig.width=6}
 get.roc.stat<-function(roc, x='best') {
@@ -835,10 +922,10 @@ get.auc.at<-function(roc, foc='spec', p=c(1,0.99)) {
   
 }
 
-get.auc.at(p53roc)
-get.auc.at(hgdpathroc)
-get.auc.at(pathroc)
-get.auc.at(roc)
+# get.auc.at(p53roc)
+# get.auc.at(hgdpathroc)
+# get.auc.at(pathroc)
+# get.auc.at(roc)
 
 m = rbind.data.frame(
       get.roc.stat(p53roc),
@@ -847,21 +934,42 @@ m = rbind.data.frame(
       get.roc.stat(roc, 0.6))
 m$model = factor(m$model, levels=c('p53 IHC','HGD Only','Dysplasia (HGD & LGD)','CN Model'), ordered = T)
 
-rocList = list(roc,roc50, pathroc,hgdpathroc,p53roc)
+rocList = list(roc,pathroc,hgdpathroc,p53roc)
 
+cols = brewer.pal(11, "PRGn")
 dodge = position_dodge(width=0.9)
 ggplot(melt(subset(m, Measure == 'AUC'), measure.vars='value'), aes(x=model, y=value*100, ymin=CI.min*100, ymax=CI.max*100, group=Measure, fill=Measure)) + 
   geom_bar(stat='identity',position=dodge) + geom_errorbar(position=dodge, width=0.3, color='black' ) + 
-  geom_text(aes(label=paste(round(value,2)*100,'%',sep=''), y=0, vjust=-1 ), position=dodge, color='white')  +
-  scale_fill_manual(values=c('purple3','dodgerblue3','firebrick3'), name='') + plot.theme + 
-  theme(legend.position = 'none') + labs(x='', y='Percent', title='ROC Comparison') 
+  geom_text(aes(label=paste(round(value,2)*100,'%',sep=''), y=1, vjust=-1 ), position=dodge, color='white')  +
+  scale_fill_manual(values=cols, name='') + plot.theme + 
+  theme(legend.position = 'none', axis.text.x = element_text(angle=45, hjust=1)) + labs(x='', y='AUC', title='ROC Comparison') 
+
 ```
 
-*** 
 
-__All predictions from here onwards are performed using the `r cutoff` cutoff__
+```{r echo=F, fig.height=8, fig.width=6}
+roc$model = "Per Sample"
 
-***
+m = rbind.data.frame(
+      get.roc.stat(roc),
+      get.roc.stat(rocEndoM),get.roc.stat(rocEndoA),
+      get.roc.stat(rocPtM), get.roc.stat(rocPtA),
+      get.roc.stat(rocFirstEndo), get.roc.stat(rocLastEndo))
+m$model = factor(m$model)
+
+cols = brewer.pal(11, 'Paired')
+dodge = position_dodge(width=0.9)
+mm = melt(subset(m, Measure == 'AUC'), measure.vars='value')
+ggplot( arrange(mm, CI.min), aes(x=model, y=value*100, ymin=CI.min*100, ymax=CI.max*100, group=Measure, fill=model)) + 
+  geom_bar(stat='identity',position=dodge) + geom_errorbar(position=dodge, width=0.3, color='black' ) + 
+  geom_text(aes(label=paste(round(value,2)*100,'%',sep=''), y=1), position=dodge, color='white')  +
+  scale_fill_manual(values=cols, name='') + plot.theme + 
+  theme(legend.position = 'none', axis.text.x = element_text(angle=45, hjust=1)) + labs(x='', y='AUC', title='ROC Comparison') 
+
+
+multi.roc.plot(list(roc, rocEndoM, rocEndoA, rocPtM, rocPtA,rocFirstEndo,rocLastEndo), 'ROC Comparisons', palette='Dark2')
+```
+
 
 ## Prediction probability distribution
 
@@ -1009,37 +1117,79 @@ ggplot(back, aes(OR, Prediction, color=Prediction)) + geom_point(show.legend = F
 
 ### Mountain plots using spatial info
 
-```{r, echo=F, warning=F, message=F, fig.height=12, fig.width=16}
+```{r, echo=F, warning=F, message=F, fig.height=10, fig.width=20}
+
+min.theme = theme(text=element_text(size=10), panel.background=element_blank(), strip.background=element_rect(fill="grey97"), 
+                   strip.text = element_text(size=10), axis.text = element_blank(),
+                   axis.line=element_line(color='black'), panel.grid.major.y =element_line(color='grey95'), panel.grid.major.x = element_blank(),
+                   panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing.x = unit(0, 'lines'), panel.spacing.y = unit(0.1, 'lines')   ) 
+
 
 mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
   if (is.null(pal))
-    pal = RColorBrewer::brewer.pal(length(limits), 'Paired')
+    pal = RColorBrewer::brewer.pal(length(limits), 'Set2')
 
-  df = merge(df, b[,c('Samplename','Endoscopy.Year','months.before.final','Block','nl')], by.x='variable',by.y='Samplename')
-  df$nl = factor(df$nl, ordered = T)
-
+  df = merge(df, b[,c('Samplename','Endoscopy.Year','months.before.final','Block','ogj')], by.x='variable',by.y='Samplename')
+  df$ogj = factor(df$ogj, ordered = T)
+  df$ogj = factor(df$ogj, levels=rev(levels(df$ogj)), ordered = T)
   #pal = pal[which(limits %in% levels(df$nl))]
+
+  altcolor = c(RColorBrewer::brewer.pal(9, 'Greys')[2],RColorBrewer::brewer.pal(9, 'Greys')[4])
+  fills = c()
+  for (yr in sort(unique(df$Endoscopy.Year))) {
+    ac = (which(sort(unique(df$Endoscopy.Year)) == yr) %% 2) + 1
+    fills = c(fills, rep(altcolor[ac], length(which(table(subset(df, Endoscopy.Year == yr)$ogj) > 0))))
+  }
+    
+  p = ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line=F)) +
+      geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
+      scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
+      labs(title=title, x='') + min.theme  
   
-  ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year~chr, scales='free_x', space='free_x') +
-    geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=nl), show.legend=T) + 
-    scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
-    theme(axis.text.x = element_blank()) +
-    plot.theme + labs(title=title)
+  legend = get.legend(p)
+  p = p + theme(legend.position = 'none')
+  
+  g = ggplot_gtable(ggplot_build(p))
+  strips = grep('strip-r', g$layout$name)
+
+  for (n in 1:length(strips)) {
+    i = strips[n]
+    j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+    g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[n]
+  }
+
+  grid.arrange(g)
+  return(list('grob'=g, 'legend'=legend))
+  #grid::grid.draw(g)  
+  #return(g)
 }
 
-ogjLimits = levels(factor(back$nl, ordered = T))
+back$ogj = back$nl
+back$ogj[which(back$nl > 0 & back$nl < 3)] = 1 
+back$ogj[which(back$nl > 3 & back$nl < 7)] = 2 
+back$ogj[which(back$nl >= 7)] = 3 
 
-p1 = mtn.spatial(subset(globalCNdf, Patient == 48 & seg.type != 'arms'), back, ogjLimits, 'Patient 48, (P)')
-ogjLegend = get.legend(p1)
-p1+theme(legend.position = 'none')
+ogjLimits = levels(factor(back$ogj, ordered = T))
 
-mtn.spatial(subset(globalCNdf, Patient == 60 & seg.type != 'arms'), back,ogjLimits,'Patient 60 (P)' )+theme(legend.position = 'none')
+p1 = mtn.spatial(subset(globalCNdf, Patient == 48 & seg.type != 'arms'), back, ogjLimits, 'Patient 48 (P)')
+p2 = mtn.spatial(subset(globalCNdf, Patient == 20 & seg.type != 'arms'), back, ogjLimits,'Patient 20 (P)' )
+p3 = mtn.spatial(subset(globalCNdf, Patient == 60 & seg.type != 'arms'), back, ogjLimits,'Patient 60 (P)' )
 
-mtn.spatial(subset(globalCNdf, Patient == 3 & seg.type != 'arms'), back,ogjLimits,'Patient 3 (NP)' )+theme(legend.position = 'none')
+p4 = mtn.spatial(subset(globalCNdf, Patient == 3 & seg.type != 'arms'), back,ogjLimits,'Patient 3 (NP)' )
+p5 = mtn.spatial(subset(globalCNdf, Patient == 15 & seg.type != 'arms'), back,ogjLimits,'Patient 15 (NP)' )
+p6 = mtn.spatial(subset(globalCNdf, Patient == 51 & seg.type != 'arms'), back,ogjLimits,'Patient 51 (NP)' )
 
-mtn.spatial(subset(globalCNdf, Patient == 15 & seg.type != 'arms'), back,ogjLimits,'Patient 15 (NP)' )+theme(legend.position = 'none')
+back$ogj = NULL
 
 ```
+
+
+```{r, echo=F, fig.width=2, fig.height=4}
+
+grid.arrange(p1$legend)
+
+```
+
 
 
 
@@ -1095,7 +1245,7 @@ Effectively it looks to me like my coefficients have fairly tight CI if the SE o
 
 ## How do the predictions look at each time point?
 
-```{r, echo=F, warning=F, message=F, fig.height=8, fig.width=9}
+```{r, echo=F, warning=F, message=F, fig.height=10, fig.width=12}
 riskPath = rbind( cbind.data.frame( table(subset(back, Status == 'P', select=c('Pathology','Risk'))), 'Status'='Progressor' ), 
                   cbind.data.frame( table(subset(back, Status == 'NP', select=c('Pathology','Risk'))), 'Status'='Non-Progressor' ))
 
@@ -1103,12 +1253,12 @@ pathTotal = back %>% group_by(Status, Pathology) %>% summarise( 'nPath'=length(P
 pathTotal$Status = ifelse(pathTotal$Status == 'P', 'Progressor','Non-Progressor')
 
 riskPath = merge(riskPath, pathTotal)
-riskPath$ratio = with(riskPath, round(Freq/nPath, 2))
+riskPath$ratio = with(riskPath, round(Freq/nPath, 3))
 riskPath$Risk = factor(riskPath$Risk, levels=c('Low','Moderate','High'), ordered = T)
 
 p53Path = cbind.data.frame(table(subset(back, Status == 'P', select=c('Pathology','p53.Status'))), 'Status'='p53 IHC')
 p53Path = merge( subset(back, Status == 'P' & !is.na(p53.Status)) %>% group_by(Pathology) %>% summarise( 'nPath'=length(Pathology)), p53Path)
-p53Path$Risk = with(p53Path, ifelse(p53.Status == 1, 'High','Low'))
+#p53Path$Risk = with(p53Path, ifelse(p53.Status == 1, 'High','Low'))
 p53Path$ratio = with(p53Path, round(Freq/nPath, 2))
 
 #riskPath = rbind(riskPath, p53Path[colnames(riskPath)])
@@ -1118,21 +1268,25 @@ riskPath$Status = factor(riskPath$Status, levels=c('Non-Progressor','Progressor'
 pathTotal = riskPath %>% group_by(Status, Pathology) %>% summarise('nPath'=unique(nPath))
 
 ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) + 
-  scale_fill_manual(values=riskCols) + 
+  scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) +
   geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), position=position_stack(), size=4) +
-  geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep='')), position=position_stack(vjust = 0.5), size=5) +
+  geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
   facet_grid(~Status) + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom')
 
 ```
 
-```{r p53IHC, echo=F, warning=F, message=F, fig.height=6, fig.width=8}
+```{r p53IHC, echo=F, warning=F, message=F, fig.height=8, fig.width=8}
 
-p53Path$Risk[p53Path$Risk == 'High'] = 'Aberrant'
-p53Path$Risk[p53Path$Risk == 'Low'] = 'Normal'
+#p53Path$Risk[p53Path$Risk == 'High'] = 'Aberrant'
+#p53Path$Risk[p53Path$Risk == 'Low'] = 'Normal'
 
-col = brewer.pal(11, "PRGn")[c(3,9)]
-ggplot(p53Path, aes(Pathology, ratio*100, group=Pathology, fill=Risk)) + geom_bar(stat='identity', position=position_stack()) + 
-  scale_fill_manual(values=col) + 
+#p53Path$p53.Status = factor(p53Path$p53.Status, levels=c('Aberrant', 'Normal'), ordered = F)
+
+p53Path$p53.Status = factor(p53Path$p53.Status, ordered = T)
+p53Path = arrange(p53Path, Pathology, p53.Status)
+col = brewer.pal(11, "PRGn")[c(9,3)]
+ggplot(p53Path, aes(Pathology, ratio*100, group=Pathology, fill=p53.Status)) + geom_bar(stat='identity', position = position_stack()) +
+  scale_fill_manual(values=col, name='p53 IHC', labels=c('Normal','Aberrant')) + 
   geom_text(aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101)) +
   geom_text(aes(label=paste(ratio*100,'%',sep='')), position=position_stack(vjust = 0.5), size=5) +
   plot.theme + labs(title='Samples predicted by aberrant p53 IHC', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom')
@@ -1243,19 +1397,25 @@ ggplot(endos.m, aes(x=brks, y=pred.r*100, ymin=(pred.r-`sem(P)`)*100, ymax=(pred
 The first two quintiles and the last two together account for 80% of our samples.  Only 20% fall into the category "Moderate".
 
 
-```{r, echo=F, warning=F, message=F, fig.width=5, fig.height=15 }
+```{r, echo=F, warning=F, message=F, fig.width=5, fig.height=5 }
 back$nl = factor(back$nl, ordered=T)
 back$Risk = factor(back$Risk, levels=c('Low','Moderate','High'), ordered = T)
 back$Patient = factor(as.numeric(back$Patient), ordered = T)
 
-pred.tiles(subset(back, Patient %in% c(6)), ncol=1, cols=myPal, probs=T) + labs(title='') + theme(legend.position = 'none')
+p = pred.tiles(subset(back, Patient %in% c(6)), ncol=1, cols=myPal, probs=T) + labs(title='')
+tilesLegend = get.legend(p)
+p + theme(legend.position = 'none')
+
+pred.tiles(subset(back, Patient %in% c(6)), ncol=1, cols=myPal, probs=T, OR=F) + labs(title='') + theme(legend.position = 'none')
 pred.tiles(subset(back, Patient %in% c(48)), ncol=1, cols=myPal, probs=T) + labs(title='') + theme(legend.position = 'none')
 pred.tiles(subset(back, Patient %in% c(33)), ncol=1, cols=myPal, probs=T) + labs(title='')+ theme(legend.position = 'none')
 pred.tiles(subset(back, Patient %in% c(89)), ncol=1, cols=myPal, probs=T) + labs(title='')+ theme(legend.position = 'none')
+```
 
+```{r, echo=F, warning=F, message=F, fig.width=5, fig.height=15 }
 grid.arrange(
-  pred.tiles(subset(back, Patient %in% c(13,20,34,56,60,48) & Status == 'P'), ncol=1, cols=myPal, probs=T) + labs(title='Progressors'),
-  pred.tiles(subset(back, Patient %in% c(15,16,21,3,45,19) & Status == 'NP'), ncol=1, cols=myPal, probs=T) + labs(title='Non-Progressors'),
+  pred.tiles(subset(back, Patient %in% c(13,20,34,56,60,48) & Status == 'P'), ncol=1, cols=myPal, probs=T) + labs(title='Progressors') + theme(legend.position = 'none'),
+  pred.tiles(subset(back, Patient %in% c(15,16,21,3,45,19) & Status == 'NP'), ncol=1, cols=myPal, probs=T) + labs(title='Non-Progressors') + theme(legend.position = 'none'),
 ncol=2)
 
 table.path.risk<-function(df) {
@@ -1585,8 +1745,6 @@ valCNdf$mean.value = valCNdf$value # but not going to use it
 cn.mtn.plot(subset(valCNdf, seg.type != 'arms'), labeller(Status=n.status, chr=label_value))
 
 df = rbind(cbind(valCNdf, 'set'=rep('Val', nrow(valCNdf))), cbind(globalCNdf, 'set'=rep('Train', nrow(globalCNdf)) ) )
-subset(df, seg.type != 'arms') %>% group_by(set,Status) %>% summarise( var(mean.value), mean(mean.value), max(mean.value), min(mean.value) )
-
 
 ```
 
@@ -1647,9 +1805,6 @@ back.v$brks = cut(back.v$months.before.final,
                   include.lowest = T, ordered_result = T)
 back.v$brks = with(back.v, factor(brks, levels=rev(levels(brks))))
 
-
-head(back.v)
-
 m = melt(back.v %>% group_by(Patient, Status) %>% summarise( 'Low'=length(which(Risk == 'Low'))/length(Patient),
                                             'Moderate'=length(which(Risk == 'Moderate'))/length(Patient),
                                             'High'=length(which(Risk == 'High'))/length(Patient),
@@ -1658,14 +1813,12 @@ m = melt(back.v %>% group_by(Patient, Status) %>% summarise( 'Low'=length(which(
 
 ggplot(m, aes(Patient,  value*100, group=variable, fill=variable)) + geom_bar(stat='identity', position=position_stack()) +
   geom_text(aes(label=n.samples, y=101)) + scale_fill_manual(values=riskCols) +
-  facet_grid(~Status, scales='free_x') + labs(y='Percent of samples', title='Validation patient set')
+  facet_grid(~Status, scales='free_x') + labs(y='Percent of samples', title='Validation patient set') + plot.theme
 ```
 
-```{r echo=F, warning=F, message=F, fig.height=14,fig.width=28}
-grid.arrange(
-  pred.tiles(subset(back.v, Status == 'P'), cols=myPal, probs=T) + labs(title='Validation Progressors') + theme(legend.position = 'none'),
-  pred.tiles(subset(back.v, Status == 'NP'), cols=myPal, probs=T) + labs(title='Validation Non-Progressors') + theme(legend.position = 'none'),
-ncol=2)
+```{r echo=F, warning=F, message=F, fig.height=5,fig.width=25}
+pred.tiles(subset(back.v, Status == 'P'), cols=myPal, probs=T, nrow=1) + labs(title='Validation Progressors') + theme(legend.position = 'none')
+pred.tiles(subset(back.v, Status == 'NP'), cols=myPal, probs=T, nrow=1) + labs(title='Validation Non-Progressors') + theme(legend.position = 'none')
 ```
 
 ```{r echo=F, warning=F, message=F, fig.height=5,fig.width=8}
@@ -1681,23 +1834,22 @@ pathTotal = back.v %>% group_by(Status, Pathology) %>% summarise( 'nPath'=length
 pathTotal$Status = ifelse(pathTotal$Status == 'P', 'Progressor','Non-Progressor')
 
 riskPath = merge(riskPath, pathTotal)
-riskPath$ratio = with(riskPath, round(Freq/nPath, 2))
+riskPath$ratio = with(riskPath, round(Freq/nPath, 3))
 riskPath$Risk = factor(riskPath$Risk, levels=c('Low','Moderate','High'), ordered = T)
 
-p53Path = cbind.data.frame(table(subset(back.v, Status == 'P', select=c('Pathology','p53.Status'))), 'Status'='p53 IHC')
-p53Path = merge( subset(back.v, Status == 'P' & !is.na(p53.Status)) %>% group_by(Pathology) %>% summarise( 'nPath'=length(Pathology)), p53Path)
-p53Path$Risk = with(p53Path, ifelse(p53.Status == 1, 'High','Low'))
-p53Path$ratio = with(p53Path, round(Freq/nPath, 2))
+hgdimc = subset(riskPath, Pathology %in% c('HGD','IMC')) %>% group_by(Risk) %>% summarize (
+  Freq=sum(Freq),  nPath=sum(nPath), ratio=sum(Freq)/sum(nPath)
+)
+riskPath = riskPath[-which(riskPath$Pathology %in% c('HGD','IMC')),] 
+riskPath = rbind(riskPath , cbind('Pathology'='HGD/IMC', 'Status'='Progressor', hgdimc))
 
-
-riskPath$Status = factor(riskPath$Status, levels=c('Non-Progressor','Progressor','p53 IHC'), ordered = T)
+riskPath$Status = factor(riskPath$Status, levels=c('Non-Progressor','Progressor'), ordered = T)
 
 pathTotal = riskPath %>% group_by(Status, Pathology) %>% summarise('nPath'=unique(nPath))
 
-ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) + 
-  scale_fill_manual(values=riskCols) + 
-  geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), position=position_stack(), size=4) +
-  geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep='')), position=position_stack(vjust = 0.5), size=5) +
+ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) +   scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) + 
+  geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), position=position_stack(), size=4, show.legend = F) +
+  geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
   facet_grid(~Status) + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom')
 
 ```
@@ -1732,8 +1884,21 @@ vroc = pROC::roc(Status ~ Prediction, data=preds, ci=T, of='thresholds')
 vroc$model = 'Validation'
 
 roc$model = 'Discovery'
-multi.roc.plot(list(roc, vroc), title='ROC') 
+multi.roc.plot(list(roc, vroc), title='ROC', palette='Dark2') 
+```
 
+
+```{r, echo=F, warning=F, message=F, fig.width=4, fig.height=4}
+aucs = rbind.data.frame(pROC::ci.auc(roc), pROC::ci.auc(vroc))
+colnames(aucs) = c('ci.min', 'auc','ci.max')
+aucs$model = c('Discovery','Validation')
+
+ggplot(aucs, aes(model, auc)) + geom_point(size=2) + ylim(0,1) +
+  geom_errorbar(aes(ymin=ci.min, ymax=ci.max), width=0.1) + coord_flip() + 
+  geom_text(aes(y=ci.min, label=round(ci.min, 2)), vjust=4) +
+  geom_text(aes(y=ci.max, label=round(ci.max, 2)), vjust=-4) +
+#  geom_text(aes(y=auc, label=round(auc, 2)), vjust=-1) +
+  labs(x='', y='AUC', title='AUC with CI') + plot.theme 
 ```
 
 ```{r, echo=F, warning=F, message=F, eval=F}
@@ -1765,56 +1930,39 @@ write.table(summary.v, sep='\t', quote=F, row.names = F)
 vign.pts = as_tibble(subset(sum.patient.data, Patient %in% c(3, 33, 34, 49, 56, 20), select=c('Status','Patient','age.diagnosis', 'smoking', 'C','M', 'initial.endo','final.endo', 'total.endos','total.samples')))
 colnames(vign.pts) = c('Status','Patient','Age at Diagnosis','Smoker','Circumference', 'Maximal length', 'Intial Endoscopy','Final Endoscopy', 'Total Endoscopies','Total Samples')
 
-#back$Risk = factor(back$Risk, levels=levels(back$labels), ordered = T)
-
-
-# ggplot(subset(back, Status == 'P'), aes(factor(Endoscopy.Year, ordered=T), nl)) + geom_tile(aes(fill=Risk, color=p53.Status), size=1.5)  + facet_wrap(~Patient, scales='free') + 
-#   scale_fill_manual(values=riskCols, limits=levels(back$Risk),name='Progression') + 
-#   scale_color_manual(values=c('grey22','white'), limits=levels(back$p53.Status), drop=F, name='p53 IHC', labels=c('normal','aberrant')) +
-#     geom_text(aes(label=Pathology), color='black', show.legend = F) +
-#     labs(y='Oesophageal Location',x='Months Prior to Endpoint', title='') +
-#     plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='none') + 
-#     #scale_x_continuous(breaks=scale) +
-#     theme(panel.background = element_rect(fill='grey60', color='grey60'), panel.grid.major = element_line(color='grey70'), panel.grid.minor = element_blank())
-# 
-# ggplot(subset(back, Status == 'NP'), aes(factor(Endoscopy.Year, ordered=T), nl)) + geom_tile(aes(fill=Risk, color=p53.Status), size=1.5)  + facet_wrap(~Patient, scales='free') + 
-#   scale_fill_manual(values=riskCols, limits=levels(back$Risk),name='Progression') + 
-#   scale_color_manual(values=c('grey22','white'), limits=levels(back$p53.Status), drop=F, name='p53 IHC', labels=c('normal','aberrant')) +
-#     geom_text(aes(label=Pathology), color='black', show.legend = F) +
-#     labs(y='Oesophageal Location',x='Months Prior to Endpoint', title='') +
-#     plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='none') + 
-#     #scale_x_continuous(breaks=scale) +
-#     theme(panel.background = element_rect(fill='grey60', color='grey60'), panel.grid.major = element_line(color='grey70'), panel.grid.minor = element_blank())
-# 
-
 
 ## P
-vig.plot(df=subset(back, Patient == 34),info= subset(patient.info, Patient == 34),cols=riskCols)
-vig.plot(subset(back, Patient == 56), subset(patient.info, Patient == 56),cols=riskCols)
-vig.plot(subset(back, Patient == 20), subset(patient.info, Patient == 20),cols=riskCols)
-vig.plot(subset(back, Patient == 86), subset(patient.info, Patient == 86),cols=riskCols)
+p = vig.plot(df=subset(back, Patient == 34),info= subset(patient.info, Patient == 34),cols=riskCols) + theme(legend.position = 'bottom')
+vigLeg = get.legend(p)
+p + theme(legend.position = 'none')
+vig.plot(subset(back, Patient == 56), subset(patient.info, Patient == 56),cols=riskCols) + theme(legend.position = 'none')
+vig.plot(subset(back, Patient == 20), subset(patient.info, Patient == 20),cols=riskCols) + theme(legend.position = 'none')
+vig.plot(subset(back, Patient == 86), subset(patient.info, Patient == 86),cols=riskCols) + theme(legend.position = 'none')
 
 
 ## NP
-vig.plot(subset(back, Patient == 3), subset(patient.info, Patient == 3),cols=riskCols)
-vig.plot(df=subset(back, Patient == 23),info= subset(patient.info, Patient == 23),cols=riskCols)
-vig.plot(subset(back, Patient == 33), subset(patient.info, Patient == 33),cols=riskCols)
-vig.plot(subset(back, Patient == 49), subset(patient.info, Patient == 49),cols=riskCols)
-vig.plot(subset(back, Patient == 51), subset(patient.info, Patient == 51),cols=riskCols)
+vig.plot(subset(back, Patient == 3), subset(patient.info, Patient == 3),cols=riskCols) + theme(legend.position = 'none')
+vig.plot(df=subset(back, Patient == 23),info= subset(patient.info, Patient == 23),cols=riskCols) + theme(legend.position = 'none')
+vig.plot(subset(back, Patient == 33), subset(patient.info, Patient == 33),cols=riskCols) + theme(legend.position = 'none')
+vig.plot(subset(back, Patient == 49), subset(patient.info, Patient == 49),cols=riskCols) + theme(legend.position = 'none')
+vig.plot(subset(back, Patient == 51), subset(patient.info, Patient == 51),cols=riskCols) + theme(legend.position = 'none')
            
-vig.plot(subset(back, Patient == 6), subset(patient.info, Patient == 6),cols=riskCols)
-vig.plot(subset(back, Patient == 54), subset(patient.info, Patient == 54),cols=riskCols)
+vig.plot(subset(back, Patient == 6), subset(patient.info, Patient == 6),cols=riskCols) + theme(legend.position = 'none')
+vig.plot(subset(back, Patient == 54), subset(patient.info, Patient == 54),cols=riskCols) + theme(legend.position = 'none')
 ```
 
+```{r, echo=F, warning=F, message=F, fig.width=4, fig.height=1}
+grid.arrange(vigLeg)
+```
 
 ### Recommendations
 
  1.	Immediate RFA: HGD diagnosis, two or more consecutive high risk predictions
  2.	Recheck 6-12 months: One high risk prediction or aberrant p53 IHC
- 3. 	Recheck endoscopy 12-24 months: One or more moderate risk predictions
- 4. 	Regular surveillance 3-5 years: Two or more consecutive low risk predictions
+ 3. Recheck endoscopy 12-24 months: One or more moderate risk predictions
+ 4. Regular surveillance 3-5 years: Two or more consecutive low risk predictions
 
- ```{r rx, echo=F, warning=F, message=T}
+```{r, rx, echo=F, warning=F, message=T, fig.width=8, fig.height=5}
 
 rx<-function(Patient, brks, Prediction, Pathology, Risk, p53.Status) {
   rules = as.data.frame(matrix(ncol=0, nrow=0))
@@ -1871,11 +2019,10 @@ table(subset(second, Status == 'NP')$rule)
 
 ## Incidence
 
-In the literature the risk of BE progression to HGD/cancer is estimated to be 0.2-0.7% per year.
+Median follow up for our discovery cohort was `r median(sum.patient.data$end.year-sum.patient.data$start.year)`. 
 
-So for every 100 BE patients, at most `r 0.07*100` patients will progress in a year.
+Adjust the RR of the orginal model with 1-3.5% offset to get an absolute risk (AR) with the understanding that the cohort was age matched and unbalanced.
 
-Lifetime risk is assumed to be ~10% presuming 10 years followup (`r 0.7*10`%).  Two ways to do this, take one year and look at the progression predictions...or take all of them and compare to the lifetime risk.
 
 ```{r echo=F}
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
@@ -1890,24 +2037,84 @@ all = rbind(sum.patient.data, sum.validation.info)
 
 # Per year
 # This isn't quite right...we'd want to do something more like a 5 year 
-pop = round((table(all$Status)['P']/(0.07*100))*100)
+#pop = round((table(all$Status)['P']/(0.07*100))*100)
 
 ```
 
-### Lifetime adjusted risk
+```{r estimateRisk, echo=F, warning=F, message=F, eval=F}
+# Probability that an individual will progress in a lifetime (20 years) given a rate of progression of 0.07 is about 77%, the probability for a specific individual is less
+1-(0.93^20)
 
-```{r adjProbRisk, echo=F, fig.height=6, fig.width=10}
-#popL = round((table(all$Status)['P']/(0.1*100))*100)
+(1-(0.99^3))*15
+(1-(0.99^3))/10
+(1-(0.99^3))/10
+
+# Or probability an individual will progress given a rate of 1%-3.5%
+poft = sapply(seq(0.96,0.99, .01), function(x) {
+ sapply(1:5, function(y) 1-(x^y) )
+})
+
+poft = as.data.frame(poft)
+colnames(poft) = paste((1-seq(0.96,0.99, .01))*100, '%', sep='')
+
+rp = apply(poft,1,function(x) cbind(mean(x),min(x), max(x)) )
+
+rownames(rp) = c('mean','min','max')
+colnames(rp) = paste('Year',1:5)
+
+rr = range(as.data.frame(subset(back, Pathology %in% c('BE'), select=c('Patient','Pathology','months.before.final','OR')))$OR)
+
+p = subset(back, Status == 'P' & months.before.final > 6 & OR > 10)$Patient
+subset(sum.patient.data, Patient %in% p) %>% group_by(Patient) %>% summarise(final.endo-initial.endo)
+
+rrPath = back %>% group_by(Status, Pathology) %>% summarise( 'mean.RR'=mean(OR),'ci.min'=mean(OR)-(1.96*sd(OR)), 'ci.max'=mean(OR)+(1.96*sd(OR)) )
+
+
+ggplot(rrPath, aes(Status, mean.RR)) + #scale_color_gradientn(colors=myPal, limits=c(min(rrPath[,3:5]), max(rrPath[,3:5])),  name='') +
+  facet_wrap(~Pathology, ncol=1) + 
+  geom_point() +  geom_errorbar(aes(ymin=ci.min, ymax=ci.max), width=0.1) + 
+  geom_text(aes(y=ci.min, label=round(ci.min,2)), vjust=2) + geom_text(aes(y=ci.max, label=round(ci.max,2)), vjust=2) +
+  coord_flip() + plot.theme + labs(y='Mean RR', x='')
+
+
+as.data.frame(arrange(subset(back, Status == 'P' & months.before.final > 6 & Pathology %in% c('BE','ID','LGD') & OR > 1), Patient, months.before.final))
+
+ggplot(t(rp), aes(1:5, mean)) +
+  geom_ribbon(aes(ymin=mean/abs(rr[1]),ymax=mean*rr[2]), fill='rosybrown1') +
+  geom_ribbon(aes(ymin=min,ymax=max), fill='grey88') +
+  geom_line() + 
+  geom_text(data=data.frame(t(rp[,5])), aes(x=5,y=min, label='1%')) + geom_text(data=data.frame(t(rp[,5])), aes(x=5,y=max, label='4%')) +
+  geom_line(aes(y=mean*rr[2]), color='red') +
+  geom_line(aes(y=mean/abs(rr[1])), color='blue') +
+  labs(y='P(P)', x='Year', title='Prob. of individual patient progression', subtitle='1-4% over 5 years') + plot.theme
+
+
+subset(back, OR > 10)
+cor.test(back$OR, as.integer(back$Pathology))
+as.data.frame(subset(back, Pathology %in% c('HGD','IMC'), select=c('Patient','Pathology','months.before.final','OR')))
+
+as.data.frame(subset(back, Status == 'P' & OR < 2 & OR > -2, select=c('Status','Patient','Pathology','months.before.final','OR')))
+
+hist(subset(back, Pathology %in% c('BE'))$OR)
+
+```
+
+
+```{r 5yrrisk, echo=F, fig.height=8, fig.width=12}
 cases = table(sum.patient.data$Status)['P']
-popL = round((table(sum.patient.data$Status)['P']/(0.1*100))*100)
+
+mn = round((table(sum.patient.data$Status)['P']/(0.01*100))*100)
+m = round((table(sum.patient.data$Status)['P']/(0.0225*100))*100)
+mx = round((table(sum.patient.data$Status)['P']/(0.035*100))*100)
+
+offsetMin = log(cases/mn)
+offsetMean = log(cases/m)
+offsetMax = log(cases/mx)
 
 #binom.test(cases, popL, 0.1)
-
-
-
 # Offset for the linear predictor would then be -log(pop/44)
 # Effectively this is my relative risk for the population
-offset = log(cases/popL)
+#offset = log(cases/popL)
 
 # link function provides odds
 #linPred = predict(fit, newx=dysplasia.df, s=lambda, type='link')
@@ -1924,42 +2131,46 @@ cols = c('Hospital.Research.ID','Patient','Status','PID', 'Samplename','Endoscop
 #loopreds = rbind(loopreds[cols], do.call(rbind, vpd)[cols])
 loopreds = do.call(rbind, pg.samp)[cols]
 
-
 loopreds$P0 = 1/(1+exp(-loopreds$OR))
-loopreds$P1 = 1/(1+exp(-loopreds$OR+abs(offset))) # Adjust OR for RR
 
-mean(loopreds$P0)
-mean(loopreds$P1)
+loopreds$Mean = 1/(1+exp(-loopreds$OR+abs(offsetMean))) # Adjust OR for RR
+loopreds$Min = 1/(1+exp(-loopreds$OR+abs(offsetMin))) # Adjust OR for RR
+loopreds$Max = 1/(1+exp(-loopreds$OR+abs(offsetMax))) # Adjust OR for RR
 
-
-ql = cbind.data.frame('y'=quantile(loopreds$OR)[c(2,4)], 'labels'=paste(c(25,75), '%', sep=''))
+#ql = cbind.data.frame('y'=quantile(loopreds$OR)[c(2,4)], 'labels'=paste(c(25,75), '%', sep=''))
 
 # From my nested-LOO predictions
 
-ggplot(loopreds, aes(P1)) + 
-    geom_histogram(aes(fill=..x..), breaks=cuts, show.legend = F) + 
-    #geom_vline(xintercept = mean(adjRR)) +
+ggplot(melt(loopreds[c('Min','Mean','Max')], measure.vars='Mean'), aes(value, fill=variable)) + 
+  geom_density(alpha=0.5) + plot.theme
+
+
+ggplot(melt(loopreds[c('Min','Max')]), aes(value)) + facet_wrap(~variable, ncol=2) +
+  geom_histogram(aes(fill=..x..), breaks=cuts, show.legend = F) + 
     scale_fill_gradientn(colors = myPal,  name='') + 
     plot.theme + theme(legend.position = 'none') + 
-    labs(y='n Samples', x='Probability',
-         title='Sample Predictions: Lifetime risk adjusted')
-        
-ggplot(loopreds, aes(OR)) + 
-    geom_histogram(aes(fill=..x..), bins=10, show.legend = F) + 
-    scale_fill_gradientn(colors = myPal,  name='') + 
-    #scale_fill_distiller(palette = 'RdYlBu', name='P(P)') + 
-    plot.theme + theme(legend.position = 'none') + 
-    labs(y='n Samples', x='Adjusted Relative Risk',
-         title='Sample Predictions: Lifetime risk adjusted')
+    labs(y='n Samples', x='Absolute Risk',
+         title='5-year adjusted risk', subtitle='Adjusted for upper & lower bound: 1-3.5% risk')
 
-# Probability that an individual will progress in a lifetime (20 years) given a rate of progression of 0.07 is about 77%, the probability for a specific individual is less
-1-(0.93^20)
 
+# ggplot(loopreds, aes(Min)) +
+#     geom_histogram(aes(fill=..x..), breaks=cuts, show.legend = F) + 
+#     scale_fill_gradientn(colors = myPal,  name='') + 
+#     plot.theme + theme(legend.position = 'none') + 
+#     labs(y='n Samples', x='Absolute Risk',
+#          title='Sample Predictions: 5 year adjusted risk', subtitle='Adjusted for lower bound, 1% risk')
+# 
+# ggplot(loopreds, aes(Max)) +
+#     geom_histogram(aes(fill=..x..), breaks=cuts, show.legend = F) + 
+#     scale_fill_gradientn(colors = myPal,  name='') + 
+#     plot.theme + theme(legend.position = 'none') + 
+#     labs(y='n Samples', x='Absolute Risk',
+#          title='5-year adjusted risk', subtitle='Adjusted for upper bound, 3.5% risk')
 
 ```
 
 
-```{r lifetimeFPR, echo=F, fig.height=6, fig.width=6}
+```{r lifetimeFPR, echo=F, fig.height=6, fig.width=6, eval=F}
 ## FPR estimates based on lifetime risks
 # We could consider any NP patient with a minimum of 2 High risk calls?  or High/Moderate Risk?
 # More correctly it should be any patients with concurrent High risk, but that's been pretty stable so two high is good enough for now
@@ -2007,9 +2218,10 @@ pop*.05
 
 ```
 
-## Clonal Heterogenity
+
 
 ```{r clonality, echo=F, message=F, warning=F, eval=F}
+## Clonal Heterogenity
 patient.info %>% group_by (Hospital.Research.ID, Patient, PID) %>% summarise(
   length(PID)
 )
@@ -2066,7 +2278,7 @@ cor.test(pp$seg, pp$max)
 
 ## Cox model - Time to progress?
 
-```{r cox, warning=F, message=F, echo=F, eval=F}
+```{r cox, warning=F, message=F, echo=F, eval=T}
 library(survival)
 
 cox.pvalue<-function(cox, test='logrank') {
@@ -2083,9 +2295,8 @@ cox.pvalue<-function(cox, test='logrank') {
   return(pvalue)
 }
 
-
 prog.pred = lapply(pg.samp, function(df) {
-  df = df[,c('Hospital.Research.ID', 'Status', 'Patient', 'PID', 'Status', 'Endoscopy.Year','Initial.Endoscopy', 'Final.Endoscopy', 'Pathology', 'Samplename','Prediction','Prediction.Dev.Resid')] %>% rowwise() %>% mutate(
+  df = df[,c('Hospital.Research.ID', 'Status', 'Patient', 'Age.at.diagnosis', 'PID', 'Status', 'Endoscopy.Year','Initial.Endoscopy', 'Final.Endoscopy', 'Pathology', 'Samplename','Prediction','Prediction.Dev.Resid')] %>% rowwise() %>% mutate(
       'Time.to.Final'=Final.Endoscopy-Endoscopy.Year)
   df = arrange(df, Endoscopy.Year, Pathology)
 
@@ -2136,55 +2347,109 @@ prog.pred = lapply(pg.samp, function(df) {
 })
 ## By pathology?
 pp = do.call(rbind, prog.pred)
+
+
 pp[is.na(pp$tstop), 'tstop'] = 0.5
 pp$Pathology = as.character(pp$Pathology)
+pp$AAD = cut(pp$Age.at.diagnosis, breaks = 3)
+
+pp = merge(pp, back[c('Samplename','Risk', 'quants')], by='Samplename')
+pp$Risk = as.character(pp$Risk)
+
+sfit = survfit( Surv(tstart, tstop, Diagnosis, type='interval') ~ Risk, data=pp, conf.int=0.95, conf.type='log', na.action=na.omit)
+ggsurv(sfit,cens.shape=3,lty.est=1,back.white=F) + xlim(0,5) + labs(y='Diagnosed', title='~Risk')
+
+cox = coxph( Surv(tstart, tstop, Diagnosis) ~ Risk, data=pp) 
+ggsurv(survfit(cox),cens.shape=3,lty.est=1,back.white=F,
+      main="coxph(Survival, Diagnosis) ~ Risk" ) + 
+      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox),2),"\n", nrow(pp), 'samples'))
+#summary(cox)
+
+sfit = survfit( Surv(tstart, tstop, Diagnosis, type='interval') ~ AAD, data=pp, conf.int=0.95, conf.type='log', na.action=na.omit)
+ggsurv(sfit,cens.shape=3,lty.est=1,back.white=F) + xlim(0,5) + labs(y='Diagnosed', title='~Age') 
+cox = coxph( Surv(tstart, tstop, Diagnosis) ~ AAD, data=pp) 
+ggsurv(survfit(cox),cens.shape=3,lty.est=1,back.white=F,
+      main="coxph(Survival, Diagnosis) ~ Age at diagnosis" ) + 
+      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox),2),"\n", nrow(pp), 'samples'))
+#summary(cox)
+
 
 sfit = survfit( Surv(tstart, tstop, Diagnosis, type='interval') ~ Pathology, data=pp, conf.int=0.95, conf.type='log', na.action=na.omit)
-ggsurv(sfit,cens.shape=3,lty.est=1,back.white=F)
-summary(sfit)
-
+ggsurv(sfit,cens.shape=3,lty.est=1,back.white=F) + xlim(0,5) + labs(y='Diagnosed', title='~Pathology')
 cox = coxph( Surv(tstart, tstop, Diagnosis) ~ Pathology, data=pp) 
 ggsurv(survfit(cox),cens.shape=3,lty.est=1,back.white=F,
       main="coxph(Survival, Diagnosis) ~ Pathology" ) + 
-      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox),2),"\n", nrow(pp), 'samples'))
-summary(cox)
+      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox),2),"\n", nrow(pp), 'samples')) + xlim(0,5)
+#summary(cox)
+
 
 ## All genomic regions
 sample.pred = merge( do.call(rbind.data.frame, prog.pred), dysplasia.df, by.x='Samplename', by.y='row.names' )
 sample.pred$Pathology = as.character(sample.pred$Pathology)
 
 gcols = grep('\\d+:', colnames(sample.pred), value=T)
-sample.pred = sample.pred[c('tstart', 'tstop','Diagnosis','Pathology',gcols)]
+sample.pred = sample.pred[c('tstart', 'tstop','Diagnosis','Pathology','Age.at.diagnosis',gcols)]
+
+sample.pred$Age.bracket = as.character(cut(sample.pred$Age.at.diagnosis, breaks=3))
 
 # all
 #cox = coxph( Surv(tstart, tstop, Diagnosis) ~., data=sample.pred)
 #ggsurv(survfit(cox))
 #summary(cox)
+```
+### Cox GLM selected features
 
-# glm selected features
+```{r echo=F, warning=F, echo=F}
+# glm selected features + Path
 cox2 = coxph( Surv(tstart, tstop, Diagnosis) ~ ., data=sample.pred[,c('tstart', 'tstop','Diagnosis', 'Pathology',  grep('^\\d+:', ch$label, value=T))]) 
-ggsurv(survfit(cox2))
-summary(cox2)
+ggsurv(survfit(cox2),cens.shape=3,lty.est=1,back.white=F,
+      main="coxph(Survival, Diagnosis) ~ GLM features + Pathology" ) + 
+      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox2),2),"\n", nrow(pp), 'samples')) 
+#summary(cox2)
+
+
+cox2 = coxph( Surv(tstart, tstop, Diagnosis) ~ ., data=sample.pred[,c('tstart', 'tstop','Diagnosis','Age.bracket', grep('^\\d+:', ch$label, value=T))]) 
+ggsurv(survfit(cox2),cens.shape=3,lty.est=1,back.white=F,
+      main="coxph(Survival, Diagnosis) ~ GLM features + Age" ) + 
+      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox2),2),"\n", nrow(pp), 'samples')) 
+#summary(cox2)
+
+cox2 = coxph( Surv(tstart, tstop, Diagnosis) ~ ., data=sample.pred[,c('tstart', 'tstop','Diagnosis',grep('^\\d+:', ch$label, value=T))]) 
+ggsurv(survfit(cox2),cens.shape=3,lty.est=1,back.white=F,
+      main="coxph(Survival, Diagnosis) ~ GLM features" ) + 
+      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox2),2),"\n", nrow(pp), 'samples')) 
+#summary(cox2)
+
+
+# chr arms only
+options(scipen=999) # turn sci notation off
+coxArms = coxph(Surv(tstart, tstop, Diagnosis) ~., data=sample.pred[,c('tstart', 'tstop','Diagnosis', with(arm.loc, paste(chrom, ':', start, '-', end, sep='')))])
+ggsurv(survfit(coxArms),cens.shape=3,lty.est=1,back.white=F,
+      main="coxph(Survival, Diagnosis) ~ chr arms" ) + 
+      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(coxArms),2),"\n", nrow(pp), 'samples')) 
+#summary(coxArms)
 
 # chr 17 only
 cox17 = coxph( Surv(tstart, tstop, Diagnosis) ~ ., data=sample.pred[,c('tstart', 'tstop','Diagnosis', grep('^17:',colnames(sample.pred), value=T))]) 
-ggsurv(survfit(cox17))
-summary(cox17)
+ggsurv(survfit(cox17),cens.shape=3,lty.est=1,back.white=F,
+      main="coxph(Survival, Diagnosis) ~ chr17" ) + 
+      labs(subtitle=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox17),2),"\n", nrow(pp), 'samples')) 
+#summary(cox17)
 
 cox11 = coxph( Surv(tstart, tstop, Diagnosis) ~ ., data=sample.pred[,c('tstart', 'tstop','Diagnosis', grep('^11:',colnames(sample.pred), value=T))]) 
 ggsurv(survfit(cox11))
-summary(cox11)
+#summary(cox11)
 
 cox13 = coxph( Surv(tstart, tstop, Diagnosis) ~ ., data=sample.pred[,c('tstart', 'tstop','Diagnosis', grep('^13:',colnames(sample.pred), value=T))]) 
 ggsurv(survfit(cox13))
-summary(cox13)
+#summary(cox13)
 
 ```
 
 
 ## CoxRFX
 
-```{r echo=F, message=F, warning=F, eval=F}
+```{r echo=F, message=F, warning=F, eval=T}
 plot.waldtest<-function(wt) {
   p = ggplot(wt, aes(coef.x, coef.y, color=p.value<0.05))
   if (length(grep('hazards', colnames(wt))) > 0) {
@@ -2214,20 +2479,28 @@ pathology = do.call(cbind.data.frame, lapply(unique(coxDF$Pathology), function(p
 }))
 colnames(pathology) = unique(coxDF$Pathology)
 
+
+# age = do.call(cbind.data.frame, lapply(unique(coxDF$Age.at.diagnosis), function(p) {
+#   cbind( as.integer(coxDF$Age.at.diagnosis == p))
+# }))
+# colnames(age) = unique(coxDF$Age.at.diagnosis)
+age = coxDF$Age.at.diagnosis
+
+
 ## GLM regions only
-coxDF = cbind(coxDF[,1:3],pathology[,c('BE','ID')], coxDF[,grep('^\\d+:', ch$label, value=T)])
+coxDF = cbind(coxDF[,1:3],pathology[,c('BE','ID')], age, coxDF[,grep('^\\d+:', ch$label, value=T)])
 coxDF$Pathology = NULL
-dim(coxDF)
 
 gcols = colnames(coxDF)
 cols = grep('^\\d+', colnames(coxDF))
 colnames(coxDF)[cols] = paste('chr', gsub(':|-','.', grep('^\\d+', colnames(coxDF), value=T)), sep='')
 
+coxSM = cbind(coxDF[,c(1:3)], StandardizeMagnitude(coxDF[,-c(1:3)]))
 
-surv = with(coxDF, Surv(tstart, tstop, Diagnosis))
-
-groups = factor(c(rep('clinical',2),c(rep('genomic', length(grep('\\d+', colnames(coxDF)))))))
-rfx = CoxRFX(coxDF[,-c(1:3)], surv, groups, verbose=F, nu=1)
+#surv = with(coxDF, Surv(tstart, tstop, Diagnosis))
+surv = with(coxSM, Surv(tstart, tstop, Diagnosis))
+groups = factor(c(rep('clinical',3),c(rep('genomic', length(grep('\\d+', colnames(coxDF)))))))
+rfx = CoxRFX(coxSM[,-c(1:3)], surv, groups, verbose=T, nu=1)
 summary(rfx)
 
 plot(rfx)
@@ -2239,15 +2512,32 @@ wt$label = sub('\\.', '-', sub('\\.', ':', sub('chr', '', rownames(wt))))
 wt = merge(wt, ch[,c('label','hazards', 'coef','stability')], by='label', all=T) 
 
 wt[is.na(wt$hazards), c('hazards', 'coef.y')] = 0
-
-
 plot.waldtest(wt) + labs(x='RFX coef',y='GLM coef', title='RFX vs GLM coefficients', subtitle='Labeled points have a significant p-value in RFX (except BE/ID)')
+
+
+options(scipen = 999)
+# arms only
+arms = with(arm.loc, paste(chrom, ':', start, '-', end, sep=''))
+coxDfArms = coxDF[,arms]
+colnames(coxDfArms) = paste('chr', gsub(':|-','.', grep('^\\d+', colnames(coxDfArms), value=T)), sep='') 
+
+surv = with(coxDF, Surv(tstart, tstop, Diagnosis))
+groups = factor(c(rep('clinical',3), rep('genomic', ncol(coxDfArms))))
+
+rfx = CoxRFX( cbind.data.frame(coxSM[,c('ID','BE','age_10')], coxDfArms), surv, groups, verbose=T, nu=1)
+summary(rfx)
+
+plot(rfx)
+wt = WaldTest(rfx)
+survConcordance(surv ~ predict(rfx))
+
 
 ```
 
 
-# TODO: Relative risk
+
 ```{r, eval=F}
+# TODO: Relative risk
 pred = predict(f, newx=dysplasia.df, s=performance.at.1se$`0.9`$lambda)
 ?predict
 ?predict.glm

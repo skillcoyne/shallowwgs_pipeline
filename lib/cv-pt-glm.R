@@ -66,10 +66,6 @@ set.up.data<-function(tile.files, samplenames, labels) {
   return(dysplasia.df)
 }
 
-
-
-
-
 add.demo.tocv <- function(patient.info, df) {
 
   patient.info = patient.info[match(rownames(df), patient.info$Samplename),]
@@ -115,9 +111,8 @@ unit.var <- function(x) {
   return((x-mean(x,na.rm=T))/sd(x,na.rm=T) )
 }
 
-
 score.cx <- function(pt.d, df) {
-  get.length.variance <- function(pd) {
+  get.length.variance <- function(pd) { # per patient
     samples = grep('^D', colnames(pd$seg.vals), value=T)
     len.var = var(pd$seg.vals$end.pos - pd$seg.vals$start.pos) # length won't vary between samples
     
