@@ -254,9 +254,7 @@ cnLegend = get.legend(globalCN.plot)
 dys.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCNdf, Status == 'Progressor' & Pathology %in% c('LGD','HGD','IMC'))$variable)), ')', sep=''),
               'Non-Progressor'=paste('Non-Progressor (n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor' & Pathology %in% c('LGD','HGD','IMC'))$variable)),')', sep=''))
 
-globalnHGDCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology %in% c('LGD','HGD','IMC')), labeller(Status=dys.status, chr=label_value)) + labs(title='LGD/HGD/IMC Only')
-
-
+#globalnHGDCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology %in% c('LGD','HGD','IMC')), labeller(Status=dys.status, chr=label_value)) + labs(title='LGD/HGD/IMC Only')
 
 ## No HGD
 # `%nin%` = Negate(`%in%`)
@@ -272,11 +270,14 @@ nb.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCN
 globalBECN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology == 'BE'), labeller(Status=nb.status, chr=label_value)) + labs(title='NDBE samples only')
 
 
-globalCN.plot + theme(legend.position = 'none')
+gp = globalCN.plot + theme(legend.position = 'none') + labs(y='mean adj. seg.', title='All samples') + theme(text=element_text(size=12))
+ggsave(filename='plots/globalCN.png', plot=gp, width=16, height=4.6, units='in', dpi=300)
 
-globalnHGDCN.plot + theme(legend.position = 'none')
 
-globalBECN.plot + theme(legend.position = 'none')
+#globalnHGDCN.plot + theme(legend.position = 'none')
+
+gbe = globalBECN.plot + theme(legend.position = 'none') + labs(y='mean adj.seg.', title="Non-Dysplastic Barrett's Samples") + theme(text=element_text(size=12))
+ggsave(filename='plots/globalBECN.png', plot=gbe, width=16, height=4.6, units='in', dpi=300)
 
 
 # dfpts = subset(globalCNdf, Patient %in% c('57','76') & seg.type != 'arms')
@@ -754,31 +755,45 @@ Based on these curves we get our best AUC at ~0.36.  Currently we are using 0.5 
 
 load(file=paste(cache.dir, 'insilico_splits.Rdata', sep='/'), verbose=T)
 
-# m = melt(insilico.rocs, measure.vars = 'auc')
-# ggplot(m, aes(variable,value)) + ylim(0,1) +
-#   geom_boxplot(fill='mintcream', color='grey55') + geom_jitter(width=0.2, color='darkblue', size=1.5, show.legend = F) + 
-#   geom_text(data=subset(m, value %in% range(value)), aes(label=round(value,2)), vjust=0.02, hjust=0.2) +
-#   plot.theme + labs(x='',y='AUC',title='AUC', subtitle='20 insilico 20:69 splits')
-
 ```
 
 ```{r prediction_cutoff, echo=F, message=F, warning=F, fig.height=7, fig.width=7}
 preds = do.call(rbind.data.frame, lapply(pg.samp, function(df) df[c('Status','Prediction')]))
 roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
-roc$model = 'CN Model'
+roc$model = 'discovery'
+roc$is = 'discovery'
 
-multi.roc.plot(list(roc), colors=brewer.pal(3,'Greys')[3]) + labs(title='Discovery cohort ROC')
+droc = multi.roc.plot(list(roc), colors=brewer.pal(3,'Greys')[3]) + labs(title='Discovery cohort ROC')
+ggsave(filename='plots/discovery_roc.png', plot=droc, width=6, height=4, units='in', dpi=300)
 
 
-insilico.rocs = rbind(insilico.rocs, c(pROC::ci.auc(roc), pROC::coords(roc, 'best')))
+insilico.rocs[['discovery']] = roc
 
-insilico.rocs[1:20,'split'] = paste('in-silico', 1:20)
-insilico.rocs[21,'split'] = 'discovery'
+df = do.call(rbind, lapply(insilico.rocs, function(r) 
+    cbind.data.frame('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'model'=r$model, 'is'=r$is) 
+))
 
-ggplot(insilico.rocs, aes(split, auc)) + geom_point() + ylim(0,1) +
-  geom_errorbar(aes(ymin=auc.ci.min, ymax=auc.ci.max), width=0.2) + 
-  coord_flip() + plot.theme + labs(y='AUC', x='', title='AUC per split', subtitle='20 insilico 20:69 splits')
+p = ggplot(df, aes(Specificity, Sensitivity,color=is)) + geom_line(size=1) + 
+    geom_line(data=subset(df, model == 'discovery'), color='red', size=1) +
+    scale_x_reverse() +
+    scale_color_brewer(palette='Blues') +
+    labs(title='ROC, all splits', x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme +
+    theme(legend.position = 'none')
+p
 
+ggsave(filename='plots/splits_roc.png', plot=p, width=6, height=6, units='in', dpi=300)
+
+
+ir = ggplot(insilico.rocs, aes(is, auc, color=split)) + ylim(0,1) +
+  geom_hline(data=m, aes(yintercept=auc, linetype=line), color='grey32', show.legend=F) + 
+  geom_point(size=2) + geom_errorbar(aes(ymin=auc.ci.min, ymax=auc.ci.max), width=0.3) + 
+  geom_text(data=m, aes(label=paste(variable, round(auc, 2), sep='\n')), color='grey32', nudge_y=0, show.legend=F) + 
+  scale_linetype_manual(values=c('dotdash','longdash')) +
+  plot.theme + scale_color_brewer(palette='Set1', name='Type') +
+  theme(axis.text.x=element_blank(), legend.position = 'bottom') +
+  labs(y='AUC', x='Data splits', title='AUC per split', subtitle='20 insilico 20:69 splits')
+ir
+ggsave(filename='plots/auc_splits.png', plot=ir, width=7, height=8, units='in', dpi=300)
 
 
 # To find the auc at a given spec or sens
@@ -831,7 +846,7 @@ Based on HGD/IMC/LGD
 pathsamples = patient.info[,c('Pathology','Status')]
 
 pathroc = pROC::roc((as.integer(pathsamples$Status)-1), ifelse(pathsamples$Pathology %in% c('LGD','HGD','IMC'), 1, 0) )
-pathroc$model = 'Dysplasia (HGD & LGD)'
+pathroc$model = 'HGD & LGD'
 
 hgdpathroc = pROC::roc((as.integer(pathsamples$Status)-1), ifelse(pathsamples$Pathology %in% c('HGD','IMC'), 1, 0) )
 hgdpathroc$model = 'HGD Only'
@@ -841,11 +856,9 @@ grid.arrange(roc.plot(pathroc, 'Pathology (LGD,HGD,IMC)'), roc.plot(hgdpathroc, 
 
 ### Per Endoscopy ROCs
 ```{r, echo=F, warning=F, message=F,fig.height=4, fig.width=4}
-
 pendo = do.call(rbind, pg.samp) %>% group_by(Patient, Status, Hospital.Research.ID, PID ) %>% summarise(
   'max'=max(Prediction), 'avg'=mean(Prediction), 'n'=length(PID)
 )
-
 
 rocEndoM = pROC::roc(Status ~ max, data=pendo, ci=T, of='thresholds')
 pROC::coords(rocEndoM, 'best')
@@ -919,7 +932,6 @@ get.roc.stat<-function(roc, x='best') {
 get.auc.at<-function(roc, foc='spec', p=c(1,0.99)) {
 # To find the auc at a given spec or sens
   pROC::auc(roc, partial.auc=p, partial.auc.focus=foc, partial.auc.correct=T)
-  
 }
 
 # get.auc.at(p53roc)
@@ -931,18 +943,22 @@ m = rbind.data.frame(
       get.roc.stat(p53roc),
       get.roc.stat(hgdpathroc),
       get.roc.stat(pathroc),
-      get.roc.stat(roc, 0.6))
-m$model = factor(m$model, levels=c('p53 IHC','HGD Only','Dysplasia (HGD & LGD)','CN Model'), ordered = T)
+      get.roc.stat(roc))
+m$model = factor(m$model, levels=c('p53 IHC','HGD Only','HGD & LGD','CN Model'), ordered = T)
 
 rocList = list(roc,pathroc,hgdpathroc,p53roc)
 
-cols = brewer.pal(11, "PRGn")
+cols = brewer.pal(4, "PRGn")
 dodge = position_dodge(width=0.9)
-ggplot(melt(subset(m, Measure == 'AUC'), measure.vars='value'), aes(x=model, y=value*100, ymin=CI.min*100, ymax=CI.max*100, group=Measure, fill=Measure)) + 
+
+comp = ggplot(melt(subset(m, Measure == 'AUC'), measure.vars='value'), aes(x=model, y=value*100, ymin=CI.min*100, ymax=CI.max*100, group=Measure, fill=Measure)) + 
   geom_bar(stat='identity',position=dodge) + geom_errorbar(position=dodge, width=0.3, color='black' ) + 
-  geom_text(aes(label=paste(round(value,2)*100,'%',sep=''), y=1, vjust=-1 ), position=dodge, color='white')  +
+  geom_text(aes(y=(value*100)-4, label=paste(round(value,2)*100,'%',sep='')), position=dodge, color='white')  +
   scale_fill_manual(values=cols, name='') + plot.theme + 
   theme(legend.position = 'none', axis.text.x = element_text(angle=45, hjust=1)) + labs(x='', y='AUC', title='ROC Comparison') 
+comp
+
+ggsave('plots/compare_auc.png', plot=comp, width=6, height=8, units="in", limitsize=F, dpi = 300)
 
 ```
 
@@ -1068,11 +1084,14 @@ pred.confidence$Risk = factor(pred.confidence$Risk, levels=c('Low','Moderate','H
 ```
 
 ```{r pcalib, echo=F, warning=F, message=F, fig.width=8, fig.height=6}
-ggplot(pred.confidence, aes(mn, perc)) + 
+pcal = ggplot(pred.confidence, aes(mn, perc)) + 
   geom_rect(aes(xmin=r1, xmax=r2, ymin=0,ymax=1, fill=Risk), alpha=0.6) + scale_fill_manual(values=riskCols) +
-  geom_point() + geom_text(aes(label=paste(r1,r2,sep='-')), nudge_x=0.05) +
+  geom_point() + #geom_text(aes(label=paste(r1,r2,sep='-')), nudge_x=0.05) +
   geom_errorbar(aes(ymin=ci.low, ymax=ci.high), width=0.01) + labs(x='Mean prediction', y='Ratio of `P` patients', title='Prediction calibration') +
-  scale_color_manual(values=riskCols) + plot.theme + theme(legend.position = 'none')
+  scale_color_manual(values=riskCols) + plot.theme + theme(legend.position = 'none', text=element_text(size=10))
+pcal
+
+ggsave(filename='plots/pred_calib.png', plot=pcal, width=6, height=6, units='in', dpi=300)
 ```
 
 ```{r probhist, echo=F, warning=F, message=F, fig.width=8, fig.height=6}
@@ -1100,15 +1119,22 @@ ggplot(back, aes(1:nrow(back), Prediction, color=Risk)) +
 
 myPal = rev(RColorBrewer::brewer.pal(11, 'RdYlBu'))
 
-ggplot(back, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, show.legend = F) +
+unadjRR = ggplot(back, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, show.legend = F) +
   #scale_fill_distiller(palette = 'RdYlBu', type='div',name='P(P)') +
   scale_fill_gradientn(colors = myPal,  name='') + 
   labs(y='n Samples', x='Relative Risk', title='Unadjusted relative risk') + plot.theme
+unadjRR
 
-ggplot(back, aes(Prediction)) + geom_histogram(aes(fill=..x..), breaks=cuts, show.legend = F) +
+ggsave(filename='plots/unadj_relrisk.png', plot=unadjRR, width=6, height=5, units='in', dpi=300)
+
+predhist = ggplot(back, aes(Prediction)) + geom_histogram(aes(fill=..x..), breaks=cuts, show.legend = F) +
     scale_fill_gradientn(colors = myPal,  name='') + 
   #scale_fill_distiller(palette = 'RdYlBu', type='div',name='P(P)') +
     plot.theme + labs(title='Predictions, all samples model', y='n Samples', x='Probability') 
+predhist
+
+ggsave(filename='plots/pred_hist.png', plot=predhist, width=5, height=5, units='in', dpi=300)
+
 
 ggplot(back, aes(OR, Prediction, color=Prediction)) + geom_point(show.legend = F) + 
   scale_color_gradientn(colors = myPal,  name='')  + plot.theme
@@ -1119,8 +1145,8 @@ ggplot(back, aes(OR, Prediction, color=Prediction)) + geom_point(show.legend = F
 
 ```{r, echo=F, warning=F, message=F, fig.height=10, fig.width=20}
 
-min.theme = theme(text=element_text(size=10), panel.background=element_blank(), strip.background=element_rect(fill="grey97"), 
-                   strip.text = element_text(size=10), axis.text = element_blank(),
+min.theme = theme(text=element_text(size=8), panel.background=element_blank(), strip.background=element_rect(fill="grey97"), strip.text.y = element_text(size=6),
+                   strip.text.x = element_text(size=12), axis.text = element_blank(), axis.ticks = element_blank(),
                    axis.line=element_line(color='black'), panel.grid.major.y =element_line(color='grey95'), panel.grid.major.x = element_blank(),
                    panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing.x = unit(0, 'lines'), panel.spacing.y = unit(0.1, 'lines')   ) 
 
@@ -1141,7 +1167,11 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
     fills = c(fills, rep(altcolor[ac], length(which(table(subset(df, Endoscopy.Year == yr)$ogj) > 0))))
   }
     
-  p = ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line=F)) +
+  blanklabel <- function(s) {
+    return('')
+  }
+  
+  p = ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
       geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
       scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
       labs(title=title, x='') + min.theme  
@@ -1171,12 +1201,12 @@ back$ogj[which(back$nl >= 7)] = 3
 
 ogjLimits = levels(factor(back$ogj, ordered = T))
 
-p1 = mtn.spatial(subset(globalCNdf, Patient == 48 & seg.type != 'arms'), back, ogjLimits, 'Patient 48 (P)')
+#p1 = mtn.spatial(subset(globalCNdf, Patient == 48 & seg.type != 'arms'), back, ogjLimits, 'Patient 48 (P)')
 p2 = mtn.spatial(subset(globalCNdf, Patient == 20 & seg.type != 'arms'), back, ogjLimits,'Patient 20 (P)' )
-p3 = mtn.spatial(subset(globalCNdf, Patient == 60 & seg.type != 'arms'), back, ogjLimits,'Patient 60 (P)' )
+#p3 = mtn.spatial(subset(globalCNdf, Patient == 60 & seg.type != 'arms'), back, ogjLimits,'Patient 60 (P)' )
 
-p4 = mtn.spatial(subset(globalCNdf, Patient == 3 & seg.type != 'arms'), back,ogjLimits,'Patient 3 (NP)' )
-p5 = mtn.spatial(subset(globalCNdf, Patient == 15 & seg.type != 'arms'), back,ogjLimits,'Patient 15 (NP)' )
+#p4 = mtn.spatial(subset(globalCNdf, Patient == 3 & seg.type != 'arms'), back,ogjLimits,'Patient 3 (NP)' )
+#p5 = mtn.spatial(subset(globalCNdf, Patient == 15 & seg.type != 'arms'), back,ogjLimits,'Patient 15 (NP)' )
 p6 = mtn.spatial(subset(globalCNdf, Patient == 51 & seg.type != 'arms'), back,ogjLimits,'Patient 51 (NP)' )
 
 back$ogj = NULL
@@ -1186,7 +1216,10 @@ back$ogj = NULL
 
 ```{r, echo=F, fig.width=2, fig.height=4}
 
-grid.arrange(p1$legend)
+grid.arrange(p2$legend)
+
+ggsave(filename='plots/spatial_mtn_pt20.png', plot=grid.arrange(p2$grob), width=14, height=6, units='in', dpi=300)
+ggsave(filename='plots/spatial_mtn_pt51.png', plot=grid.arrange(p6$grob), width=14, height=6, units='in', dpi=300)
 
 ```
 
@@ -1267,11 +1300,15 @@ riskPath$Status = factor(riskPath$Status, levels=c('Non-Progressor','Progressor'
 
 pathTotal = riskPath %>% group_by(Status, Pathology) %>% summarise('nPath'=unique(nPath))
 
-ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) + 
+rp = ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) + 
   scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) +
   geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), position=position_stack(), size=4) +
   geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
-  facet_grid(~Status) + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom')
+  facet_grid(~Status) + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom', text=element_text(size=10))
+rp
+
+ggsave(filename='plots/pred_by_path.png', plot=rp, width=9, height=7, units='in', dpi=300)
+
 
 ```
 
@@ -1284,13 +1321,14 @@ ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk
 
 p53Path$p53.Status = factor(p53Path$p53.Status, ordered = T)
 p53Path = arrange(p53Path, Pathology, p53.Status)
-col = brewer.pal(11, "PRGn")[c(9,3)]
-ggplot(p53Path, aes(Pathology, ratio*100, group=Pathology, fill=p53.Status)) + geom_bar(stat='identity', position = position_stack()) +
+col = brewer.pal(11, "PRGn")[c(10,2)]
+rp = ggplot(p53Path, aes(Pathology, ratio*100, group=Pathology, fill=p53.Status)) + geom_bar(stat='identity', position = position_stack()) +
   scale_fill_manual(values=col, name='p53 IHC', labels=c('Normal','Aberrant')) + 
   geom_text(aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101)) +
-  geom_text(aes(label=paste(ratio*100,'%',sep='')), position=position_stack(vjust = 0.5), size=5) +
+  geom_text(aes(label=paste(ratio*100,'%',sep='')), position=position_stack(vjust = 0.5), size=5,color='white') +
   plot.theme + labs(title='Samples predicted by aberrant p53 IHC', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom')
-
+rp
+ggsave(filename='plots/p53_pred.png', plot=rp, width=7, height=6, units='in', dpi=300)
 
 ```
 
@@ -1340,13 +1378,15 @@ tmp = tmp %>% group_by(brks) %>% summarise( 'mean(P)'=mean(Prediction),'sem(P)'=
 
 endos.m = arrange(merge(endos.m,tmp), brks)
 
-ggplot(endos.m, aes(x=brks, y=pred.r*100, ymin=(pred.r-`sem(P)`)*100, ymax=(pred.r+`sem(P)`)*100, group=brks)) + ylim(0,105) +
+rp = ggplot(endos.m, aes(x=brks, y=pred.r*100, ymin=(pred.r-`sem(P)`)*100, ymax=(pred.r+`sem(P)`)*100, group=brks)) + ylim(0,105) +
   geom_bar(stat='identity', fill='darkred', alpha=0.8, show.legend = F) + 
   geom_errorbar(color='grey21', width=0.2) +
   geom_text(aes(y=3, label=paste(round(pred.r*100), '%', sep='')), color='white') +
   geom_text(aes(y=pred.r*100-5, label=paste('n=',n.endo,'\ns=',n.samp,sep='')), color='white') + 
   labs(x='Months prior to endpoint', y='Percent predicted', title='Predictions prior to final endoscopy', subtitle='n = #endoscopies, s = #samples') +
-  plot.theme + theme( axis.text.x=element_text(angle=45,hjust=1)) 
+  plot.theme + theme( axis.text.x=element_text(angle=45,hjust=1), text=element_text(size=12)) 
+
+ggsave(filename='plots/pred_endo.png', plot=rp, width=9, height=7, units='in', dpi=300)
 
 #endos$months.before.final = endos$months.before.final*-1
 #me = endos %>% group_by(Patient) %>% summarise('max.endo' = max(i), 'months' = min(months.before.final))
@@ -1406,10 +1446,10 @@ p = pred.tiles(subset(back, Patient %in% c(6)), ncol=1, cols=myPal, probs=T) + l
 tilesLegend = get.legend(p)
 p + theme(legend.position = 'none')
 
-pred.tiles(subset(back, Patient %in% c(6)), ncol=1, cols=myPal, probs=T, OR=F) + labs(title='') + theme(legend.position = 'none')
-pred.tiles(subset(back, Patient %in% c(48)), ncol=1, cols=myPal, probs=T) + labs(title='') + theme(legend.position = 'none')
-pred.tiles(subset(back, Patient %in% c(33)), ncol=1, cols=myPal, probs=T) + labs(title='')+ theme(legend.position = 'none')
-pred.tiles(subset(back, Patient %in% c(89)), ncol=1, cols=myPal, probs=T) + labs(title='')+ theme(legend.position = 'none')
+#pred.tiles(subset(back, Patient %in% c(6)), ncol=1, cols=myPal, probs=T, OR=F) + labs(title='') + theme(legend.position = 'none')
+#pred.tiles(subset(back, Patient %in% c(48)), ncol=1, cols=myPal, probs=T) + labs(title='') + theme(legend.position = 'none')
+#pred.tiles(subset(back, Patient %in% c(33)), ncol=1, cols=myPal, probs=T) + labs(title='')+ theme(legend.position = 'none')
+#pred.tiles(subset(back, Patient %in% c(89)), ncol=1, cols=myPal, probs=T) + labs(title='')+ theme(legend.position = 'none')
 ```
 
 ```{r, echo=F, warning=F, message=F, fig.width=5, fig.height=15 }
@@ -1445,15 +1485,25 @@ write.table(summary.t, quote=F, sep='\t', row.names = F)
 ```{r, echo=F, message=F, warning=F}
 back = back %>% group_by(Patient) %>% mutate( 'pred.ratio'=round(sum(Prediction)/length(Prediction),2))
 
-p = pred.tiles(transform(subset(back, Status == 'NP'), Patient=reorder(Patient, pred.ratio)), cols=myPal, probs=T, nrow=2) + labs(title='Non-Progressors') 
-riskLegend = get.legend(p)
-p = p + theme(legend.position = 'none')
-ggsave('npg_heatmap.png', plot = p, scale = 1, width = 52, height = 8, units = "in", limitsize = F, dpi = 300)
- 
-p = pred.tiles(transform(subset(back, Status == 'P'), Patient=reorder(Patient, -pred.ratio)), probs=T, cols=myPal,nrow=2) + labs(title='Progressors') + theme(legend.position = 'none')
-ggsave('pg_heatmap.png', plot = p, scale = 1, width = 52, height = 8, units = "in", limitsize = F, dpi = 300)
+p1 = pred.tiles(subset(back, Status == 'NP'), cols=myPal, probs=T, nrow=2) + labs(title='Non-Progressors') 
+riskLegend = get.legend(p1)
+p1 = p1 + theme(legend.position = 'bottom')
+riskLegendLong = get.legend(p1)
 
-ggsave('risk_legend.png', plot=grid.arrange(riskLegend), scale=1, dpi=300)
+
+p1 = p1 + theme(legend.position = 'none')
+
+p2 = pred.tiles(subset(back, Status == 'P'), probs=T, cols=myPal,nrow=2) + labs(title='Progressors') + theme(legend.position = 'none')
+
+ggsave('plots/pred_heatmap.png', plot=grid.arrange(p2,p1,nrow=2), width=52, height=16, units="in", limitsize=F, dpi = 300)
+
+ggsave('plots/npg_heatmap.png', plot=p1, width=52, height=8, units="in", limitsize=F, dpi = 300)
+ggsave('plots/pg_heatmap.png', plot=p2, width=52, height=8, units="in", limitsize=F, dpi = 300)
+
+ggsave('plots/risk_legend.png', plot=grid.arrange(riskLegend), width=2,height=4, dpi=300)
+
+ggsave('plots/risk_legend_long.png', plot=grid.arrange(riskLegendLong), width=8,height=2, dpi=300)
+
 
 ```
 
@@ -1564,11 +1614,17 @@ genesGR = makeGRangesFromDataFrame(genes, keep.extra.columns = T)
 chGR = makeGRangesFromDataFrame(chh, keep.extra.columns = T)
 
 ov = findOverlaps(chGR, genesGR)
-genes = as.data.frame(genesGR[unique(subjectHits(ov))])
-colnames(genes)[1] = c('chr')
+#genes = as.data.frame(genesGR[unique(subjectHits(ov))])
+#colnames(genes)[1] = c('chr')
 
-plot.cn.chr(globalCNdf, chrom='17', chr.lengths, genes=genes, haz=chh) + labs(
-title="Segment Values Samples", subtitle=paste('NonP:Prog - ', paste(table(patient.info$Status), collapse=':'))) + theme(legend.position = 'none')
+
+g17 = plot.cn.chr(globalCNdf, chrom='17', chr.lengths, genes=genes, haz=chh, label=labeller(chr=label_both, Status=n.status)) + labs(
+title="All Samples") + theme(legend.position = 'none')
+g17
+
+g17 = g17 + theme(text=element_text(size=11), strip.text = element_text(size=11))
+ggsave(filename='plots/chr17.png', plot=g17, width=10, height=5, units='in', dpi=300)
+
 ```
 
 
@@ -1677,16 +1733,7 @@ features[unique(subset(distanceTSG, distanceToTSG == 0)$features)]
 # But this is double the actual number we see
 ncol(dysplasia.df)/round(avgTSGdist/5e6)
 
-
-
-
-
-
-
 length(which(round((subset(distanceTSG, distanceToTSG > 0)$distanceToTSG/5e6)-0.5) == round((avgTSGdist/5e6)-0.5)))
-
-
-
 ```
 
 
@@ -1742,7 +1789,7 @@ n.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(valCNdf, 
 valCNdf = valCNdf %>% group_by(Status, start, end) %>% mutate( 'mean.value' = value/length(unique(variable)) )
 valCNdf$mean.value = valCNdf$value # but not going to use it 
 
-cn.mtn.plot(subset(valCNdf, seg.type != 'arms'), labeller(Status=n.status, chr=label_value))
+cn.mtn.plot(subset(valCNdf, seg.type != 'arms'), labeller(Status=n.status, chr=label_value)) + theme(legend.position = 'none')
 
 df = rbind(cbind(valCNdf, 'set'=rep('Val', nrow(valCNdf))), cbind(globalCNdf, 'set'=rep('Train', nrow(globalCNdf)) ) )
 
@@ -1816,9 +1863,21 @@ ggplot(m, aes(Patient,  value*100, group=variable, fill=variable)) + geom_bar(st
   facet_grid(~Status, scales='free_x') + labs(y='Percent of samples', title='Validation patient set') + plot.theme
 ```
 
-```{r echo=F, warning=F, message=F, fig.height=5,fig.width=25}
-pred.tiles(subset(back.v, Status == 'P'), cols=myPal, probs=T, nrow=1) + labs(title='Validation Progressors') + theme(legend.position = 'none')
-pred.tiles(subset(back.v, Status == 'NP'), cols=myPal, probs=T, nrow=1) + labs(title='Validation Non-Progressors') + theme(legend.position = 'none')
+```{r echo=F, warning=F, message=F, fig.height=10,fig.width=25}
+back.v$Patient = factor(as.numeric(back.v$Patient), ordered=T)
+
+p1 = pred.tiles(subset(back.v, Status == 'P'), cols=myPal, probs=T, nrow=1) + labs(title='Validation Progressors', x='') + theme(legend.position = 'bottom') 
+valLeg = get.legend(p1)
+p1 = p1 + theme(legend.position = 'none')
+p2 = pred.tiles(subset(back.v, Status == 'NP'), cols=myPal, probs=T, nrow=1) + labs(title='Validation Non-Progressors') + theme(legend.position = 'none')
+
+grid.arrange(p1, p2, nrow=2)
+
+ggsave(filename='plots/val_heatmap.png', plot=grid.arrange(p1, p2, nrow=2), width=18, height=6, units='in', dpi=300)
+
+ggsave(filename='plots/val_leg.png', plot=valLeg, width=4, height=2, units='in', dpi=300)
+
+
 ```
 
 ```{r echo=F, warning=F, message=F, fig.height=5,fig.width=8}
@@ -1847,10 +1906,15 @@ riskPath$Status = factor(riskPath$Status, levels=c('Non-Progressor','Progressor'
 
 pathTotal = riskPath %>% group_by(Status, Pathology) %>% summarise('nPath'=unique(nPath))
 
-ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) +   scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) + 
+pr = ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) +   scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) + 
   geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), position=position_stack(), size=4, show.legend = F) +
   geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
   facet_grid(~Status) + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom')
+pr
+
+ggsave(filename='plots/val_riskpath.png', plot=pr, width=7, height=7, units='in', dpi=300)
+
+
 
 ```
 
@@ -1926,7 +1990,7 @@ write.table(summary.v, sep='\t', quote=F, row.names = F)
 
 ## Vignettes
 
-```{r, echo=F, warning=F, message=F, fig.width=8, fig.height=5}
+```{r, echo=F, warning=F, message=F, fig.width=5, fig.height=5}
 vign.pts = as_tibble(subset(sum.patient.data, Patient %in% c(3, 33, 34, 49, 56, 20), select=c('Status','Patient','age.diagnosis', 'smoking', 'C','M', 'initial.endo','final.endo', 'total.endos','total.samples')))
 colnames(vign.pts) = c('Status','Patient','Age at Diagnosis','Smoker','Circumference', 'Maximal length', 'Intial Endoscopy','Final Endoscopy', 'Total Endoscopies','Total Samples')
 
@@ -1934,25 +1998,44 @@ colnames(vign.pts) = c('Status','Patient','Age at Diagnosis','Smoker','Circumfer
 ## P
 p = vig.plot(df=subset(back, Patient == 34),info= subset(patient.info, Patient == 34),cols=riskCols) + theme(legend.position = 'bottom')
 vigLeg = get.legend(p)
-p + theme(legend.position = 'none')
-vig.plot(subset(back, Patient == 56), subset(patient.info, Patient == 56),cols=riskCols) + theme(legend.position = 'none')
-vig.plot(subset(back, Patient == 20), subset(patient.info, Patient == 20),cols=riskCols) + theme(legend.position = 'none')
-vig.plot(subset(back, Patient == 86), subset(patient.info, Patient == 86),cols=riskCols) + theme(legend.position = 'none')
+p = p + theme(legend.position = 'none')
+ggsave('plots/vig_34.png', plot=p, width=6, height=6,dpi=300)
 
+p = vig.plot(subset(back, Patient == 56), subset(patient.info, Patient == 56),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_56.png', plot=p, width=6, height=6,dpi=300)
+
+p = vig.plot(subset(back, Patient == 20), subset(patient.info, Patient == 20),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_20.png', plot=p, width=6, height=6,dpi=300)
+
+p = vig.plot(subset(back, Patient == 86), subset(patient.info, Patient == 86),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_86.png', plot=p, width=6, height=6,dpi=300)
+
+print(p)
 
 ## NP
-vig.plot(subset(back, Patient == 3), subset(patient.info, Patient == 3),cols=riskCols) + theme(legend.position = 'none')
-vig.plot(df=subset(back, Patient == 23),info= subset(patient.info, Patient == 23),cols=riskCols) + theme(legend.position = 'none')
-vig.plot(subset(back, Patient == 33), subset(patient.info, Patient == 33),cols=riskCols) + theme(legend.position = 'none')
-vig.plot(subset(back, Patient == 49), subset(patient.info, Patient == 49),cols=riskCols) + theme(legend.position = 'none')
-vig.plot(subset(back, Patient == 51), subset(patient.info, Patient == 51),cols=riskCols) + theme(legend.position = 'none')
-           
-vig.plot(subset(back, Patient == 6), subset(patient.info, Patient == 6),cols=riskCols) + theme(legend.position = 'none')
-vig.plot(subset(back, Patient == 54), subset(patient.info, Patient == 54),cols=riskCols) + theme(legend.position = 'none')
-```
+p = vig.plot(subset(back, Patient == 3), subset(patient.info, Patient == 3),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_3.png', plot=p, width=6, height=6,dpi=300)
 
-```{r, echo=F, warning=F, message=F, fig.width=4, fig.height=1}
-grid.arrange(vigLeg)
+p = vig.plot(df=subset(back, Patient == 23),info= subset(patient.info, Patient == 23),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_23.png', plot=p, width=6, height=6,dpi=300)
+
+p = vig.plot(subset(back, Patient == 33), subset(patient.info, Patient == 33),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_33.png', plot=p, width=6, height=6,dpi=300)
+
+p = vig.plot(subset(back, Patient == 49), subset(patient.info, Patient == 49),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_49.png', plot=p, width=6, height=6,dpi=300)
+
+p = vig.plot(subset(back, Patient == 51), subset(patient.info, Patient == 51),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_51.png', plot=p, width=6, height=6,dpi=300)
+           
+p = vig.plot(subset(back, Patient == 6), subset(patient.info, Patient == 6),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_6.png', plot=p, width=6, height=6,dpi=300)
+
+p = vig.plot(subset(back, Patient == 54), subset(patient.info, Patient == 54),cols=riskCols) + theme(legend.position = 'none')
+ggsave('plots/vig_54.png', plot=p, width=6, height=6,dpi=300)
+
+print(p)
+
 ```
 
 ### Recommendations

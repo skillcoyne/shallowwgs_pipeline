@@ -7,7 +7,7 @@ get.legend<-function(a.gplot){
   return(legend)
 }
 
-plot.theme = theme(text=element_text(size=14, face='bold'), panel.background=element_blank(), strip.background =element_rect(fill="lightcyan2"),  
+plot.theme = theme(text=element_text(size=14, face='bold'), panel.background=element_blank(), strip.background =element_rect(fill="grey88"),  
                    strip.text = element_text(size=14, face='bold'), 
                    axis.line=element_line(color='black'), panel.grid.major=element_line(color='grey90'),
                    panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing = unit(0.1, 'lines')  ) 
@@ -143,16 +143,16 @@ pred.tiles <- function(df, probs=F, OR=F, cols=c('green3','orange','red3'), ...)
   }
   p + 
     geom_point(aes(shape=Pathology, color=Risk), fill='white', size=3) + scale_color_manual(values=c('white','black','white'), guide=F) +
-    scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='black', color='black'))) +
+    scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='white', color='white'))) +
     #scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') +  #scale_color_manual(values=cols, limits=levels(df$Risk),name='Progression') +
     #geom_label(aes(label=Pathology), fill='white', show.legend=F) + 
     #scale_color_manual(values=c('white','black','white'), limits=levels(df$Risk)) +
     facet_wrap(~Patient, scales='free', labeller=label_both, ...) +
     labs(y='Oesophageal Location',x='Months Prior to Endpoint', title='') +
-    plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1)) 
+    plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1), legend.key = element_rect(fill='grey39')) 
 }
 
-plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL) {
+plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NULL) {
   low = c( min(df$mean.value), quantile(subset(df, mean.value < -1)$mean.value, probs=c(0.25, 0.75)), -1)
   high = c(1, quantile(subset(df, mean.value > 1)$mean.value, probs=c(0.25, 0.75)), max(df$mean.value))
   
@@ -163,7 +163,10 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL) {
   cols = c(lowCol,'#F7F7F7', highCol)
   
   df = subset(df, chr == chrom) # & seg.type != 'arms')  
-  p = ggplot(df, aes(x=chr.length)) + facet_grid(Status~chr, scales='free_x', labeller=labeller(chr=label_both)) +
+  
+  if (is.null(label)) label = labeller(chr=label_both)
+  
+  p = ggplot(df, aes(x=chr.length)) + facet_grid(Status~chr, scales='free_x', labeller=label) +
     geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts),show.legend = T) + 
     #geom_segment(aes(x=start, xend=end, y=mean.value, yend=mean.value, color=cuts), show.legend=T, size=1) + 
     #geom_segment(data=subset(df, seg.type == 'arms'), aes(x=start, xend=end, y=mean.value, yend=mean.value, color=cn), alpha=0.8, show.legend = F) + 
@@ -172,7 +175,8 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL) {
   if (!is.null(info)) {
     info = info[which(info$chrom == chrom),]
     p = p + geom_vline(data=info, aes(xintercept=chr.cent-cent.gap), color='grey39', linetype='longdash' ) +
-      geom_label(data=info, aes(x=chr.cent-cent.gap*3, y=max(df$mean.value)), label='p-arm')
+      geom_label(data=info, aes(x=chr.cent-cent.gap*3, y=max(df$mean.value)), label='p-arm') +
+      geom_label(data=info, aes(x=chr.cent+cent.gap*2, y=max(df$mean.value)), label='q-arm')
   }
   
   if (!is.null(genes)) {
@@ -189,10 +193,9 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL) {
       p = p + geom_rect(data=subset(haz, gl == 'gain'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='goldenrod2', alpha=0, show.legend=F, size=1) 
     }
   }
-  
-  p + theme(text=element_text(face='bold', size=14), axis.text.x=element_blank(), legend.position='bottom', 
-            panel.grid = element_blank(), panel.background = element_blank(),strip.background =element_rect(fill="lightcyan2"),  
-            panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing.x = unit(0.1, 'lines') ) + labs(x='', y='Mean adjusted segmentation value')
+  p + plot.theme + 
+    labs(x='', y='Mean adj. segmentation value') +
+    theme(axis.text.x=element_blank(), legend.position='none', panel.grid=element_blank(), panel.background=element_blank())  
 }
 
 
