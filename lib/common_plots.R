@@ -69,13 +69,14 @@ model.performance<-function(p1se, coeffs, lims=NULL) {
           '100%'=length(which(x==1)) )
   })))
   
-  p = ggplot(performance, aes(alpha, mean, color=(alpha != 0.9))) + 
-    geom_point(size=2) +
-    geom_text( aes(label=round(mean, 3)), hjust=-0.5) +
-    geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme), width=0.3, size=1) + 
-    geom_text(aes(label=n.Coef), nudge_y=0.03, fontface='bold') +
-    geom_text(aes(label=paste('(',`75%`,')',sep='')), nudge_y=0.02) + 
-    scale_colour_manual(values=c('red', 'grey39')) + plot.theme + theme(legend.position = 'none') +
+  p = ggplot(performance, aes(alpha, mean, fill=(alpha != 0.9))) + ylim(0,1) + geom_col() +
+    geom_text( aes(label=round(mean, 3)), vjust=3) +
+    geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme), width=0.3, size=1, color='grey39') + 
+    geom_text(aes(y=0.1, label=n.Coef), ) +
+    geom_text(aes(label=paste('(',`75%`,')',sep=''), y=0.05)) + 
+    scale_fill_brewer(palette='Paired') +
+    #scale_fill_manual(values=c('red', 'grey39')) + 
+    plot.theme + theme(legend.position = 'none') +
     labs(x='Elasticnet penalty value: ridge <-> lasso', y='Model classification at lambda-1se')
   
   

@@ -5,7 +5,7 @@ require(plyr)
 require(GenomicRanges)
 
 
-set.up.data<-function(tile.files, samplenames, labels) {
+set.up.dataX<-function(tile.files, samplenames, labels) {
   get.loc<-function(df) {
     locs = do.call(rbind.data.frame, lapply(colnames(df), function(x) unlist(strsplit( x, ':|-'))))
     colnames(locs) = c('chr','start','end')
@@ -106,12 +106,12 @@ add.demo.tocv <- function(patient.info, df) {
   return(df)
 }
 
-unit.var <- function(x) {
+unit.varX <- function(x) {
   if (sd(x, na.rm=T) == 0) return(x)
   return((x-mean(x,na.rm=T))/sd(x,na.rm=T) )
 }
 
-score.cx <- function(pt.d, df) {
+score.cxX <- function(pt.d, df) {
   get.length.variance <- function(pd) { # per patient
     samples = grep('^D', colnames(pd$seg.vals), value=T)
     len.var = var(pd$seg.vals$end.pos - pd$seg.vals$start.pos) # length won't vary between samples
@@ -161,21 +161,24 @@ coef.stability<-function(opt, nz.list) {
 
 create.patient.sets<-function(pts, n, splits, minR=0.2) {
   # This function just makes sure the sets don't become too unbalanced with regards to the labels.
+  pts$label = 0
+  pts[which(pts$Status == 'P'), 'label'] = 1
+
   check.sets<-function(df, grpCol, min) {
-    sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=labels[df$Samplename]))
+    sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=df$label))
     while ( (length(which(sets/rowSums(sets) < minR) ) >= 2 | length(which(sets/rowSums(sets) == 0)) > 0) ) {
-      #print(sets/rowSums(sets))
+      print(sets/rowSums(sets))
       s = sample(rep(seq(5), length = length(unique(df$Hospital.Research.ID))))
       df2 = merge(df, cbind('Hospital.Research.ID'=unique(df$Hospital.Research.ID), 'tmpgrp'=s), by="Hospital.Research.ID")
       df[[grpCol]] = df2$tmpgrp
-      sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=labels[df$Samplename]))
+      sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=df$label))
     }
     return(df[[grpCol]])
   }
   
   s = sample(rep(seq(splits), length = length(unique(pts$Hospital.Research.ID))))
   patients = merge(pts, cbind('Hospital.Research.ID'=unique(pts$Hospital.Research.ID), 'group'=s), by="Hospital.Research.ID")  
-  colnames(patients)[3] = c('fold.1')
+  colnames(patients)[5] = c('fold.1')
   patients$fold.1 = check.sets(patients, 'fold.1', minR)
   
   for (i in 2:n) {
@@ -185,9 +188,6 @@ create.patient.sets<-function(pts, n, splits, minR=0.2) {
     colnames(patients)[foldcol] = paste('fold',i,sep='.')
     patients[[paste('fold',i,sep='.')]] = check.sets(patients, paste('fold',i,sep='.'))
   }
-  
-  
-  
   return(patients)
 }
 

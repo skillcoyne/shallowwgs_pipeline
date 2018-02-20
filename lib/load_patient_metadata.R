@@ -115,7 +115,7 @@ read.patient.info<-function(file, file2=NULL, set='Training') {
   patient.info = subset(patient.info, !grepl('D2|Gastriccardia|normal', Pathology, ignore.case=T))
 
   patient.info$Pathology = droplevels(patient.info$Pathology)
-  patient.info$Pathology = ordered( patient.info$Pathology, levels=c("BE","ID","LGD", "IMC","HGD" ))
+  patient.info$Pathology = ordered( patient.info$Pathology, levels=c("BE","ID","LGD","HGD","IMC" ))
   
   patient.info$Batch.Name = as.factor(patient.info$Batch.Name)
   

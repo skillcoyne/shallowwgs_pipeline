@@ -1,4 +1,9 @@
 #!/usr/bin/env Rscript
+
+
+# Step 2
+
+
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 3) {
@@ -13,7 +18,6 @@ suppressPackageStartupMessages( library(dplyr) )
 
 source("../lib/fastPCF.R")
 source('../lib/load_patient_metadata.R')
-
 
 
 data = args[1]
