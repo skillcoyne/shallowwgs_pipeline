@@ -4,7 +4,6 @@ suppressPackageStartupMessages(library(plyr))
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(gridExtra))
 suppressPackageStartupMessages(library(glmnet))
-suppressPackageStartupMessages(library(mice))
 suppressPackageStartupMessages(library(reshape2))
 suppressPackageStartupMessages(library(GenomicRanges))
 
@@ -19,6 +18,8 @@ args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 4)
   stop("Missing required params: <data dir> <outdir> <info file dir> <patient ID>")
+
+print(args)
 
 data = args[1]
 #data = '~/Data/Ellie/Cleaned'
@@ -40,6 +41,9 @@ dir.create(cache.dir, recursive=T, showWarnings=F)
 ## Hospital.Research.ID info file
 patient.file = list.files(infodir, pattern='All_patient_info.xlsx', recursive=T, full.names=T)
 demo.file = list.files(infodir, pattern='Demographics_full.xlsx', recursive=T, full.names=T)
+
+print(patient.file)
+print(demo.file)
 
 if ( length(patient.file) < 1 | length(demo.file) < 1)
   stop("Missing files in info dir: All_patient_info.xlsx and Demographics_full.xlsx")
@@ -119,7 +123,7 @@ dim(allDf)
 dysplasia.df = as.matrix(allDf[sampleStatus$Samplename,])
 dim(dysplasia.df)
 
-save(allDf, dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
+save(allDf, dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, paste(patient, '_model_data.Rdata', sep=''), sep='/'))
 
 nl = 1000;folds = 10; splits = 5 
 
@@ -159,7 +163,6 @@ message("LOO")
 
 info = subset(patient.info, Hospital.Research.ID == patient | Patient == patient)
 
-info = subset(patient.info, Hospital.Research.ID == pt)
 info$Prediction = NA
 info$Prediction.Dev.Resid = NA
 info$OR = NA
@@ -189,20 +192,20 @@ test = as.matrix(dysplasia.df[-train.rows,])
 if ( nrow(test) == ncol(dysplasia.df) ) test = t(test)
     
 # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
-sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(pg.samp[[pt]]$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
-                            dimnames=list(pg.samp[[pt]]$Samplename,colnames(training)), sparse=T)
+sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(info$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
+                            dimnames=list(info$Samplename,colnames(training)), sparse=T)
 for(i in colnames(dysplasia.df)) sparsed_test_data[,i] = test[,i]
     
 # Fit generated on all samples, including HGD
-#fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
-#l = fitLOO$lambda
+fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
+l = fitLOO$lambda
     
 cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
                               pts=subset(sets, Samplename %in% samples), fit=fitLOO, standardize=F)
     
-plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
+plots = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
     
-fits[[pt]] = cv  
+fits = cv  
     
 if ( length(cv$lambda.1se) > 0 ) {
   performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
@@ -215,17 +218,17 @@ if ( length(cv$lambda.1se) > 0 ) {
       
   pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
   or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
-  sy = as.matrix(sqrt(binomial.deviance(pm, labels[pg.samp[[pt]]$Samplename])))
+  sy = as.matrix(sqrt(binomial.deviance(pm, labels[info$Samplename])))
       
-  pg.samp[[pt]]$Prediction = pm[,1]
-  pg.samp[[pt]]$Prediction.Dev.Resid = sy[,1] 
-  pg.samp[[pt]]$OR = or[,1]
+  info$Prediction = pm[,1]
+  info$Prediction.Dev.Resid = sy[,1] 
+  info$OR = or[,1]
       
 } else {
   warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
 }
 
-save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.samp, file=file)
+save(plots, performance.at.1se, coefs, nzcoefs, fits, info, file=file)
 
 message("Finished")
 
