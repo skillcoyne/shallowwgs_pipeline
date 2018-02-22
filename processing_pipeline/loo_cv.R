@@ -29,7 +29,7 @@ infodir = args[3]
 #infodir = '~/Data/Ellie/QDNAseq'
 
 patient = args[4]
-#patient = 'AHM0291'
+#patient = 'AD0607'
 
 # 
 allPts = T
@@ -81,9 +81,7 @@ sampleVar = do.call(rbind, lapply(raw, function(f) {
 
 # Load segment files
 tiled.segs = do.call(rbind, lapply(segs, function(f) {
-  fx = load.segment.matrix(f)
-  #if (nrow(fx) <= 2) return(NULL)
-  fx
+  load.segment.matrix(f)
 }))
 dim(tiled.segs)
 segsList = prep.matrix(tiled.segs)
@@ -91,6 +89,7 @@ segsList = prep.matrix(tiled.segs)
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
 segs = segsList$matrix
+dim(segs)
 
 # Complexity score
 cx.score = score.cx(segs,1)
@@ -99,9 +98,7 @@ sd.cx = sd(cx.score)
 
 # Load arm files  
 tiled.arms = do.call(rbind, lapply(arms, function(f) {
-  fx = load.segment.matrix(f)
-  #if (nrow(fx) <= 2) return(NULL)
-  fx
+  load.segment.matrix(f)
 }))
 dim(tiled.arms)
 armsList = prep.matrix(tiled.arms)
@@ -184,12 +181,18 @@ performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs
 pt = unique(info$Hospital.Research.ID)
 
 samples = subset(patient.info, Hospital.Research.ID != pt)$Samplename
-    
+
 train.rows = which(rownames(dysplasia.df) %in% samples)
 training = dysplasia.df[train.rows,]
+
+dysplasia.df[info$Samplename,]
+
 test = as.matrix(dysplasia.df[-train.rows,])
     #if (ncol(test) <= 1) next
-if ( nrow(test) == ncol(dysplasia.df) ) test = t(test)
+if ( nrow(test) == ncol(dysplasia.df) ) {
+  test = t(test)
+  rownames(test) = info$Samplename
+}
     
 # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
 sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(info$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),

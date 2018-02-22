@@ -28,9 +28,12 @@ shinyUI(fluidPage(
       tags$hr(),
       checkboxInput("header", "Header", TRUE)
     ),
+    
+    
+    
     mainPanel(
-      tableOutput("contents")
-      #plotOutput("plot")
+      plotOutput("plot")
+      #tableOutput("contents")
     )
   )
   

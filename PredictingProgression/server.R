@@ -8,6 +8,7 @@
 
 library(shiny)
 library(ggplot2)
+library(ggrepel)
 library(glmnet)
 
 source('lib/data_func.R')
@@ -49,6 +50,49 @@ unadjRR = ggplot(pg.samp, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, sh
 # Define server logic required to draw a histogram
 shinyServer(function(input, output) {
   
+  predict.progression <- function(file) {
+    rs <- read.table(file, header=T, sep="\t")
+    if (ncol(rs) < 4)
+      stop("File needs to contain 4 columns: chr, start, end, sample_value")
+    
+    
+    segs <- tile.segmented.data(rs, size=5e6 )
+    segM = as.matrix(segs[,-c(1:3)])
+    rownames(segM) = paste(segs$chr, ':', segs$start, '-', segs$end, sep='')
+    segM = t(segM)
+    
+    for (i in 1:ncol(segM)) 
+      segM[,i] = unit.var(segM[,i], z.mean[i], z.sd[i])
+    #segM = unit.var(segM)
+    
+    
+    arms <- tile.segmented.data(rs, size='arms')
+    armsM = as.matrix(arms[,-c(1:3)])
+    rownames(armsM) = paste(arms$chr, ':', arms$start, '-', arms$end, sep='')
+    armsM = t(armsM)
+    
+    for (i in 1:ncol(armsM)) 
+      armsM[,i] = unit.var(armsM[,i], z.arms.mean[i], z.arms.sd[i])
+    #armsM = unit.var(armsM)
+    
+    #nrow(armsM) == nrow(segM)
+    
+    cx.score = score.cx(segM,1)
+    
+    mergedDf = subtract.arms(segM, armsM)
+    mergedDf = cbind(mergedDf, 'cx' = unit.var(cx.score, mn.cx, sd.cx))
+    
+    # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
+    sparsed_test_data <- Matrix(data=0, nrow=nrow(mergedDf),  ncol=ncol(mergedDf),
+                                dimnames=list(rownames(mergedDf),colnames(mergedDf)), sparse=T)
+    for(i in colnames(mergedDf)) sparsed_test_data[,i] = mergedDf[,i]
+    
+    preds = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='response')
+    RR = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='link')
+    
+    return(list('prob'=preds, 'rel.risk'=RR))
+  }
+  
   output$contents <- renderTable({
     # input$file1 will be NULL initially. After the user selects
     # and uploads a file, it will be a data frame with 'name',
@@ -60,72 +104,24 @@ shinyServer(function(input, output) {
     if (is.null(inFile))
       return(NULL)
     
-    rs <- read.table(inFile$datapath, header=T, sep="\t")
-    if (ncol(rs) < 4)
-      stop("File needs to contain 4 columns: chr, start, end, sample_value")
+    pp = predict.progression(inFile$datapath)
     
-    progress <- shiny::Progress$new()
-    on.exit(progress$close())
-    
-    progress$set(message = "Setting up data...", value = 0)
-    
-    n <- 20
-    updateProgress <- function(detail = NULL) {
-      progress$inc(amount = 1/n, detail = detail)
-    }
-    
-    segs <- tile.segmented.data(rs, size=5e6 )
-    segM = as.matrix(segs[,-c(1:3)])
-    rownames(segM) = paste(segs$chr, ':', segs$start, '-', segs$end, sep='')
-    segM = t(segM)
-
-    for (i in 1:ncol(segM)) 
-      segM[,i] = unit.var(segM[,i], z.mean[i], z.sd[i])
-    
-
-    arms <- tile.segmented.data(rs, size='arms')
-    armsM = as.matrix(arms[,-c(1:3)])
-    rownames(armsM) = paste(arms$chr, ':', arms$start, '-', arms$end, sep='')
-    armsM = t(armsM)
-
-    for (i in 1:ncol(armsM)) 
-      armsM[,i] = unit.var(armsM[,i], z.arms.mean[i], z.arms.sd[i])
-    
-    nrow(armsM) == nrow(segM)
-        
-    cx.score = score.cx(segM,1)
-
-    mergedDf = subtract.arms(segM, armsM)
-    mergedDf = cbind(mergedDf, 'cx' = unit.var(cx.score, mn.cx, sd.cx))
-    
-    # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
-    sparsed_test_data <- Matrix(data=0, nrow=nrow(mergedDf),  ncol=ncol(mergedDf),
-                                dimnames=list(rownames(mergedDf),colnames(mergedDf)), sparse=T)
-    for(i in colnames(mergedDf)) sparsed_test_data[,i] = mergedDf[,i]
-
-    preds = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='response')
-    RR = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='link')
-    
-    preds
+    pp$prob
     
   })     
    output$plot <- renderPlot({
-  
-    #if (is.null(inFile))  
-    #  return(unadjRR)
+     inFile <- input$file
      
-    #unadjRR + geom_point(data=as.data.frame(RR), aes(x=`1`, y=3), size=2)
-  
-  #   
-  #   # generate bins based on input$bins from ui.R
-  #   x    <- faithful[, 2] 
-  #   bins <- seq(min(x), max(x), length.out = input$bins + 1)
-  #   
-  #   # draw the histogram with the specified number of bins
-  #   #hist(x, breaks = bins, col = 'darkgray', border = 'white')
-  #   
-  #   ggplot(faithful, aes(x=waiting)) + geom_histogram(breaks=bins, color='lightgrey') + theme_minimal()
-  #   
+    if (is.null(inFile))  
+      return(unadjRR)
+    
+    pp = predict.progression(inFile$datapath)
+      
+    RR = as.data.frame(pp$rel.risk)
+    colnames(RR) = 'rel.risk'
+
+    unadjRR + geom_point(data=RR, aes(x=rel.risk, y=3), size=2) +
+      geom_text_repel(data=RR, aes(x=rel.risk, y=3, label=round(rel.risk, 2)))
    })
   
 })

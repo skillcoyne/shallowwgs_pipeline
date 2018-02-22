@@ -30,11 +30,14 @@ load.segment.matrix<-function(segFile) {
   endCol = grep('end',colnames(dt))
   
   rows = paste(dt[,chrCol], ':', dt[,startCol], '-', dt[,endCol], sep='')
+  cols = colnames(dt)[-c(chrCol, startCol, endCol)]
   
   dt = as.matrix(dt[,-c(chrCol, startCol, endCol)])
   rownames(dt) = rows
+  colnames(dt) = cols
   return( t(dt) )
 }
+
 
 
 unit.var <- function(x, mean=NULL, sd=NULL) {
@@ -44,7 +47,7 @@ unit.var <- function(x, mean=NULL, sd=NULL) {
       warning("Unit normalization can't be performed with less than 2 samples or SD was 0")
       return(x)
     } else {
-    return((x-mean(x,na.rm=T))/sd(x,na.rm=T) )
+      return((x-mean(x,na.rm=T))/sd(x,na.rm=T) )
     }
   }
   
