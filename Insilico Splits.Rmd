@@ -1,0 +1,174 @@
+---
+title: "Insilico Splits"
+author: "Sarah Killcoyne"
+date: "1/10/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(ggrepel)
+library(pander)
+library(reshape2)
+library(gridExtra)
+library(plyr) 
+library(dplyr)
+library(pROC)
+
+source('lib/load_patient_metadata.R')
+source('lib/cv-pt-glm.R')
+source('lib/common_plots.R')
+
+data = '~/Data/Ellie'
+tile.w=c(5e06, 'arms')
+
+includeDemo = F
+
+data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
+analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
+
+load(grep('All_patients.Rdata', analysis.files, value=T), verbose=T)
+
+## Hospital.Research.ID info file
+patient.file = grep('All_patient_info.xlsx', data.files, value=T)
+if (length(patient.file) != 1)
+  stop(paste("Missing/too many patient info file(s) in", data))
+demo.file = grep('Demographics_full.xlsx', data.files, value=T)
+
+all.patient.info = read.patient.info(patient.file, demo.file, set='all')$info
+head(all.patient.info)
+
+#sum.pt = summarise.patient.info(all.patient.info)
+
+sum.pt = all.patient.info %>% group_by(Set, Patient) %>% summarize(
+  med.reads=median(Total.Reads),
+  sd.reads=sd(Total.Reads),
+  n.endoscopy=length(unique(PID)),
+  n.years=unique(Final.Endoscopy-Initial.Endoscopy),
+  n.samples=length(Samplename)
+) 
+
+sp = sum.pt %>% group_by(Set) %>% summarize(
+  med.endo=median(n.endoscopy),
+  sd.endo=sd(n.endoscopy),
+  med.years=median(n.years),
+  med.samples=median(n.samples),
+  sd.samples=sd(n.samples)
+)
+
+```
+
+`r pander(as.data.frame(sp))`
+
+```{r echo=F, warning=F, message=F}
+
+cache.dir = paste(data, 'Analysis', sub('\\+','',paste(tile.w, collapse='_')), sep='/')
+
+ins_splits = grep('val_', list.dirs(cache.dir), value=T)
+
+performance = data.frame()
+rocs = list()
+
+select.alpha = '0.9'
+
+file = paste(cache.dir, 'insilico_splits.Rdata', sep='/')
+if (file.exists(file)) {
+  load(file, verbose=T)
+  rocs = insilico.rocs
+  performance = insilico.perf
+} else {
+  for (split in ins_splits) {
+    load(grep('all.*Rdata', list.files(split,full.names = T), value=T), verbose=F)
+    performance = rbind(performance, performance.at.1se[[select.alpha]])
+    rm(plots,coefs,performance.at.1se,models,cv.patient)
+    
+    load(grep('loo.*Rdata', list.files(split,full.names = T), value=T), verbose=F)
+    rm(plots, performance.at.1se,coefs,nzcoefs,fits)
+  
+    predictions = do.call(rbind, pg.samp)
+  
+    preds = do.call(rbind.data.frame, lapply(pg.samp, function(df) df[c('Status','Prediction')]))
+    roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
+    #rocs = rbind(rocs,c(ci.auc(roc), coords(roc, 'best') ))
+    roc$model = 'in-silico'
+    roc$is = basename(split)
+    rocs[[basename(split)]] = roc
+  
+    rm(dysplasia.df, labels)
+  }
+  #colnames(rocs) = c('auc.ci.min','auc','auc.ci.max','threshold','specificity','sensitivity')
+  
+  insilico.rocs=rocs
+  insilico.perf=performance
+  save(insilico.rocs, insilico.perf, file=paste(cache.dir, 'insilico_splits.Rdata', sep='/'))
+}
+
+load(grep('all.*Rdata',list.files(cache.dir, full.names = T), value=T), verbose=F)
+performance = rbind(performance, performance.at.1se[[select.alpha]])
+performance$split = c(basename(ins_splits), 'discovery')
+rm(plots,coefs,performance.at.1se,models,cv.patient,dysplasia.df,labels)
+
+load(grep('loo\\.Rdata', list.files(cache.dir,full.names = T), value=T), verbose=F)
+rm(plots, performance.at.1se,coefs,nzcoefs,fits)
+
+predictions = do.call(rbind, pg.samp)
+
+preds = do.call(rbind.data.frame, lapply(pg.samp, function(df) df[c('Status','Prediction')]))
+roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
+roc$model = 'discovery'
+roc$is = 'discovery'
+
+#rocs = rbind(rocs,c(ci.auc(roc), coords(roc, 'best')) )
+
+#rocs$split = c(basename(ins_splits),'discovery')
+
+```
+
+
+Original "discovery" cohort vs insilico generated discovery cohorts.  Original is noted in red, we appear to have gotten lucky in our patient selection. 
+
+
+## Model Performance
+
+```{r echo=F, fig.align='left'}
+performance$name = 'insilico'
+performance$name[which(performance$split == 'discovery')] = 'discovery'
+m = melt(performance, measure.vars = 'mean')
+ggplot(m, aes(variable,value)) + ylim(0,1) +
+  geom_boxplot(fill='mintcream', color='grey55') + geom_jitter(width=0.2, aes(color=name), size=1.5) + 
+  geom_text(data=subset(m, value %in% range(value)), aes(label=round(value,2)), vjust=0.02, hjust=0.2) +
+  plot.theme + labs(x='CV Models',y='Mean model performance',title='Mean performance for CV model', subtitle='20 insilico 20:69 splits')
+```
+
+Median performance `r median(performance$mean)`, SD `r sd(performance$mean)`
+
+## AUC Plot
+
+
+```{r echo=FALSE, fig.align='left'}
+rocs[['discovery']] = roc
+
+mrplot <- function(rocList) {
+  aucs = do.call(rbind, lapply(rocList,function(r) 
+    cbind.data.frame('AUC'=r$auc*100,'model'=r$model,'Specificity'=pROC::coords(r,'best')[['specificity']], 'Sensitivity'=pROC::coords(r,'best')[['sensitivity']])))
+  aucs$y = aucs$Sensitivity
+  aucs$x = aucs$Specificity
+
+  df = do.call(rbind, lapply(rocList, function(r) 
+    cbind.data.frame('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'model'=r$model, 'is'=r$is) 
+  ))
+
+  ggplot(df, aes(Specificity, Sensitivity,color=is)) + geom_line(size=1) + 
+    geom_line(data=subset(df, model == 'discovery'), color='red', size=1) +
+    scale_x_reverse() +
+    scale_color_brewer(palette='Blues') +
+    labs(title=title, x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme +
+    theme(legend.position = 'none')
+}
+
+mrplot(rocs)
+
+```
+Median AUC `r median(rocs$auc)`, SD `r sd(rocs$auc)`
+
+

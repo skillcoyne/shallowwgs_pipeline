@@ -1,0 +1,401 @@
+---
+title: "Untitled"
+author: "Sarah Killcoyne"
+date: "2/21/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(GenomicRanges)
+library(ggplot2)
+library(ggrepel)
+library(GGally)
+library(plyr) 
+library(pander)
+library(reshape2)
+library(gridExtra)
+library(plyr)
+library(dplyr)
+
+source('lib/load_patient_metadata.R')
+source('lib/cv-pt-glm.R')
+source('lib/common_plots.R')
+source('lib/data_func.R')
+
+assign.risk <- function(pred) {
+  cuts = seq(0,1,0.1)
+  
+  pred$quants = with(pred, cut(Prediction, breaks=cuts))
+  qt = as.data.frame.matrix(table(pred$quants, pred$Status))
+  qt$quant = rownames(qt)
+  
+  ft.fun<-function(NP,P) {
+   f = fisher.test(rbind(cbind(NP,P),table(sum.patient.data$Status)))
+   cbind.data.frame('p.value'=f$p.value, 'odds.ratio'=f$estimate)
+  }
+  
+  qt = cbind(qt, pred %>% group_by(quants) %>% summarise ( 'mn'=mean(Prediction), 'sd'=sd(Prediction) ))
+  pred.confidence = qt %>% as.data.frame.matrix %>% group_by(quant) %>% mutate( 
+    'perc'=P/sum(NP,P), 'p.value'=ft.fun(NP,P)$p.value, 'odds'=ft.fun(NP,P)$odds.ratio, 'conf'=ifelse(p.value < 0.05, '*', '') )
+  
+  pred.confidence[c('r1','r2')] = NA
+  for (i in 1:(length(cuts)-1)) pred.confidence[i, c('r1','r2')] = round(range(cuts[i:(i+1)]), 3)
+  
+  pred.confidence$Risk = 'Moderate'
+  pred.confidence$Risk[ which(with(pred.confidence, p.value < 0.05 & perc < .5)) ] = 'Low'
+  pred.confidence$Risk[ which(with(pred.confidence, p.value < 0.05 & perc > .5)) ] = 'High'
+  
+  pred.confidence = bind_cols(pred.confidence, 
+                              data.frame(ci.low=qbeta(0.025, shape1=pred.confidence$P+.5, shape2 = pred.confidence$NP+.5),
+                                        ci.high=qbeta(0.975, shape1=pred.confidence$P+.5, shape2 = pred.confidence$NP+.5)))
+  
+  
+  #grid.arrange( tableGrob(annotation.table, rows=NULL, theme=tt3) )
+  pred.confidence$Risk = factor(pred.confidence$Risk, levels=c('Low','Moderate','High'), ordered = T)
+  
+  riskCols = brewer.pal(11, "RdYlBu")[c(10, 5, 1)]
+ggplot(pred.confidence, aes(mn, perc)) + 
+  geom_rect(aes(xmin=r1, xmax=r2, ymin=0,ymax=1, fill=Risk), alpha=0.6) +
+  scale_fill_manual(values=riskCols) +
+  geom_point() + #geom_text(aes(label=paste(r1,r2,sep='-')), nudge_x=0.05) +
+  geom_errorbar(aes(ymin=ci.low, ymax=ci.high), width=0.01) + labs(x='Mean prediction', y='Ratio of `P` patients', title='Prediction calibration') +
+  scale_color_manual(values=riskCols) + plot.theme + theme(legend.position = 'none', text=element_text(size=10))
+
+  pred = merge(pred, pred.confidence, by='quants')
+  pred = arrange(pred, Patient, Endoscopy.Year, PID, Pathology)
+  return(pred)
+}
+
+
+data = '~/Data/Ellie'
+info.dir = '~/Data/Ellie/QDNAseq'
+
+patient.file = list.files(info.dir, pattern='All_patient_info.xlsx', recursive=T, full.names=T)
+demo.file = list.files(info.dir, pattern='Demographics_full.xlsx', recursive=T, full.names=T)
+
+if (length(patient.file) != 1 | length(demo.file) != 1)
+  stop(paste("Missing/too many patient info file(s) in", info.dir))
+
+all.patient.info = read.patient.info(patient.file, demo.file, set='all')$info
+head(all.patient.info)
+
+patient.info = all.patient.info
+#patient.info = subset(all.patient.info, Set == 'Training')
+
+patient.info = arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
+sum.patient.data = summarise.patient.info(patient.info)
+
+```
+
+# Why are the patient sin the validaiton cohort driving down prediction?
+
+1. Look at the patients (and samples) that are misclassified in the LOO predictions within the 'D' only set.
+  a. Do they stand out for anything else like very quiet genomes?
+  b. Batches? 
+  
+2. Look at coef within the 'D' model, and in the 'all' model
+  a. Which coef change?
+  b. Which samples change?
+
+
+
+```{r disc_data, echo=F}
+disc.dir = paste(data, 'Analysis/5e6_arms_disc', sep='/')
+file = paste(disc.dir, 'model_data.Rdata', sep='/')
+if (!file.exists(file))
+  stop(paste("Missing data file", file))
+
+load(file, verbose=T)
+disc.dysplasia.df = dysplasia.df
+disc.labels = labels
+
+length(labels) == nrow(patient.info)
+
+file = paste(disc.dir, 'all.pt.alpha.Rdata', sep='/')
+load(file, verbose=T)
+disc.coefs = coefs$`0.9`
+
+file = paste(disc.dir, 'loo.Rdata', sep='/')
+load(file, verbose=T)
+
+disc.pred = do.call(rbind, pg.samp)
+disc.performance = performance.at.1se
+names(disc.performance) = names(pg.samp)
+
+m = melt(as.matrix(disc.performance))
+m$Var2 = 'LOO'
+ggplot(m, aes(Var2, value, group=Var2)) + geom_boxplot(outlier.colour = NA) + 
+  geom_jitter(width=0.1) + labs(x='', y='Model classification performance', title="LOO, 'D'")
+disc.loo.coefs = nzcoefs
+
+
+rm(dysplasia.df, fits, plots, pg.samp, allDf, nzcoefs, coefs)
+```
+
+
+## Misclassified in 'Discovery'
+
+1. Look at the patients (and samples) that are misclassified in the LOO predictions within the 'D' only set.
+  a. Do they stand out for anything else like very quiet genomes?
+  b. Batches? 
+
+```{r, echo=T}
+
+preds = disc.pred[c('Status','Prediction')]
+roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
+cutoff = round(pROC::coords(roc, 'best')[['threshold']], 2)
+
+ggplot(disc.pred, aes(Prediction)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1), show.legend = F) + 
+  scale_fill_distiller(palette = 'RdYlBu', name='P(P)') + labs(title='LOO Prediction', y='n Samples', x='Probability') + plot.theme
+
+disc.pred = assign.risk(disc.pred)
+
+
+prg = subset(disc.pred, Status == 'P' & Risk == 'High')
+non = subset(disc.pred, Status == 'NP' & Risk == 'Low')
+
+## Low
+falseNeg = subset(disc.pred, Risk == 'Low' & Status == 'P')
+table(falseNeg$Hospital.Research.ID)/table(subset(patient.info, Hospital.Research.ID %in% unique(falseNeg$Hospital.Research.ID))$Hospital.Research.ID )
+
+# Mod
+mods = subset(disc.pred, Risk == 'Moderate')
+table(falseNeg$Hospital.Research.ID)/table(subset(patient.info, Hospital.Research.ID %in% unique(falseNeg$Hospital.Research.ID))$Hospital.Research.ID )
+
+# High
+falsePos = subset(disc.pred, Risk == 'High'  & Status == 'NP')
+table(falsePos$Hospital.Research.ID)/table(subset(patient.info, Hospital.Research.ID %in% unique(falsePos$Hospital.Research.ID))$Hospital.Research.ID )
+
+intersect(mods$Hospital.Research.ID, falseNeg$Hospital.Research.ID)
+intersect(mods$Hospital.Research.ID, falsePos$Hospital.Research.ID)
+
+```
+
+Patients with the highest false pos/neg rate: AHM0121, AHM0277, AD0252, AD0591
+
+
+```{r all_data, echo=F}
+all.dir = paste(data, 'Analysis/5e6_arms_all', sep='/')
+file = paste(all.dir, 'model_data.Rdata', sep='/')
+if (!file.exists(file))
+  stop(paste("Missing data file", file))
+
+load(file, verbose=T)
+all.dysplasia.df = dysplasia.df
+all.labels = labels
+
+file = paste(all.dir, 'all.pt.alpha.Rdata', sep='/')
+load(file, verbose=T)
+all.coefs = coefs$`0.9`
+all.performance = performance.at.1se$`0.9`
+
+file = paste(all.dir, 'loo.Rdata', sep='/')
+load(file, verbose=T)
+all.pred = do.call(rbind, pg.samp)
+all.performance.loo = performance.at.1se
+names(all.performance.loo) = names(pg.samp)
+
+all.loo.coefs = coefs
+
+m = melt(as.matrix(all.performance.loo))
+m$Var2 = 'LOO'
+ggplot(m, aes(Var2, value, group=Var2)) + geom_boxplot(outlier.colour = NA) + 
+  geom_jitter(width=0.1) + labs(x='', y='Model classification performance', title="LOO, 'All'")
+
+rm(coefs, nzcoefs, dysplasia.df, fits, plots, pg.samp, allDf)
+```
+# What are their coefficients like?
+
+Look at coef within the 'D' model, and in the 'all' model
+  a. Which coef change?
+  b. Which samples change?
+
+
+```{r}
+# Coefs not in the 'D' model
+setdiff(rownames(disc.coefs), rownames(all.coefs))
+ucf = union(rownames(disc.coefs), rownames(all.coefs))
+
+coefs = data.frame(matrix(ncol=2, nrow=length(ucf), dimnames=list(ucf, c('D','A'))))
+coefs[rownames(disc.coefs),'D'] = disc.coefs[,1]
+coefs[rownames(all.coefs),'A'] = all.coefs[,1]
+#coefs[is.na(coefs)] = 0
+
+abs(coefs$D) - abs(coefs$A)
+
+```
+
+
+
+# Re run cv w/o those patients?
+
+```{r}
+file = list.files(data, pattern='patient_folds.tsv', recursive=T, full.names=T)[1]
+if (length(file) == 1) {
+  message(paste("Reading folds file", file))
+  sets = read.table(file, header=T, sep='\t')
+} else {
+  sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2)  
+}
+
+rows = which(rownames(all.dysplasia.df) %in% subset(patient.info, Hospital.Research.ID %in% c('AHM0121', 'AHM0277', 'AD0252','AD0591'))$Samplename)
+
+df = all.dysplasia.df[-rows,]
+labels = all.labels[rownames(df)]
+
+
+a = 0.9; nl=1000; folds=10; splits=5
+fit0 <- glmnet(df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)    
+autoplot(fit0) + theme(legend.position = 'none')
+    
+cv = crossvalidate.by.patient(x=df, y=labels, lambda=fit0$lambda, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
+    
+lambda.opt = cv$lambda.1se
+subset(cv$lambdas, lambda == lambda.opt)$mean
+
+pm = predict(fit0, newx=all.dysplasia.df[rows,], s=cv$lambda.1se, type='response')
+colnames(pm) = c("Prediction")
+pred = merge(pm, patient.info, by.x='row.names', by.y='Samplename')
+
+# Prediction for those three don't improve
+table(subset(pred, Status == 'P')$Prediction > 0.5)
+
+table(subset(pred, Status == 'NP')$Prediction < 0.5)
+
+```
+
+# Do it with the 'D' model only
+
+```{r}
+`%nin%` = Negate('%in%')
+
+exsamples = subset(patient.info, Hospital.Research.ID %in% c('AHM0121', 'AHM0277', 'AD0252','AD0591'))$Samplename
+samples = subset(patient.info, Hospital.Research.ID %nin% c('AHM0121', 'AHM0277', 'AD0252','AD0591'))$Samplename
+
+df = disc.dysplasia.df[intersect(samples, rownames(disc.dysplasia.df)),]
+labels = disc.labels[ rownames(df) ]
+length(labels) == nrow(df)
+
+a = 0.9; nl=1000; folds=10; splits=5
+fit1 <- glmnet(df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)    
+autoplot(fit1) + theme(legend.position = 'none')
+    
+cv = crossvalidate.by.patient(x=df, y=labels, lambda=fit1$lambda, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit1, select='deviance', opt=-1, standardize=F)
+
+pm = predict(fit1, newx=disc.dysplasia.df[exsamples,], s=cv$lambda.1se, type='response')
+colnames(pm) = c("Prediction")
+pred1 = merge(pm, patient.info, by.x='row.names', by.y='Samplename')
+
+# Prediction for those three don't improve
+table(subset(pred1, Status == 'P')$Prediction > 0.5)
+table(subset(pred1, Status == 'NP')$Prediction < 0.5)
+
+```
+
+## What about the validation patients?
+
+```{r}
+vpi = subset(patient.info, Set == 'Test')
+
+df = all.dysplasia.df[vpi$Samplename,]
+labels = all.labels[rownames(df)]
+
+pm = predict(fit1, newx=df, s=cv$lambda.1se, type='response')
+colnames(pm) = c("Prediction")
+pred2 = merge(pm, all.patient.info, by.x='row.names', by.y='Samplename')
+
+
+table(subset(pred2, Status == 'P')$Prediction > min(subset(disc.pred, Risk == "High")$r1) )
+table(subset(pred2, Status == 'NP')$Prediction < max(subset(disc.pred, Risk == "Low")$r2))
+
+
+
+roc = pROC::roc(Status ~ Prediction, data= pred2[c('Status','Prediction')], auc=T, ci=T, of='thresholds')
+roc.plot(roc)
+
+```
+
+## LOO better trained w/o those three?
+```{r}
+sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2) 
+
+pi = subset(patient.info, Hospital.Research.ID %nin% c('AHM0121', 'AHM0277', 'AD0252','AD0591') )
+
+pg.samp = lapply(unique(pi$Hospital.Research.ID), function(pt) {
+  info = subset(pi, Hospital.Research.ID == pt)
+  info$Prediction = NA
+  info$Prediction.Dev.Resid = NA
+  info$OR = NA
+  info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
+  return(info)
+})
+names(pg.samp) = unique(pi$Hospital.Research.ID)
+
+secf = as.data.frame(all.coefs[,1])
+rownames(secf) = rownames(all.coefs)
+performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
+  # Remove each patient (LOO)
+for (pt in names(pg.samp)) {
+    print(pt)
+    samples = subset(patient.info, !Hospital.Research.ID %in% c('AHM0121', 'AHM0277', 'AD0252', pt))$Samplename
+    
+    train.rows = which(rownames(all.dysplasia.df) %in% samples)
+    training = all.dysplasia.df[train.rows,]
+    
+    exsamples = subset(patient.info, Hospital.Research.ID == pt)$Samplename
+    test = as.matrix(all.dysplasia.df[which(rownames(all.dysplasia.df) %in% exsamples),])
+    #if (ncol(test) <= 1) next
+    if ( nrow(test) == ncol(all.dysplasia.df) ) test = t(test)
+    
+    # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
+    sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(pg.samp[[pt]]$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
+                                dimnames=list(pg.samp[[pt]]$Samplename,colnames(training)), sparse=T)
+    for(i in colnames(all.dysplasia.df)) sparsed_test_data[,i] = test[,i]
+    
+    # Fit generated on all samples, including HGD
+    fitLOO <- glmnet(training, all.labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
+    l = fitLOO$lambda
+    
+    cv = crossvalidate.by.patient(x=training, y=all.labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
+                                  pts=subset(sets, Samplename %in% samples), fit=fitLOO, standardize=F)
+    
+    plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
+    
+    fits[[pt]] = cv  
+    
+    if ( length(cv$lambda.1se) > 0 ) {
+      performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
+      
+      #coef.1se = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
+      
+      nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
+      
+      coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
+      #coef.stability(coef.1se, cv$non.zero.cf)
+      
+      logit <- function(p){log(p/(1-p))}
+      inverse.logit <- function(or){1/(1 + exp(-or))}
+      
+      pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
+      or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
+      sy = as.matrix(sqrt(binomial.deviance(pm, labels[pg.samp[[pt]]$Samplename])))
+      
+      pg.samp[[pt]]$Prediction = pm[,1]
+      pg.samp[[pt]]$Prediction.Dev.Resid = sy[,1] 
+      pg.samp[[pt]]$OR = or[,1]
+      
+    } else {
+      warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
+    }
+  }
+
+back = do.call(rbind, pg.samp)
+
+hist(back$Prediction)
+
+```
+
+
+
+
+

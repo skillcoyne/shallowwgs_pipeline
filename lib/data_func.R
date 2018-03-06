@@ -4,6 +4,65 @@ require(data.table)
 require(tibble)
 
 
+#source("fastPCF.R")
+
+
+binSWGS<-function(raw.data, fit.data, blacklist) {
+  require(copynumber)
+  
+  if (is.null(blacklist)) 
+    stop('QDNASeq blacklisted regions missing')
+    
+  countCols = grep('loc|feat|chr|start|end', colnames(fit.data), invert=T)
+  
+  dim(fit.data)
+  dim(raw.data)
+  
+  rows = which(fit.data[,1] %in% raw.data[,1])
+  #raw.data = raw.data[rows,]
+  fit.data = fit.data[rows,]
+
+  window.depths = raw.data[,countCols]/fit.data[,countCols]
+  dim(window.depths)
+  message(paste(nrow(blacklist), "genomic regions in the exclusion list."))
+  fit.data$in.blacklist = F
+  for(r in 1:nrow(blacklist)) {
+    fit.data$in.blacklist[ fit.data$chrom == blacklist$chromosome[r] & 
+                           fit.data$start >= blacklist$start[r] & 
+                           fit.data$end <= blacklist$end[r] ] = T
+  }
+  message(paste("# excluded probes = ",sum(fit.data$in.blacklist),sep=""))
+  if (sum(fit.data$in.blacklist) <= 0)
+    stop("There's an issue with the excluded list, no probes excluded.")
+  
+  if (length(countCols) == 1)
+    window.depths = as.data.frame(window.depths)
+  
+  window.depths.standardised = as.data.frame(window.depths[which(!fit.data$in.blacklist),])
+
+  fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
+  sdevs = sapply(c(1:length(countCols)), function(s) {
+    getMad( window.depths.standardised[!is.na(window.depths.standardised[,s]),s], k=25 )
+  })
+  sdevs[sdevs==0] = NA
+  sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) 
+  
+  good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.na(sdevs)]))))
+  gamma2=250 
+
+  data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
+  
+  if (ncol(data) < 4) { # Single sample
+    res = pcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
+    colnames(res)[grep('mean', colnames(res))] = colnames(raw.data)[countCols]
+    res$sampleID = NULL
+  } else { # for most we have multiple samples
+    res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
+  }
+  
+  return(res)
+}
+
 prep.matrix<-function(dt) {
   output = list()
   
@@ -37,7 +96,6 @@ load.segment.matrix<-function(segFile) {
   colnames(dt) = cols
   return( t(dt) )
 }
-
 
 unit.var <- function(x, mean=NULL, sd=NULL) {
   if (is.null(mean) | is.null(sd)) {
@@ -195,8 +253,6 @@ subtract.arms<-function(segments, arms) {
   #plot(apply(mergedDf, 2, mean))
   return(mergedDf)  
 }
-
-
 
 get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='hg19') {
   require(plyr)

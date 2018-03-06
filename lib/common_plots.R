@@ -96,13 +96,13 @@ roc.plot <- function(roc,title="") {
   ggplot(df, aes(specificity, sensitivity)) + geom_line() + scale_x_reverse() + 
     geom_label(data=as.data.frame(t(round(pROC::coords(roc, "best"),2))), 
                aes(x=specificity, y=sensitivity, 
-                   label=paste(' (FPR ', round((1-specificity),2)*100, '%, TPR ', round(sensitivity,2)*100,'%)\nAUC:',round(roc$auc, 2)*100, '%', sep='')), nudge_x=.25) +
+                   label=paste(' (FPR ', round((1-specificity),2),' TPR ', round(sensitivity,2),')\nAUC:',round(roc$auc, 2), sep='')), nudge_x=.25) +
     labs(title=title, x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme
 }
 
 multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   aucs = do.call(rbind, lapply(rocList,function(r) 
-    cbind.data.frame('AUC'=r$auc*100,'model'=r$model,'Specificity'=pROC::coords(r,'best')[['specificity']], 'Sensitivity'=pROC::coords(r,'best')[['sensitivity']])))
+    cbind.data.frame('AUC'=r$auc,'model'=r$model,'Specificity'=pROC::coords(r,'best')[['specificity']], 'Sensitivity'=pROC::coords(r,'best')[['sensitivity']])))
   aucs$y = aucs$Sensitivity
   aucs$x = aucs$Specificity
 
@@ -111,7 +111,7 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
     aucs$x = 0.5
   }
   
-  aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC), '%\nTPR=', round(Sensitivity*100), '% FPR=', round((1-Specificity)*100), '%', sep=''))
+  aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), '\nTPR=', round(Sensitivity,2), ' FPR=', round((1-Specificity),2), sep=''))
   
   df = do.call(rbind, lapply(rocList, function(r) 
     cbind.data.frame('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'model'=r$model) 
