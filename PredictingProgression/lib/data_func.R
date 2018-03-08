@@ -155,19 +155,20 @@ score.cx <- function(df, MARGIN) {
   return(tiles)
 }
 
+
 # Presumes that the segmented data has already been filtered for num of probes, sd etc
 tile.segmented.data<-function(data, size=5e6, chr.info=NULL) {
   
   if (!is.tibble(data))
     data = as_tibble(data)
   
-  descCols = sort(union(grep('chr|arm|start|end|probes', colnames(data)), which(!sapply(data, is.numeric))))
+  descCols = sort(union(grep('chr|arm|start|end|probes', colnames(data),ignore.case=T), which(!sapply(data, is.numeric))))
   dataCols = c((descCols[length(descCols)]+1):ncol(data))
   
-  chrCol = grep('chr',colnames(data),value=T)
-  armCol = grep('arm',colnames(data),value=T)
-  startPos = grep('start',colnames(data),value=T)
-  endPos = grep('end',colnames(data),value=T)
+  chrCol = grep('chr',colnames(data),ignore.case=T,value=T)
+  #armCol = grep('arm',colnames(data),ignore.case=T,value=T)
+  startPos = grep('start',colnames(data),ignore.case=T,value=T)
+  endPos = grep('end',colnames(data),ignore.case=T,value=T)
   
   data = data[which(!data[[chrCol]] %in% c('X','Y')),]
   x1 = data[,c(chrCol, startPos, endPos, colnames(data)[dataCols])]

@@ -7,15 +7,26 @@ get.legend<-function(a.gplot){
   return(legend)
 }
 
-plot.theme = theme(text=element_text(size=14, face='bold'), panel.background=element_blank(), strip.background =element_rect(fill="grey88"),  
-                   strip.text = element_text(size=14, face='bold'), 
+plot.theme = theme(text=element_text(size=12, face='bold'), panel.background=element_blank(), strip.background =element_rect(fill="white"),  
+                   strip.text = element_text(size=12, face='bold'), 
                    axis.line=element_line(color='black'), panel.grid.major=element_line(color='grey90'),
                    panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing = unit(0.1, 'lines')  ) 
 
 cn.mtn.plot<-function(df, label, type='bar') {
-  low = c( min(df$mean.value), quantile(subset(df, mean.value < -1)$mean.value, probs=c(0.25, 0.75)), -1)
-  high = c(1, quantile(subset(df, mean.value > 1)$mean.value, probs=c(0.25, 0.75)), max(df$mean.value))
-  df$cuts = cut(df$mean.value, breaks=c(low,high), include.lowest = T, ordered_result = T)
+  df = arrange(df, chr, start)
+  rows = which(df$mean.value > 1 | df$mean.value < -1)
+  
+  #low = c( min(df$mean.value), quantile(subset(df, mean.value < -1)$mean.value, probs=c(0.25, 0.75)), -1)
+  #high = c(1, quantile(subset(df, mean.value > 1)$mean.value, probs=c(0.25, 0.75)), max(df$mean.value))
+
+  df$cuts = cut(df$mean.value, breaks=c(min(df$mean.value), -1,0,1, max(df$mean.value)), include.lowest = T, ordered_result = T)
+  medDf = df[-rows,]
+  rangeDf = df[rows,]
+  
+  medDf$cuts = factor('-1-1')
+  rangeDf$cuts = factor(ifelse(rangeDf$mean.value > 1, '> 1', '< -1'))
+
+  #df$cuts = cut(df$mean.value, breaks=c(low,high), include.lowest = T, ordered_result = T)
   
   p = ggplot(df, aes(x=chr.length)) + facet_grid(Status~chr, scales='free_x', space='free_x', labeller=label) 
   
@@ -24,18 +35,22 @@ cn.mtn.plot<-function(df, label, type='bar') {
     p = p + geom_segment(aes(x=start, xend=end, y=mean.value, yend=mean.value, color=cn), show.legend=T, size=1) + scale_color_manual(values=riskCols) 
   }
   if (type == 'bar') {
-    highCol = rev(brewer.pal(6, "Purples"))[c(3,1,3)]
-    lowCol = rev(rev(brewer.pal(6, "Greens"))[c(3,1,3)])
-    grey = brewer.pal(3,'Greys')[1]
+    highCol = rev(brewer.pal(6, "Purples"))[c(1,3)]
+    lowCol = rev(brewer.pal(6, "Greens"))[c(3,1)]
+#    grey = brewer.pal(3,'Greys')[1]
+    
+    colors = c('#74C476', 'darkblue','#9E9AC8')
     
     p = p + 
-      geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=T ) + 
-      scale_fill_manual(values=c(lowCol,grey,highCol),labels=c('<25%','25-75%','75%','0','<25%','25-75%','>75%'), limits=levels(df$cuts), name='') 
+      geom_rect(data=rangeDf, aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=T ) + 
+      geom_rect(data=medDf, aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=F ) + 
+      scale_fill_manual(values=colors, limits=c( levels(rangeDf$cuts)[1], levels(medDf$cuts), levels(rangeDf$cuts)[2]), name='') 
+      #scale_fill_manual(values=c(lowCol,grey,highCol),labels=c('<25%','25-75%','75%','0','<25%','25-75%','>75%'), limits=levels(df$cuts), name='') 
   }
-  p + labs(x='', y='Mean adjusted segmentation value', title='All samples') +
-    theme(text=element_text(face='bold', size=14), axis.text.x=element_blank(), legend.position='right', 
-          panel.grid = element_blank(), panel.background = element_blank(),strip.background =element_rect(fill="whitesmoke"),  
-          panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing.x = unit(0, 'lines') )
+  p + labs(x='', y='Mean adjusted segmentation value', title='All samples') + theme_minimal() +
+    theme(text=element_text(size=12, face='bold'), axis.text.x=element_blank(), legend.position='right', 
+          panel.grid = element_blank(), panel.background = element_blank(),   
+          panel.border = element_rect(color="grey88", fill=NA, size=0.5), panel.spacing.x = unit(0, 'lines') ) 
 }
 
 cn = function(x) {
@@ -97,7 +112,7 @@ roc.plot <- function(roc,title="") {
     geom_label(data=as.data.frame(t(round(pROC::coords(roc, "best"),2))), 
                aes(x=specificity, y=sensitivity, 
                    label=paste(' (FPR ', round((1-specificity),2),' TPR ', round(sensitivity,2),')\nAUC:',round(roc$auc, 2), sep='')), nudge_x=.25) +
-    labs(title=title, x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme
+    labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme
 }
 
 multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
@@ -120,7 +135,7 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   p = ggplot(df, aes(Specificity, Sensitivity,color=model,fill=model)) +
         geom_line(show.legend = F, size=1.5) + scale_x_reverse() +
         geom_label(data=aucs, aes(x=x, y=y, label=label), color='white', show.legend = F) +
-        labs(title=title, x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme
+        labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme
   if (is.null(colors) & !is.null(palette)) {
     colors = RColorBrewer::brewer.pal(length(rocList)+1, palette)
   } else if (is.null(colors) & is.null(palette)) {

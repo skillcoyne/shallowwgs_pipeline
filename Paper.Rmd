@@ -230,18 +230,20 @@ globalCNdf$mean.value = globalCNdf$value # but not going to use it
 globalCNdf$Status = factor(globalCNdf$Status, levels=sort(unique(globalCNdf$Status), decreasing=T), ordered=T)
 globalCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms'), labeller(Status=n.status, chr=label_value))
 cnLegend = get.legend(globalCN.plot)
-#globalCN.plot = globalCN.plot + theme(legend.position = 'none')
+#globalCN.plot = 
+globalCN.plot + theme(legend.position = 'none')
 
 ## NDBE
 nb.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCNdf, Status == 'Progressor' & Pathology == 'BE')$variable)), ')', sep=''),
               'Non-Progressor'=paste('Non-Progressor (n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor' & Pathology == 'BE')$variable)),')', sep=''))
 globalBECN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology == 'BE'), labeller(Status=nb.status, chr=label_value)) + labs(title='NDBE samples only')
 
-gp = globalCN.plot + theme(legend.position = 'none') + labs(y='mean adj. seg.', title='All samples') + theme(text=element_text(size=12))
+gp = globalCN.plot + theme(legend.position = 'none') + labs(y='mean adj. seg.', title='All samples')# + theme(text=element_text(size=12))
 ggsave(filename='plots/globalCN.png', plot=gp, width=16, height=4.6, units='in', dpi=300)
 
-gbe = globalBECN.plot + theme(legend.position = 'none') + labs(y='mean adj.seg.', title="Non-Dysplastic Barrett's Samples") + theme(text=element_text(size=12))
+gbe = globalBECN.plot + theme(legend.position = 'none') + labs(y='mean adj.seg.', title="Non-Dysplastic Barrett's Samples") 
 ggsave(filename='plots/globalBECN.png', plot=gbe, width=16, height=4.6, units='in', dpi=300)
+
 
 ```
 
@@ -1043,6 +1045,11 @@ unadjRR = ggplot(back, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, show.
   scale_fill_gradientn(colors = myPal,  name='') + 
   labs(y='n Samples', x='Relative Risk', title='Unadjusted relative risk') + plot.theme
 unadjRR
+
+ggplot(back, aes(Status, OR, color=OR)) + 
+  geom_boxplot(outlier.colour=NA) + geom_jitter(width=0.3, aes(shape=Pathology)) + 
+  scale_color_gradientn(colors = myPal,  name='') + plot.theme
+
 
 ggsave(filename='plots/unadj_relrisk.png', plot=unadjRR, width=6, height=5, units='in', dpi=300)
 

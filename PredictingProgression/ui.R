@@ -19,21 +19,26 @@ shinyUI(fluidPage(
   titlePanel("Barrett's Progression Prediction"),
   sidebarLayout(
     sidebarPanel(
-      fileInput("file", "Choose TSV File",
+      fileInput("file", "Choose Caveman copy number or segmented copy number file:",
                 accept = c(
                   "text/tsv",
-                  "text/tab-separated-values,text/plain",
-                  ".tsv", ".txt")
+                  "text/csv",
+                  "text/tab-separated-values,comma-separated-values,text/plain",
+                  ".csv", ".tsv", ".txt")
       ),
       tags$hr(),
-      checkboxInput("header", "Header", TRUE)
+      checkboxInput("header", "Header", TRUE),
+      # Input: Select separator ----
+      checkboxInput("norm", "Model provided norm", TRUE)
+
     ),
     
     
     
     mainPanel(
+      tableOutput("contents"),
       plotOutput("plot")
-      #tableOutput("contents")
+      
     )
   )
   

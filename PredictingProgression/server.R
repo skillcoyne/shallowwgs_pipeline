@@ -11,6 +11,7 @@ library(ggplot2)
 library(ggrepel)
 library(glmnet)
 
+
 source('lib/data_func.R')
 
 chr.info = read.table('data/chr_hg19.txt', sep='\t', header=T)
@@ -19,11 +20,11 @@ chr.info = read.table('data/chr_hg19.txt', sep='\t', header=T)
 load('data/model_data.Rdata', verbose=T)
 rm(dysplasia.df, labels)
 
-load('data/all.pt.alpha.Rdata', verbose=F)
+load('data/all.pt.alpha.Rdata', verbose=T)
 select.alpha = '0.9'
 fitV = models[[select.alpha]]
 lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
-rm(plots, coefs, dysplasia.df, cv.patient, labels, models, performance.at.1se)
+rm(plots, coefs, dysplasia.df, labels, models, performance.at.1se)
 
 
 load('data/loo.Rdata', verbose=T)
@@ -40,6 +41,10 @@ unadjRR = ggplot(pg.samp, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, sh
   labs(y='n Samples', x='Relative Risk', title='Unadjusted relative risk') + theme_light(base_size = 14)
 
 
+probs = ggplot(pg.samp, aes(Prediction)) + geom_histogram(aes(fill=..x..), bins=10, show.legend = T) +
+  scale_fill_gradientn(colors = riskPal,  name='RR') + 
+  labs(y='n Samples', x='P(Progression)', title='Predictions Probabilities') + theme_light(base_size = 14)
+
 
 # p = ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
 #   geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
@@ -50,30 +55,43 @@ unadjRR = ggplot(pg.samp, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, sh
 # Define server logic required to draw a histogram
 shinyServer(function(input, output) {
   
-  predict.progression <- function(file) {
-    rs <- read.table(file, header=T, sep="\t")
+  ## how to correctly deal with actual CN calls?  e.g. Total 2, Minor 1 etc
+  
+  predict.progression <- function(file, model.norm=T) {
+    #rs <- read.table(file, header=T, sep="\t")
+    rs <- as.data.frame(fread(file, header=T))
     if (ncol(rs) < 4)
       stop("File needs to contain 4 columns: chr, start, end, sample_value")
+    #head(rs)
     
+    cnCol = grep('Total_CN', colnames(rs))
+    if (length(col) >= 1)
+      rs = rs[,c(1:cnCol)]
     
     segs <- tile.segmented.data(rs, size=5e6 )
     segM = as.matrix(segs[,-c(1:3)])
     rownames(segM) = paste(segs$chr, ':', segs$start, '-', segs$end, sep='')
     segM = t(segM)
     
-    for (i in 1:ncol(segM)) 
-      segM[,i] = unit.var(segM[,i], z.mean[i], z.sd[i])
-    #segM = unit.var(segM)
-    
+    if (model.norm) {
+      for (i in 1:ncol(segM)) 
+        segM[,i] = unit.var(segM[,i], z.mean[i], z.sd[i])
+    } else {
+      segM = unit.var(segM)
+    }
     
     arms <- tile.segmented.data(rs, size='arms')
     armsM = as.matrix(arms[,-c(1:3)])
     rownames(armsM) = paste(arms$chr, ':', arms$start, '-', arms$end, sep='')
     armsM = t(armsM)
     
-    for (i in 1:ncol(armsM)) 
-      armsM[,i] = unit.var(armsM[,i], z.arms.mean[i], z.arms.sd[i])
-    #armsM = unit.var(armsM)
+    if (model.norm) {
+      for (i in 1:ncol(armsM)) 
+        armsM[,i] = unit.var(armsM[,i], z.arms.mean[i], z.arms.sd[i])
+    } else {
+      armsM = unit.var(armsM)
+    }
+    
     
     #nrow(armsM) == nrow(segM)
     
@@ -99,29 +117,47 @@ shinyServer(function(input, output) {
     # 'size', 'type', and 'datapath' columns. The 'datapath'
     # column will contain the local filenames where the data can
     # be found.
+    req(input$file)
+    
     inFile <- input$file
     
-    if (is.null(inFile))
-      return(NULL)
+    df <- data.table::fread(input$file$datapath,
+                            header = input$header)
+                   #sep = input$sep,
+                   #quote = input$quote)
     
-    pp = predict.progression(inFile$datapath)
     
-    pp$prob
+    return(head(df))
+    
+    #pp = predict.progression(inFile$datapath)
+    
+    #pp$prob
     
   })     
    output$plot <- renderPlot({
      inFile <- input$file
      
+     norm = input$norm
+     
     if (is.null(inFile))  
       return(unadjRR)
     
-    pp = predict.progression(inFile$datapath)
+    pp = predict.progression(inFile$datapath, norm)
       
     RR = as.data.frame(pp$rel.risk)
     colnames(RR) = 'rel.risk'
 
-    unadjRR + geom_point(data=RR, aes(x=rel.risk, y=3), size=2) +
+    pR = as.data.frame(round(pp$prob, 3))
+    colnames(pR) = 'Probability'
+    
+    
+    plot = unadjRR + geom_point(data=RR, aes(x=rel.risk, y=3), size=2) +
       geom_text_repel(data=RR, aes(x=rel.risk, y=3, label=round(rel.risk, 2)))
+    
+    gridExtra::grid.arrange(plot, gridExtra::tableGrob(pR, theme=ttheme_minimal()), nrow=2, heights=c(4,1))
+
    })
   
+   
+   
 })
