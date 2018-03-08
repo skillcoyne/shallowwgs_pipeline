@@ -29,11 +29,11 @@ infodir = args[3]
 
 # Discovery or all
 allPts = ifelse (length(args) == 2, as.logical(args[2]), F)
-
+allPts = T
 
 cache.dir = paste(outdir, '5e6_arms_disc', sep='/')
 if (allPts)
-  cache.dir = paste(outdir, '5e6_arms_all', sep='/')
+  cache.dir = paste(outdir, '5e6_arms_all_exAHM0320', sep='/')
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 ## Hospital.Research.ID info file
@@ -58,6 +58,12 @@ raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
 
 cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
 raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
+
+cleaned = grep('AHM0320', cleaned, value=T, invert=T)
+raw = grep('AHM0320', raw, value=T, invert=T)
+
+sum.patient.data = subset(sum.patient.data, Hospital.Research.ID != 'AHM0320')
+patient.info = subset(patient.info, Hospital.Research.ID != 'AHM0320')
 
 arms = grep('arms', cleaned, value=T)
 segs = grep('arms', cleaned, invert=T, value=T)
@@ -125,13 +131,13 @@ save(allDf, dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arm
 
 nl = 1000;folds = 10; splits = 5 
 
-file = list.files(data, pattern='patient_folds.tsv', recursive=T, full.names=T)
-if (length(file) == 1 && !allPts) {
-  message(paste("Reading folds file", file))
-  sets = read.table(file, header=T, sep='\t')
-} else {
+#file = list.files(data, pattern='patient_folds.tsv', recursive=T, full.names=T)
+#if (length(file) == 1 && !allPts) {
+#  message(paste("Reading folds file", file))
+#  sets = read.table(file, header=T, sep='\t')
+#} else {
   sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2)  
-}
+#}
 
 nl = 1000;folds = 10; splits = 5 
 alpha.values = c(0, 0.5,0.7,0.8,0.9,1)

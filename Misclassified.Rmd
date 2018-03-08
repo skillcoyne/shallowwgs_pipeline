@@ -132,6 +132,45 @@ disc.loo.coefs = nzcoefs
 rm(dysplasia.df, fits, plots, pg.samp, allDf, nzcoefs, coefs)
 ```
 
+## Worst patient in the 'all' model
+
+54 (AHM0320)
+
+```{r echo=F}
+dir = paste(data, 'Analysis/5e6_arms_all', sep='/')
+file = paste(disc.dir, 'model_data.Rdata', sep='/')
+if (!file.exists(file))
+  stop(paste("Missing data file", file))
+
+load(file, verbose=T)
+all.dysplasia.df = dysplasia.df
+all.labels = labels
+
+sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2)  
+
+rows = which(rownames(all.dysplasia.df) %in% subset(patient.info, Hospital.Research.ID %in% c('AHM0320'))$Samplename)
+
+df = all.dysplasia.df[-rows,]
+labels = all.labels[rownames(df)]
+
+a = 0.9; nl=1000; folds=10; splits=5
+fit0 <- glmnet(df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)    
+#autoplot(fit0) + theme(legend.position = 'none')
+    
+cv = crossvalidate.by.patient(x=df, y=labels, lambda=fit0$lambda, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
+    
+lambda.opt = cv$lambda.1se
+subset(cv$lambdas, lambda == lambda.opt)$mean
+
+predict(fit0, newx=all.dysplasia.df[rows,], s=cv$lambda.1se, type='link')
+pm = predict(fit0, newx=all.dysplasia.df[rows,], s=cv$lambda.1se, type='response')
+colnames(pm) = c("Prediction")
+pred = merge(pm, patient.info, by.x='row.names', by.y='Samplename')
+
+
+```
+
+
 
 ## Misclassified in 'Discovery'
 

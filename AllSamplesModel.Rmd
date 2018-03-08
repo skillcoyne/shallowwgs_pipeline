@@ -604,8 +604,65 @@ oddPt = names(pg.samp)[which.max(performance.at.1se)]
 subset(sum.patient.data, Hospital.Research.ID == oddPt)
 pg.samp[[oddPt]]$Prediction
 
+oddPt = names(pg.samp)[which.min(performance.at.1se)]
+
 # Not the pt with the most samples or endos
 #sum.patient.data[which.max(sum.patient.data$total.samples),]
+```
+
+## All LOO
+
+```{r echo=F, eval=F}
+
+files = list.files('~/Data/Ellie/Analysis/5e6_arms_LOO', full.names = T)
+
+sum.patient.data$Hospital.Research.ID[1]
+
+
+pg.samp = list()
+performance = vector(length=nrow(sum.patient.data), mode='numeric')
+names(performance) = sum.patient.data$Hospital.Research.ID
+
+for (pt in sum.patient.data$Hospital.Research.ID) {
+  ptF = grep(pt, files, value=T)
+  load(grep('loo\\.Rdata', ptF, value=T), verbose=T)
+  #load(grep('model_data\\.Rdata', ptF, value=T), verbose=T)
+  performance[pt] = performance.at.1se
+  pg.samp[[pt]] = info
+}
+rm(plots,coefs,nzcoefs,fits,info)
+
+load("/Users/skillcoy/Data/Ellie/Analysis/5e6_arms_LOO/PR1_HIN_042_loo.Rdata", verbose=T)
+load("/Users/skillcoy/Data/Ellie/Analysis/5e6_arms_LOO/PR1_HIN_042_model_data.Rdata", verbose=T)
+
+load("/Users/skillcoy/Data/Ellie/Analysis/5e6_arms_LOO/AHM0320_loo.Rdata", verbose=T)
+load("/Users/skillcoy/Data/Ellie/Analysis/5e6_arms_LOO/AHM0320_model_data.Rdata", verbose=T)
+
+
+fitLOO <- glmnet(dysplasia.df, labels[rownames(dysplasia.df)], alpha=0.9, family='binomial', nlambda=500, standardize=F) 
+
+pm = predict(fitLOO, newx=allDf, s=fits$lambda.1se, type='response')
+or = predict(fitLOO, newx=allDf, s=fits$lambda.1se, type='link')
+
+hist(pm)
+hist(or)
+
+pm[subset(patient.info, Hospital.Research.ID == 'AHM0320')$Samplename,]
+or[subset(patient.info, Hospital.Research.ID == 'AHM0320')$Samplename,]
+
+sort(performance)
+
+pg.samp[which.max(performance)]
+
+pg.samp[which.min(performance)]
+
+back = do.call(rbind, pg.samp)
+
+subset(sum.patient.data, Status == 'NP' & total.endos <=2)
+
+pm[pg.samp[['AD0309']]$Samplename,]
+pg.samp[['AD0309']]$Prediction
+
 ```
 
 
@@ -888,13 +945,14 @@ qt = as.data.frame.matrix(table(back$quants, back$Status))
 qt$quant = rownames(qt)
 
 ft.fun<-function(NP,P) {
-  f = fisher.test(rbind(cbind(NP,P),table(sum.patient.data$Status)))
-  cbind.data.frame('p.value'=f$p.value, 'odds.ratio'=f$estimate)
+  f = chisq.test(rbind(cbind(NP,P),table(sum.patient.data$Status)))
+  cbind.data.frame('p.value'=f$p.value)
+  #cbind.data.frame('p.value'=f$p.value, 'odds.ratio'=f$estimate)
 }
 
 qt = cbind(qt, back %>% group_by(quants) %>% dplyr::summarise ( 'mn'=mean(Prediction), 'sd'=sd(Prediction) ))#, 
 pred.confidence = qt %>% as.data.frame.matrix %>% group_by(quant) %>% dplyr::mutate( 
-  'perc'=P/sum(NP,P), 'p.value'=ft.fun(NP,P)$p.value, 'odds'=ft.fun(NP,P)$odds.ratio, 'conf'=ifelse(p.value < 0.05, '*', '') )
+  'perc'=P/sum(NP,P), 'p.value'=ft.fun(NP,P)$p.value,  'conf'=ifelse(p.value < 0.05, '*', '') )
 
 pred.confidence[c('r1','r2')] = NA
 for (i in 1:(length(cuts)-1)) 
@@ -928,7 +986,7 @@ pred.confidence$Risk = factor(pred.confidence$Risk, levels=c('Low','Moderate','H
 ```{r pcalib, echo=F, warning=F, message=F, fig.width=8, fig.height=6}
 pcal = ggplot(pred.confidence, aes(mn, perc)) + 
   geom_rect(aes(xmin=r1, xmax=r2, ymin=0,ymax=1, fill=Risk), alpha=0.6) + scale_fill_manual(values=riskCols) +
-  geom_point() + #geom_text(aes(label=paste(r1,r2,sep='-')), nudge_x=0.05) +
+  geom_point() + geom_abline(slope=1, intercept=0, color='grey39', linetype='dotted') + #geom_text(aes(label=paste(r1,r2,sep='-')), nudge_x=0.05) +
   geom_errorbar(aes(ymin=ci.low, ymax=ci.high), width=0.01) + labs(x='Mean prediction', y='Ratio of `P` patients', title='Prediction calibration') +
   scale_color_manual(values=riskCols) + plot.theme + theme(legend.position = 'none')
 pcal
@@ -955,6 +1013,10 @@ unadjRR
 
 ggsave(filename='plots/unadj_relrisk.png', plot=unadjRR, width=6, height=5, units='in', dpi=300)
 
+ggplot(back, aes(Status, OR, color=OR)) + 
+  geom_boxplot(outlier.colour=NA) + geom_jitter(width=0.3, aes(shape=Pathology)) + 
+  scale_color_gradientn(colors = myPal,  name='') + plot.theme
+
 predhist = ggplot(back, aes(Prediction)) + geom_histogram(aes(fill=..x..), breaks=cuts, show.legend = F) +
   scale_fill_gradientn(colors = myPal,  name='') + 
   plot.theme + labs(title='Predictions, all samples model', y='n Samples', x='Probability') 
@@ -973,7 +1035,6 @@ The idea here is to get some sort of CI for the coefficients, I'm not entirely s
 Could just as easily get a jacknife CI per patient
 
 ```{r jacknife, echo=T, warning=F, message=F, fig.height=10, fig.width=12}
-
 coefs.per.pt = data.frame(matrix(ncol=length(pg.samp), nrow=nrow(ch), dimnames=list( ch$label, names(pg.samp))))
 for (pt in names(pg.samp)) {
 lcf = loo.coefs[[pt]][,1]
@@ -1179,6 +1240,144 @@ ggsave('plots/npg_heatmap.png', plot=p1, width=52, height=8, units="in", limitsi
 ggsave('plots/pg_heatmap.png', plot=p2, width=52, height=8, units="in", limitsize=F, dpi = 300)
 ggsave('plots/risk_legend.png', plot=grid.arrange(riskLegend), width=2,height=4, dpi=300)
 ggsave('plots/risk_legend_long.png', plot=grid.arrange(riskLegendLong), width=8,height=2, dpi=300)
+```
+
+# Chr17
+
+## p arm
+```{r, echo=T}
+
+p11 = subset(globalCNdf, chr == 17 &  start == 1 & seg.type == 'arms')
+p11Loss = subset(p11, value < -1)
+table(p11Loss$Status)
+
+p11path = table(subset(patient.info, Samplename %in% p11Loss$variable)$Pathology)
+
+p11path['BE']/sum(p11path)
+sum(p11path[c('HGD','IMC')])/sum(p11path)
+
+table(p11Loss[c('Patient', 'Pathology')])
+
+# Samples with a loss vs all Progressor samples
+length(unique(p11Loss$variable))/length(unique(subset(globalCNdf, Status == 'Progressor')$variable))
+
+p11Loss = unique(p11Loss[,c('variable', 'Status','Hospital.Research.ID', 'Patient', 'Pathology')])
+length(unique(p11Loss$Patient))/length(subset(sum.patient.data, Status == 'P')$Patient)
+# Of those where we see loss of p arm, p53 IHC shows an "abnormal" result 33% of the time
+
+table(subset(patient.info, Samplename %in% p11Loss$variable, select='p53.Status'))/length(p11Loss$variable)
+
+(table(subset(patient.info, Samplename %in% p11Loss$variable, select=c('p53.Status', 'Pathology'))))
+
+
+pi = patient.info
+pi$p11Loss = as.numeric(pi$Samplename %in% p11Loss$variable)
+
+plot(table(p11=pi$p11Loss, ihc=pi$p53.Status))
+
+cor.test(pi$p11Loss, (as.numeric(pi$p53.Status)-1))
+
+# So why might there be loss but no corresponding aberrant staining?
+table(subset(pi, p11Loss == 1 & p53.Status == 0)$Pathology)
+table(subset(pi, p11Loss == 1 & p53.Status == 1)$Pathology)
+
+```
+
+## Top Features
+```{r, echo=T}
+m = data.frame(matrix(nrow=nrow(chh), ncol=0))
+
+for (i in 1:nrow(chh)) {
+  feat = chh[i,]
+  
+  seg = subset(globalCNdf, chr == as.character(feat$chr) & start == feat$start & end == feat$end & seg.type != 'arms')  
+  if(feat$end-feat$start > 5e6)
+    seg = subset(globalCNdf, chr == as.character(feat$chr) & start == feat$start & end == feat$end & seg.type == 'arms')  
+  
+  segGL = subset(seg, value < -1)
+  if(feat$coef > 0)
+    segGL = subset(seg, value > 1)
+
+  m[i, 'n.samples'] = length(unique(segGL$variable))
+  m[i,'ratio.samples.P'] = length(unique(segGL$variable))/length(unique(subset(globalCNdf, Status == 'Progressor')$variable))
+  m[i, 'ratio.NP'] = table(segGL$Status)[1]/sum(table(segGL$Status))
+  m[i, 'ratio.P'] = table(segGL$Status)[2]/sum(table(segGL$Status))
+  
+  segpath = table(subset(patient.info, Samplename %in% segGL$variable)$Pathology)
+
+  m[i,'BE'] = segpath['BE']/sum(segpath)
+  m[i,'HGD'] = sum(segpath[c('HGD','IMC')])/sum(segpath)
+}
+rownames(m) = chh$label
+
+range(m$ratio.samples.P)
+summary(m$ratio.samples.P)
+subset(m, ratio.samples.P == max(ratio.samples.P))
+subset(chh, label == rownames(subset(m, ratio.samples.P == max(ratio.samples.P))))
+subset(chh, label == rownames(subset(m, ratio.samples.P == min(ratio.samples.P))))
+#table(cdkGain[c('Patient', 'Pathology')])
+
+cor.test(chh$hazards, m$n.samples)
+
+# Samples with a gain vs all samples
+
+```
+One way of looking at the p53 prediction (e.g. Adam Bass) is to see how predictive the p-arm loss in chr17 is.
+```{r, echo=F, warning=F, message=F, fig.height=5, fig.width=10}
+ccgenes = read.table('~/Data/CosmicCensusGenes.tsv', sep='\t', header=T, stringsAsFactors=F)
+ccgenes = ccgenes[-grep('^X|Y', ccgenes$Genome.Location),]
+#ccgenes = ccgenes[-which(ccgenes$Mutation.Types == 'T'),] # drop the translocations
+#ccgenes = subset(ccgenes, !grepl('^X|Y', Genome.Location))
+#loc = unlist(strsplit(ccgenes$Genome.Location, ':|-'))
+loc = do.call(rbind.data.frame, strsplit(ccgenes$Genome.Location, ':|-'))
+colnames(loc) = c('chr','start','end')
+loc[] = lapply(loc[], function(x) as.numeric(as.character(x)))
+
+ccgenes = cbind(ccgenes, loc)
+ccgenes = ccgenes[c('Gene.Symbol','Genome.Location', 'Role.in.Cancer', 'Mutation.Types',colnames(loc))]
+#ccgenes = subset(ccgenes, grepl('\\w+',Role.in.Cancer))
+
+genes = cbind(subset(ccgenes, grepl('TSG|oncogene', Role.in.Cancer) & Mutation.Types != 'T', select=c('Gene.Symbol','Genome.Location', colnames(loc))), 'value'=min(globalCNdf$mean.value)+2*sd(globalCNdf$mean.value), 'Row.names'='', 'Patient'='', 'selected'=as.factor(0))
+
+genesGR = makeGRangesFromDataFrame(genes, keep.extra.columns = T)
+chGR = makeGRangesFromDataFrame(chh, keep.extra.columns = T)
+
+ov = findOverlaps(chGR, genesGR)
+
+g17 = plot.cn.chr(globalCNdf, chrom='17', chr.lengths, genes=genes, haz=chh, label=labeller(chr=label_both, Status=n.status)) + 
+  labs(title="All Samples") + theme(legend.position = 'none')
+g17
+
+ggsave(filename='plots/hazards/chr17.png', plot=g17, width=10, height=5, units='in', dpi=300)
+
+```
+
+
+```{r echo=F, warning=F, message=F, fig.height=5, fig.width=10}
+chGR$Genes = ''
+for (hit in unique(queryHits(ov))) {
+  chGR[hit]$Genes = paste(genesGR[subjectHits(ov[queryHits(ov) == hit])]$Gene.Symbol, collapse=',')
+}
+
+for (chr in unique(chh$chr)) {  
+  print(chr)
+  p = plot.cn.chr(subset(globalCNdf, seg.type != 'arms') , chrom=chr, chr.lengths, genes=genes, haz=chh)
+  f = paste('chr',chr,'.png',sep='')
+  ggsave(paste('plots/hazards/',f,sep=''), plot=p, width=10, height=5, units='in', dpi=300)
+#  print(p)
+}
+
+annoG = arrange(subset(ccgenes, grepl('CDKN2A$|TP53|MYC$|SMAD4|VEG|ERBB2|EGFR|SMYD|ARID1A|FHIT|RUNX1', Gene.Symbol)), chr)
+annoG = merge(annoG, chr.lengths[c('chrom','chr.length')], by.x='chr',by.y='chrom')
+annoG$ymin = round(range(globalCN.plot$data$mean.value))[1]/2
+annoG$ymax = round(range(globalCN.plot$data$mean.value))[2]/2
+
+p = globalCN.plot + #geom_rect(data=annoG, aes(xmin=start, xmax=end, ymin=ymin,ymax=ymax), color='red') +
+  geom_point(data=annoG, aes(x=start, y=0), size=1.5, color='red') +
+  geom_text_repel(data=annoG, aes(x=start, y=ymax/2, label=Gene.Symbol), color='red', size=1.5, fontface='italic' ) + theme(legend.position = 'none')
+
+ggsave('plots/global_gene_ann.png', plot=p, width=10, height=5, units='in', dpi=300)
+
 ```
 
 

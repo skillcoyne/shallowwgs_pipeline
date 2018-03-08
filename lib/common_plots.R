@@ -198,7 +198,7 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NUL
   if (!is.null(genes)) {
     genes = subset(genes, chr == chrom)
     if (nrow(genes) > 0) p = p + geom_point(data=genes, aes(x=start,  y=value), color='darkblue', size=3) +
-        geom_text_repel(data=genes, aes(x=start, y=value, label=Gene.Symbol), color='darkblue') 
+        geom_text_repel(data=genes, aes(x=start, y=value, label=Gene.Symbol), color='darkblue', fontface='italic') 
   }
   if (!is.null(haz)) {
     haz = subset(haz, chr == chrom)

@@ -29,9 +29,8 @@ infodir = args[3]
 #infodir = '~/Data/Ellie/QDNAseq'
 
 patient = args[4]
-#patient = 'AD0607'
+#patient = 'AHM0320'
 
-# 
 allPts = T
 
 
