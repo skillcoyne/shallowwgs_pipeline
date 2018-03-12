@@ -2,7 +2,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 3)
-  stop("Missing required params: <data dir> <out dir> <blacklist file>")
+  stop("Missing required params: <data dir> <out dir> <blacklist file> <overwrite: default F>")
 
 suppressPackageStartupMessages(source('lib/fastPCF.R'))
 suppressPackageStartupMessages(source('lib/data_func.R'))
@@ -13,6 +13,8 @@ chrlen = get.chr.lengths()
 dir = args[1]
 outdir = args[2]
 exclude.file = args[3]
+overwrite = F
+if (length(args) == 4) overwrite = args[4]
 
 # dir = '~/Data/Ellie/QDNAseq/DownsampledBE/20180206_KillcoyneS_RF_BarrettsCN/qdnaseq/'
 # outdir = '~/Data/Ellie/Analysis/downsampled5G_BEAdjacent/'
@@ -28,6 +30,13 @@ if ( !file.exists(exclude.file) )
 blacklisted.regions = read.table(exclude.file,sep="\t",header=T,stringsAsFactors=F)
 
 samples = unique(sub('\\.binSize.*', '', list.files(dir)))
+
+existing = sub('_raw.txt','',list.files(outdir))
+existing = grep('\\.Rdata', existing, invert=T, value=T)
+
+if (!overwrite) 
+  samples = setdiff(samples, existing)
+
 
 for (i in 1:length(samples)) {
   sampleFiles = grep(samples[i], list.files(dir), value=T)
@@ -45,3 +54,4 @@ for (i in 1:length(samples)) {
   res = binSWGS(raw.data, fit.data, blacklisted.regions)
   write.table(res, sep='\t', quote=F, row.names=F, file=paste(outdir, paste(samples[i], '_raw.txt',sep=''), sep='/'))
 }
+print("Finished")
