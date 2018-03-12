@@ -1,24 +1,29 @@
 
+args = commandArgs(trailingOnly=TRUE)
+
+if (length(args) < 3)
+  stop("Missing required params: <data dir> <out dir> <blacklist file>")
+
 suppressPackageStartupMessages(source('lib/fastPCF.R'))
 suppressPackageStartupMessages(source('lib/data_func.R'))
 
-if (length(args) < 2)
-  stop("Missing required params: <data dir> <out dir>")
-
 
 chrlen = get.chr.lengths()
+
 dir = args[1]
 outdir = args[2]
+exclude.file = args[3]
 
-# dir = '~/Data/Ellie/QDNAseq/DownsampledBE/BEST2_NDBE'
-# outdir = '~/Data/Ellie/Analysis/downsampled5G_NDBE'
+# dir = '~/Data/Ellie/QDNAseq/DownsampledBE/20180206_KillcoyneS_RF_BarrettsCN/qdnaseq/'
+# outdir = '~/Data/Ellie/Analysis/downsampled5G_BEAdjacent/'
+#exclude.file = '~/Data/Ellie/QDNAseq/qDNAseq_blacklistedRegions.txt'
+
 dir.create(outdir, F)
 #f = 'LP2000110-DNA_A01.binSize15.fittedReadCounts.txt'
 #r = 'LP2000110-DNA_A01.binSize15.readCounts.txt'
 
-exclude.file = grep('qDNAseq_blacklistedRegions.txt', list.files('~/Data/Ellie',recursive=T,full.names=T), value=T)
-if (length(exclude.file) <= 0)
-  stop(paste("Missing necessary exclusion file from 'qDNAseq_blacklistedRegions.txt' in",data))
+if ( !file.exists(exclude.file) )
+  stop(paste("Missing necessary exclusion file from 'qDNAseq_blacklistedRegions.txt' in",dir))
 
 blacklisted.regions = read.table(exclude.file,sep="\t",header=T,stringsAsFactors=F)
 
