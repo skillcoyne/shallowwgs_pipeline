@@ -9,15 +9,15 @@ suppressPackageStartupMessages(library(reshape2))
 suppressPackageStartupMessages(library(GenomicRanges))
 
 
-suppressPackageStartupMessages(source('../lib/load_patient_metadata.R'))
-suppressPackageStartupMessages(source('../lib/cv-pt-glm.R'))
-suppressPackageStartupMessages(source('../lib/data_func.R'))
+suppressPackageStartupMessages(source('/homes/skillcoy/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
+suppressPackageStartupMessages(source('/homes/skillcoy/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
+suppressPackageStartupMessages(source('/homes/skillcoy/workspace/shallowwgs_pipeline/lib/data_func.R'))
 
 
 
 args = commandArgs(trailingOnly=TRUE)
 
-if (length(args) < 4)
+if (length(args) < 3)
   stop("Missing required params: <data dir> <outdir> <info file dir>")
 
 data = args[1]
@@ -125,8 +125,8 @@ dim(dysplasia.df)
 save(allDf, dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
 
 
-sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2) 
 nl = 1000; folds = 10; splits = 5 
+sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2) 
 alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
 
 ## ----- All ----- ##
