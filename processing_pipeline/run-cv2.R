@@ -29,9 +29,8 @@ infodir = args[3]
 
 # Discovery or all
 allPts = ifelse (length(args) == 2, as.logical(args[2]), F)
-allPts = T
 
-cache.dir = paste(outdir, '5e6_arms_disc', sep='/')
+cache.dir = paste(outdir, '5e6_arms_disc_exAHM0320', sep='/')
 if (allPts)
   cache.dir = paste(outdir, '5e6_arms_all_exAHM0320', sep='/')
 dir.create(cache.dir, recursive=T, showWarnings=F)
@@ -136,7 +135,7 @@ nl = 1000;folds = 10; splits = 5
 #  message(paste("Reading folds file", file))
 #  sets = read.table(file, header=T, sep='\t')
 #} else {
-  sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2)  
+sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2)  
 #}
 
 nl = 1000;folds = 10; splits = 5 
@@ -151,7 +150,7 @@ if (file.exists(file)) {
   for (a in alpha.values) {
     fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)    
     l = fit0$lambda
-    
+
     cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
     lambda.opt = cv.patient$lambda.1se

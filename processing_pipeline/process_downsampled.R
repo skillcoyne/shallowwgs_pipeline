@@ -1,12 +1,18 @@
 
-source('lib/fastPCF.R')
-source('lib/data_func.R')
+suppressPackageStartupMessages(source('lib/fastPCF.R'))
+suppressPackageStartupMessages(source('lib/data_func.R'))
 
-chrlen=get.chr.lengths()
+if (length(args) < 2)
+  stop("Missing required params: <data dir> <out dir>")
 
-dir = '~/Data/Ellie/QDNAseq/DownsampledBE/BEST2_NDBE'
-outdir = '~/Data/Ellie/Analysis/downsampled5G_NDBE'
-dir.create(outdir)
+
+chrlen = get.chr.lengths()
+dir = args[1]
+outdir = args[2]
+
+# dir = '~/Data/Ellie/QDNAseq/DownsampledBE/BEST2_NDBE'
+# outdir = '~/Data/Ellie/Analysis/downsampled5G_NDBE'
+dir.create(outdir, F)
 #f = 'LP2000110-DNA_A01.binSize15.fittedReadCounts.txt'
 #r = 'LP2000110-DNA_A01.binSize15.readCounts.txt'
 

@@ -147,7 +147,7 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
 }
 
 pred.tiles <- function(df, probs=F, OR=F, cols=c('green3','orange','red3'), ...) {
-  p = ggplot(df, aes(brks, nl))
+  p = ggplot(df, aes(brks, as.factor(Block)))
 
   if (OR) {
     p = p + geom_tile(aes(fill=OR), color='white') + scale_fill_gradientn(colors = myPal, limits=c(-9.3,15), name='RR') 
@@ -157,15 +157,12 @@ pred.tiles <- function(df, probs=F, OR=F, cols=c('green3','orange','red3'), ...)
     p = p + geom_tile(aes(fill=Risk)) + 
       scale_fill_manual(values=cols, limits=levels(df$Risk), name='Progression')
   }
-  p + 
-    geom_point(aes(shape=Pathology, color=Risk), fill='white', size=3) + scale_color_manual(values=c('white','black','white'), guide=F) +
+  p + geom_point(aes(shape=Pathology), fill='white', color='white', size=3) + 
+    # scale_color_manual(values=c('white','black','white'), guide=F) +
     scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='white', color='white'))) +
-    #scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') +  #scale_color_manual(values=cols, limits=levels(df$Risk),name='Progression') +
-    #geom_label(aes(label=Pathology), fill='white', show.legend=F) + 
-    #scale_color_manual(values=c('white','black','white'), limits=levels(df$Risk)) +
-    facet_wrap(~Patient, scales='free', labeller=label_both, ...) +
-    labs(y='Oesophageal Location',x='Months Prior to Endpoint', title='') +
-    plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1), legend.key = element_rect(fill='grey39')) 
+    facet_wrap(~Patient, ...) +
+    labs(y='Oesophageal Location (OGJ..)',x='Endoscopy (Base...End)', title='') +
+    plot.theme + theme(axis.text = element_blank(), legend.key = element_rect(fill='grey39'), panel.background = element_rect(colour = 'black'), panel.grid.major = element_blank()) 
 }
 
 plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NULL) {
