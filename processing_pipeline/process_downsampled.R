@@ -17,7 +17,7 @@ overwrite = F
 if (length(args) == 4) overwrite = args[4]
 
 # dir = '~/Data/Ellie/QDNAseq/DownsampledBE/20180206_KillcoyneS_RF_BarrettsCN/qdnaseq/'
-# outdir = '~/Data/Ellie/Analysis/downsampled5G_BEAdjacent/'
+# outdir = '~/Data/Ellie/Analysis/downsampled5G_BEAdjacent_normal/'
 #exclude.file = '~/Data/Ellie/QDNAseq/qDNAseq_blacklistedRegions.txt'
 
 dir.create(outdir, F)

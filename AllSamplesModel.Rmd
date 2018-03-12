@@ -201,21 +201,20 @@ globalCNdf = globalCNdf %>% group_by(Status, start, end) %>% dplyr::mutate( 'mea
 globalCNdf$mean.value = globalCNdf$value # but not going to use it 
 
 globalCNdf$Status = factor(globalCNdf$Status, levels=sort(unique(globalCNdf$Status), decreasing=T), ordered=T)
-globalCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms'), labeller(Status=n.status, chr=label_value))
-cnLegend = get.legend(globalCN.plot)
-#globalCN.plot = globalCN.plot + theme(legend.position = 'none')
+globalCN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms'), labeller(Status=n.status, chr=label_value)) 
+cnLegend = get.legend(globalCN.plot + theme(legend.position='bottom'))
+
+globalCN.plot = globalCN.plot + theme(legend.position = 'none') + labs(y='mean adj. seg.', title='All samples')
+ggsave(filename='plots/globalCN.png', plot=globalCN.plot + labs(title=''), width=16, height=4.6, units='in', dpi=300)
+globalCN.plot
+
 
 ## NDBE
 nb.status <- c('Progressor'=paste('Progressor (n=',length(unique(subset(globalCNdf, Status == 'Progressor' & Pathology == 'BE')$variable)), ')', sep=''),
               'Non-Progressor'=paste('Non-Progressor (n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor' & Pathology == 'BE')$variable)),')', sep=''))
 globalBECN.plot = cn.mtn.plot(subset(globalCNdf, seg.type != 'arms' & Pathology == 'BE'), labeller(Status=nb.status, chr=label_value)) + labs(title='NDBE samples only')
-
-globalCN.plot = globalCN.plot + theme(legend.position = 'none') + labs(y='mean adj. seg.', title='All samples')
-ggsave(filename='plots/globalCN.png', plot=globalCN.plot, width=16, height=4.6, units='in', dpi=300)
-globalCN.plot
-
 globalBECN.plot = globalBECN.plot + theme(legend.position = 'none') + labs(y='mean adj.seg.', title="Non-Dysplastic Barrett's Samples") 
-ggsave(filename='plots/globalBECN.png', plot=globalBECN.plot, width=16, height=4.6, units='in', dpi=300)
+ggsave(filename='plots/globalBECN.png', plot=globalBECN.plot + labs(title=''), width=16, height=4.6, units='in', dpi=300)
 globalBECN.plot
 
 ```
@@ -345,7 +344,7 @@ rm(performance.at.1se, coefs, mp, no.hgd.plots)
 
 ### Remove LGD
 
-```{r noLGD, echo=F, warning=F, message=F, fig.width=6, fig.height=6, eval=F}
+```{r noLGD, echo=F, warning=F, message=F, fig.width=6, fig.height=6, eval=T}
 file = paste(cache.dir, 'nolgd.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
@@ -357,7 +356,7 @@ mp = model.performance(performance.at.1se, coefs)
 mp$plot = mp$plot + labs(title='No LGD/HGD/IMC samples')
 mp$plot
 
-ggsave('plots/performance/no_lgd_perf.png', plot=mp$plot, height=5, width=5, units='in', dpi=30)
+ggsave('plots/performance/no_lgd_perf.png', plot=mp$plot, height=5, width=5, units='in', dpi=300)
 
 classification.rate = add_row(classification.rate, 'model'='No LGD/HGD/IMC', 'mean'=mp$performance[select.alpha, 'mean'], 'sme'=mp$performance[select.alpha, 'sme'],
                               'stable.coef'=length(which(mp$stable.coeffients[[select.alpha]] >= 0.75)), 'all.coef'=length(mp$stable.coeffients[[select.alpha]]))
@@ -537,7 +536,10 @@ chh = subset(chh, !is.na(chr))
 chh = merge(chh, chr.lengths[,c('chrom','chr.length')], by.y='chrom', by.x='chr')
 chh$chr = factor(chh$chr, levels=c(1:22))
 
-chh$ymax = ifelse(chh$coef > 0, max(globalCN.plot$data$mean.value), min(globalCN.plot$data$mean.value))
+chh = merge(chh,globalCNdf %>% group_by(chr) %>% dplyr::summarise(minV=min(mean.value), maxV=max(mean.value)),by='chr')
+chh = chh %>% dplyr::mutate( ymax = ifelse(coef > 0, maxV, minV) )
+chh[c('maxV','minV')] = NULL
+
 chh$gl = factor(ifelse(chh$coef > 0, 'gain', 'loss'))
 
 custom.max<-function(cf, hazards, ymax) {
@@ -672,7 +674,7 @@ roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
 roc$model = 'CN Model'
 roc$is = 'all'
 
-ggsave(filename='plots/discovery_roc.png', plot=roc.plot(roc), width=6, height=4, units='in', dpi=300)
+ggsave(filename='plots/auc/all_roc.png', plot=roc.plot(roc), width=6, height=4, units='in', dpi=300)
 
 insilico.rocs[['all']] = roc
 
@@ -846,7 +848,7 @@ comp = ggplot(melt(subset(m, Measure == 'AUC'), measure.vars='value'), aes(x=mod
   theme(legend.position = 'none') + labs(x='', y='AUC', title='ROC Comparison') 
 comp
 
-ggsave('plots/auc/path_p53_cn_auc.png', plot=comp, width=6, height=8, units="in", limitsize=F, dpi = 300)
+ggsave('plots/auc/path_p53_cn_auc.png', plot=comp, width=2.7, height=3.7, units="in", limitsize=F, dpi = 300, scale=2)
 
 ```
 
@@ -992,7 +994,7 @@ pcal = ggplot(pred.confidence, aes(mn, perc)) +
   scale_color_manual(values=riskCols,limits=levels(pred.confidence$Risk) ) + plot.theme + theme(legend.position = 'none')
 pcal
 
-ggsave(filename='plots/pred_calib.png', plot=pcal, width=3, height=3, units='in', dpi=300)
+ggsave(filename='plots/pred_calib.png', plot=pcal, width=2.2, height=2.2, units='in', dpi=300, scale=2)
 
 back = merge(back, pred.confidence[c('quant','Risk')], by.x='quants',by.y='quant')
 back = back %>% group_by(Risk) %>% dplyr::mutate('se(Risk)'=(sd(Prediction)/sqrt(length(Risk)))*1.96 )
@@ -1008,7 +1010,7 @@ unadjRR = ggplot(back, aes(OR)) + geom_histogram(aes(fill=..x..), bins=15, show.
   scale_fill_gradientn(colors = myPal,  name='') + 
   labs(y='n Samples', x='Relative Risk', title='Unadjusted relative risk') + plot.theme
 unadjRR
-ggsave(filename='plots/unadj_relrisk.png', plot=unadjRR, width=6, height=5, units='in', dpi=300)
+ggsave(filename='plots/unadj_relrisk.png', plot=unadjRR, width=5.5, height=4.3, units='in', dpi=300)
 
 ggplot(back, aes(Status, OR, color=OR)) + 
   geom_boxplot(outlier.colour=NA) + geom_jitter(width=0.3, aes(shape=Pathology)) + 
@@ -1023,6 +1025,149 @@ ggsave(filename='plots/pred_hist.png', plot=predhist, width=5, height=5, units='
 
 ggplot(back, aes(OR, Prediction, color=Prediction)) + geom_point(show.legend = F) + scale_color_gradientn(colors = myPal,  name='')  + plot.theme
 ```
+
+### Mountain plots using spatial info
+
+```{r, echo=F, warning=F, message=F, fig.height=10, fig.width=20}
+min.theme = theme(text=element_text(size=12), panel.background=element_blank(), strip.background=element_rect(fill="grey97"), strip.text.y = element_text(size=6),
+                   strip.text.x = element_text(size=12), axis.text = element_blank(), axis.ticks = element_blank(),
+                   axis.line=element_line(color='black'), panel.grid.major.y =element_line(color='grey95'), panel.grid.major.x = element_blank(),
+                   panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing.x = unit(0, 'lines'), panel.spacing.y = unit(0.1, 'lines')   ) 
+
+
+mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
+  if (is.null(pal))
+    pal = RColorBrewer::brewer.pal(length(limits), 'Set2')
+
+  df = merge(df, b[,c('Samplename','Endoscopy.Year','months.before.final','Block','ogj')], by.x='variable',by.y='Samplename')
+  df$ogj = factor(df$ogj, ordered = T)
+  df$ogj = factor(df$ogj, levels=rev(levels(df$ogj)), ordered = T)
+  #pal = pal[which(limits %in% levels(df$nl))]
+
+  altcolor = c(RColorBrewer::brewer.pal(9, 'Greys')[2],RColorBrewer::brewer.pal(9, 'Greys')[4])
+  fills = c()
+  for (yr in sort(unique(df$Endoscopy.Year))) {
+    ac = (which(sort(unique(df$Endoscopy.Year)) == yr) %% 2) + 1
+    fills = c(fills, rep(altcolor[ac], length(which(table(subset(df, Endoscopy.Year == yr)$ogj) > 0))))
+  }
+    
+  blanklabel <- function(s) {
+    return('')
+  }
+  
+  p = ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
+      geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
+      scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
+      labs(title=title, x='') + min.theme  
+  
+  legend = get.legend(p)
+  p = p + theme(legend.position = 'none')
+  
+  g = ggplot_gtable(ggplot_build(p))
+  strips = grep('strip-r', g$layout$name)
+
+  for (n in 1:length(strips)) {
+    i = strips[n]
+    j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+    g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[n]
+  }
+
+  #grid.arrange(g)
+  return(list('grob'=g, 'legend'=legend))
+  #grid::grid.draw(g)  
+  #return(g)
+}
+
+back$ogj = back$nl
+back$ogj[which(back$nl > 0 & back$nl < 3)] = 1 
+back$ogj[which(back$nl > 3 & back$nl < 7)] = 2 
+back$ogj[which(back$nl >= 7)] = 3 
+
+ogjLimits = levels(factor(back$ogj, ordered = T))
+
+df = subset(globalCNdf, Patient == 20 & seg.type != 'arms')
+#df = subset(globalCNdf, Patient == 51 & seg.type != 'arms')
+
+# early/late samples
+#df = subset(globalCNdf, Patient == pt)
+df = merge(globalCNdf, back[,c('Samplename','Endoscopy.Year', 'ogj', 'months.before.final', 'OR','Prediction')], by.x='variable', by.y='Samplename')
+df = arrange(df, chr, start, Endoscopy.Year)
+
+## count arms differently than segs??
+df2 = df %>% group_by(Status, Patient, Endoscopy.Year) %>% summarise( 
+  'max.Pred'=max(Prediction),
+  'max.RR'=max(OR),
+  'max.Path'=max(Pathology),
+  'CNA'=length(which(seg.type != 'arms' & cn %in% c('loss','gain'))),
+  'arms'=length(which(seg.type == 'arms' & cn %in% c('loss','gain'))),
+  'ratio'=length(which(seg.type != 'arms' & cn %in% c('loss','gain')))/length(cn)
+  )
+#as.data.frame(df2)
+#df2 = subset(df2, max.Path %in% c('BE','ID','LGD'))
+
+df2 = df2 %>% group_by(Status, Patient) %>% mutate(
+  'early'= Endoscopy.Year == min(Endoscopy.Year),
+  'late' = Endoscopy.Year == max(Endoscopy.Year)
+)
+df2 = subset(df2, Patient %in% names(which(table(df2$Patient) > 1)))
+
+
+el = subset(df2, early | late)
+el2 = el %>% group_by(Status, Patient) %>% summarise( diff(arms), diff(CNA) )
+wtA = round(wilcox.test(subset(el2, Status == 'Progressor')$`diff(arms)`, subset(el2, Status == 'Non-Progressor')$`diff(arms)`)$p.value, 3)
+if (wtA < 0.0001) wtA = '< 0.0001'
+#wilcox.test(subset(el2, Status == 'Progressor')$`diff(CNA)`, subset(el2, Status == 'Non-Progressor')$`diff(CNA)`)
+
+p = ggplot(subset(df2, early|late), aes(Endoscopy.Year, arms, color=Patient)) + facet_grid(~Status) +
+  geom_point() +  geom_line(data=subset(df2, early | late)) + theme(legend.position = 'none', text=element_text(size=11)) + 
+  plot.theme + labs(x='Endoscopy Year', y='CN arm values', title='Initial vs final endoscopy', subtitle=paste('p', wtA))
+p
+ggsave(filename='plots/status_hetero.png', plot=p, width=8, height=6, units='in', dpi=300)
+
+wtA = round(wilcox.test(subset(df2, early &  Status == 'Progressor')$arms, subset(df2, early & Status == 'Non-Progressor')$arms)$p.value, 3)
+wtCN = round(wilcox.test(subset(df2, early & Status == 'Progressor')$CNA, subset(df2, early & Status == 'Non-Progressor')$CNA)$p.value, 2)
+
+m = melt(subset(df2, early), measure.vars=c('CNA','arms'), id.vars=c('Status'))
+p = ggplot(m, aes(Status, value, fill=Status)) + facet_wrap(~variable, scales='free_y') + 
+  geom_boxplot(outlier.colour = NA) + geom_jitter(width=0.2) + plot.theme + theme(legend.position = 'none', text=element_text(size=11)) +
+  labs(y='', x='', title='CN values, initial endoscopy', subtitle=paste('Arms p=',wtA, '   CNA p=',wtCN, sep=''))
+p
+ggsave(filename='plots/hetero_initial.png', plot=p, width=6, height=4, units='in', dpi=300)
+
+
+p2 = mtn.spatial(subset(globalCNdf, Patient == 20 & seg.type != 'arms'), back, ogjLimits,'Patient 20 (P)' )
+p6 = mtn.spatial(subset(globalCNdf, Patient == 51 & seg.type != 'arms'), back,ogjLimits,'Patient 51 (NP)' )
+
+# for (i in 1:nrow(sum.patient.data)) {
+#   print(i)
+#   pt = sum.patient.data[i, 'Patient']
+#   status = sum.patient.data[i, 'Status']
+# 
+#   pms = mtn.spatial(subset(globalCNdf, Patient == pt & seg.type != 'arms'), back, ogjLimits, paste('Patient', pt, '(', status, ')' ))
+#   
+#   fl = paste('patient_', pt, '.png', sep='')
+#   ggsave(paste('plots/spatial/', fl, sep=''), plot=grid.arrange(pms$grob), width=14, height=6, units='in', dpi=300)
+# }
+
+back$ogj = NULL
+
+```
+
+
+```{r, echo=F, fig.width=2, fig.height=4}
+
+grid.arrange(p2$legend)
+
+ggsave(filename='plots/spatial/patient_20.png', plot=grid.arrange(p2$grob), width=14, height=6, units='in', dpi=300)
+ggsave(filename='plots/spatial/patient_51.png', plot=grid.arrange(p6$grob), width=14, height=6, units='in', dpi=300)
+
+```
+
+
+At each quintile are the percentage of progressor samples that were predicted within that range, and the hypergeometric p-value (Fishers) for the significance within that quintile. Then our predictions are at best a coin flip in the middle, but highly significant at the outer edges. This would also push the prediction for "high" risk up to `r min(subset(pred.confidence, labels == 'High' )$r1)` while "low" risk is below `r max(subset(pred.confidence, labels == 'Low' )$r2)`.
+
+`r pander(as.data.frame(pred.confidence))`
+
 
 
 ## Jacknife coefficients
@@ -1102,7 +1247,28 @@ rp = ggplot(riskPath, aes(Pathology, ratio*100)) +
   labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom')
 rp
 
-ggsave(filename='plots/pred_by_path.png', plot=rp, width=8, height=8, units='in', dpi=300)
+ggsave(filename='plots/pred_by_path.png', plot=rp, width=5.8, height=4.5, units='in', dpi=300, scale=1.5)
+
+```
+
+
+```{r p53IHC, echo=F, warning=F, message=F, fig.height=8, fig.width=8}
+
+#p53Path$Risk[p53Path$Risk == 'High'] = 'Aberrant'
+#p53Path$Risk[p53Path$Risk == 'Low'] = 'Normal'
+
+#p53Path$p53.Status = factor(p53Path$p53.Status, levels=c('Aberrant', 'Normal'), ordered = F)
+
+p53Path$p53.Status = factor(p53Path$p53.Status, ordered = T)
+p53Path = arrange(p53Path, Pathology, p53.Status)
+col = brewer.pal(11, "PRGn")[c(10,2)]
+rp = ggplot(p53Path, aes(Pathology, ratio*100, group=Pathology, fill=p53.Status)) + geom_bar(stat='identity', position = position_stack()) +
+  scale_fill_manual(values=col, name='p53 IHC', labels=c('Normal','Aberrant')) + 
+  geom_text(aes(label=paste('n=',nPath,sep=''), x=Pathology, y=102)) +
+  geom_text(aes(label=paste(ratio*100,'%',sep='')), position=position_stack(vjust = 0.5), size=5,color='white') +
+  plot.theme + labs(title='Samples predicted by aberrant p53 IHC', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom')
+rp
+ggsave(filename='plots/p53_pred.png', plot=rp, width=4.5, height=3.6, units='in', dpi=300, scale=1.5)
 
 ```
 
@@ -1185,12 +1351,12 @@ rp = ggplot(endos.m, aes(x=brks, y=pred.r*100, ymin=(pred.r-`sem(P)`)*100, ymax=
   labs(x='Months prior to endpoint', y='Percent predicted', title='Predictions prior to final endoscopy', subtitle='n = #endoscopies, s = #samples') +
   plot.theme + theme( axis.text.x=element_text(angle=45,hjust=1), text=element_text(size=12)) 
 rp
-ggsave(filename='plots/pred_endo.png', plot=rp, width=9, height=7, units='in', dpi=300)
+ggsave(filename='plots/pred_endo.png', plot=rp, width=5.6, height=4.4, units='in', dpi=300, scale=1.5)
 
 #endos$months.before.final = endos$months.before.final*-1
 #me = endos %>% group_by(Patient) %>% dplyr::summarise('max.endo' = max(i), 'months' = min(months.before.final))
 ```
-# TODO number endoscopies so the images are scaled 
+
 `r pander(as.data.frame(pred.confidence))`
 
 ```{r, echo=F, warning=F, message=F, fig.width=5, fig.height=5 }
@@ -1365,7 +1531,10 @@ ccgenes = cbind(ccgenes, loc)
 ccgenes = ccgenes[c('Gene.Symbol','Genome.Location', 'Role.in.Cancer', 'Mutation.Types',colnames(loc))]
 #ccgenes = subset(ccgenes, grepl('\\w+',Role.in.Cancer))
 
-genes = cbind(subset(ccgenes, grepl('TSG|oncogene', Role.in.Cancer) & Mutation.Types != 'T', select=c('Gene.Symbol','Genome.Location', colnames(loc))), 'value'=min(globalCNdf$mean.value)+2*sd(globalCNdf$mean.value), 'Row.names'='', 'Patient'='', 'selected'=as.factor(0))
+genes = cbind(subset(ccgenes, grepl('TSG|oncogene', Role.in.Cancer) & Mutation.Types != 'T', select=c('Gene.Symbol','Genome.Location', colnames(loc))), 'Row.names'='', 'Patient'='', 'selected'=as.factor(0))
+
+genes = merge(genes, globalCNdf %>% group_by(chr) %>% dplyr::summarise( value = min(mean.value)+sd(mean.value) ), by='chr')
+
 
 genesGR = makeGRangesFromDataFrame(genes, keep.extra.columns = T)
 chGR = makeGRangesFromDataFrame(chh, keep.extra.columns = T)
@@ -1376,7 +1545,7 @@ g17 = plot.cn.chr(globalCNdf, chrom='17', chr.lengths, genes=genes, haz=chh, lab
   labs(title="All Samples") + theme(legend.position = 'none')
 g17
 
-ggsave(filename='plots/hazards/chr17.png', plot=g17, width=10, height=5, units='in', dpi=300)
+ggsave(filename='plots/hazards/chr17.png', plot=g17, width=7.5, height=3.7, units='in', dpi=300, scale=1.5)
 
 ```
 
@@ -1413,8 +1582,9 @@ ggsave('plots/global_gene_ann.png', plot=p, width=10, height=5, units='in', dpi=
 ## Downsampled Datasets
 
 ```{r echo=F, eval=T}
-dirA = '~/Data/Ellie/Analysis/downsampled5G_BEAdjacent'
-dirB = '~/Data/Ellie/Analysis/downsampled5G_NDBE'
+dirs = c('~/Data/Ellie/Analysis/downsampled5G_BEAdjacent',
+         '~/Data/Ellie/Analysis/downsampled5G_BEAdjacent_normal/',
+          '~/Data/Ellie/Analysis/downsampled5G_NDBE')
 
 file = paste(cache.dir, 'model_data.Rdata', sep='/')
 if (!file.exists(file))
@@ -1430,89 +1600,71 @@ select.alpha = '0.9'
 fitV = models[[select.alpha]]
 lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
 
+predfiles = sapply(dirs, function(x) {
+  list.files(x, 'predictions_all_exAHM0320.Rdata', full.names = T)
+})
 
-predA = list.files(dirA, 'predictions_all_exAHM0320.Rdata', full.names = T)
-predB = list.files(dirB, 'predictions_all_exAHM0320.Rdata', full.names = T)
-
-files = c()
-if (length(predA) < 1)
-  files = c(list.files(dirA, pattern='raw', full.names=T))
-if (length(predB) < 1)
-  files = c(files, list.files(dirB, pattern='raw', full.names=T))
-
-if (length(files) > 0) {
-  sampleNames = sub('_raw.txt', '', basename(files))
-  dspred = data.frame(matrix(ncol=2, nrow=length(sampleNames), dimnames=list(sampleNames,c('Prob','RR'))))
-  
-  predA = sub('_raw.txt','',basename(c(list.files(dirA, pattern='raw', full.names=T))))
-  predB = sub('_raw.txt','',basename(c(list.files(dirB, pattern='raw', full.names=T))))
-  
-  for (n in 1:length(files)) {
-    print(n)
-    print(sampleNames[n])
-    
-    rs = read.table(files[n], sep='\t',header=T)
-    if (ncol(rs) < 4)
-      stop("File needs to contain 4 columns: chr, start, end, sample_value")
-    
-    segs <- tile.segmented.data(rs, size=5e6, chr.info=chr.lengths)
-    segM = as.matrix(segs[,-c(1:3)])
-    rownames(segM) = paste(segs$chr, ':', segs$start, '-', segs$end, sep='')
-    segM = t(segM)
-    for (i in 1:ncol(segM)) 
-      segM[,i] = unit.var(segM[,i], z.mean[i], z.sd[i])
-    
-    arms <- tile.segmented.data(rs, size='arms', chr.info=chr.lengths)
-    armsM = as.matrix(arms[,-c(1:3)])
-    rownames(armsM) = paste(arms$chr, ':', arms$start, '-', arms$end, sep='')
-    armsM = t(armsM)
-    for (i in 1:ncol(armsM)) 
-      armsM[,i] = unit.var(armsM[,i], z.arms.mean[i], z.arms.sd[i])
-    
-    nrow(armsM) == nrow(segM)
+predObj = list()
+for (i in 1:length(predfiles)) {
+  if (length(predfiles[[i]]) > 0) {
+      load(predfiles[[i]], verbose=T)
+      dspred$Type = basename(names(predfiles[i]))
+      predObj[[i]] = dspred
+      rm(dspred)
+  } else {
+    files = list.files(names(predfiles[i]), pattern='raw', full.names=T)
+    sampleNames = sub('_raw.txt', '', basename(files))
+    dspred = data.frame(matrix(ncol=2, nrow=length(sampleNames), dimnames=list(sampleNames,c('Prob','RR'))))
+    for (n in 1:length(files)) {
+      print(n)
+      print(sampleNames[n])
       
-    cx.score = score.cx(segM,1)
-    
-    mergedDf = subtract.arms(segM, armsM)
-    mergedDf = cbind(mergedDf, 'cx' = unit.var(cx.score, mn.cx, sd.cx))
-    dim(mergedDf)
-    
-    # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
-    sparsed_test_data <- Matrix(data=0, nrow=nrow(mergedDf),  ncol=ncol(mergedDf),
-                                dimnames=list(rownames(mergedDf),colnames(mergedDf)), sparse=T)
-    for(col in colnames(mergedDf)) sparsed_test_data[,col] = mergedDf[,col]
-    
-    preds = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='response')
-    RR = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='link')
-    
-    dspred[n,] = c(preds[,1],RR[,1])
-    print(dspred[1:n,])
+      rs = read.table(files[n], sep='\t',header=T)
+      if (ncol(rs) < 4)
+        stop("File needs to contain 4 columns: chr, start, end, sample_value")
+      
+      segs <- tile.segmented.data(rs, size=5e6, chr.info=chr.lengths)
+      segM = as.matrix(segs[,-c(1:3)])
+      rownames(segM) = paste(segs$chr, ':', segs$start, '-', segs$end, sep='')
+      segM = t(segM)
+      for (i in 1:ncol(segM)) 
+        segM[,i] = unit.var(segM[,i], z.mean[i], z.sd[i])
+      
+      arms <- tile.segmented.data(rs, size='arms', chr.info=chr.lengths)
+      armsM = as.matrix(arms[,-c(1:3)])
+      rownames(armsM) = paste(arms$chr, ':', arms$start, '-', arms$end, sep='')
+      armsM = t(armsM)
+      for (i in 1:ncol(armsM)) 
+        armsM[,i] = unit.var(armsM[,i], z.arms.mean[i], z.arms.sd[i])
+      
+      nrow(armsM) == nrow(segM)
+        
+      cx.score = score.cx(segM,1)
+      
+      mergedDf = subtract.arms(segM, armsM)
+      mergedDf = cbind(mergedDf, 'cx' = unit.var(cx.score, mn.cx, sd.cx))
+      dim(mergedDf)
+      
+      # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
+      sparsed_test_data <- Matrix(data=0, nrow=nrow(mergedDf),  ncol=ncol(mergedDf),
+                                  dimnames=list(rownames(mergedDf),colnames(mergedDf)), sparse=T)
+      for(col in colnames(mergedDf)) sparsed_test_data[,col] = mergedDf[,col]
+      
+      preds = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='response')
+      RR = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='link')
+      
+      dspred[n,] = c(preds[,1],RR[,1])
+      print(dspred[1:n,])
   }
-    dspred$Type = NA
-    dspred[predA,'Type'] = 'AdjacentBE'
-    dspred[predB,'Type'] = 'BEST2 NDBO'
-    pred = dspred
+
+    dspred$Type = basename(names(predfilels[i]))
+    predObj[[i]] = dspred
     
-    dspred = subset(pred, Type == 'AdjacentBE')
-    
-    save(dspred, file=paste(dirA, 'predictions_all_exAHM0320.Rdata', sep='/'))
+    save(dspred, file=paste(names(predfiles[i]), 'predictions_all_exAHM0320.Rdata', sep='/'))
+    rm(dspred)
+  }
 
-    dspred = subset(pred, Type == 'BEST2 NDBO')
-    save(dspred, file=paste(dirB, 'predictions_all_exAHM0320.Rdata', sep='/'))
-
-    dspred = pred
-
-} else {
-  load(predB, verbose=T)
-  dspredB = dspred
-
-  load(predA, verbose=T)
-  
-  dspred = rbind(dspred, dspredB)
-  dspred$Type = NA
-  
-  dspred[sub('_raw.*','',basename(list.files(dirA, pattern='raw', full.names=T))),'Type'] = 'AdjacentBE'
-  dspred[sub('_raw.*','',basename(list.files(dirB, pattern='raw', full.names=T))),'Type'] = 'BEST2 NDBO'
+  dspred = do.call(rbind, predObj)
   
 }
 
