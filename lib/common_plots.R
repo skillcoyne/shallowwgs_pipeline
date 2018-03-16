@@ -146,23 +146,28 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   return(p)
 }
 
-pred.tiles <- function(df, probs=F, OR=F, cols=c('green3','orange','red3'), ...) {
-  p = ggplot(df, aes(brks, as.factor(Block)))
+pred.tiles <- function(df, probs=F, OR=F, cols=c('green3','orange','red3'), ylim=NULL, ...) {
+  if (is.null(ylim)) ylim = 1:max(as.integer(levels(droplevels(df$Block))))
+
+  df$months.before.final = factor(df$months.before.final, ordered = T)
+  df$months.before.final = factor(df$months.before.final, levels=rev(levels(df$months.before.final)))
+
+  
+  p = ggplot(df, aes(months.before.final, Block)) + scale_y_discrete(limits=ylim)
 
   if (OR) {
     p = p + geom_tile(aes(fill=OR), color='white') + scale_fill_gradientn(colors = myPal, limits=c(-9.3,15), name='RR') 
   } else if (probs) {
     p = p + geom_tile(aes(fill=Prediction), color='white') + scale_fill_gradientn(colors = myPal, limits=c(0,1), name='P(P)') 
   } else {
-    p = p + geom_tile(aes(fill=Risk)) + 
-      scale_fill_manual(values=cols, limits=levels(df$Risk), name='Progression')
+    p = p + geom_tile(aes(fill=Risk), color='white') + scale_fill_manual(values=cols, limits=levels(df$Risk), name='Progression')
   }
-  p + geom_point(aes(shape=Pathology), fill='white', color='white', size=3) + 
+  p + geom_point(aes(shape=Pathology), fill='white', color='white', size=5) + 
     # scale_color_manual(values=c('white','black','white'), guide=F) +
     scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='white', color='white'))) +
-    facet_wrap(~Patient, ...) +
+    facet_grid(~Patient, ...) +
     labs(y='Oesophageal Location (OGJ..)',x='Endoscopy (Base...End)', title='') +
-    plot.theme + theme(axis.text = element_blank(), legend.key = element_rect(fill='grey39'), panel.background = element_rect(colour = 'black'), panel.grid.major = element_blank()) 
+    plot.theme + theme(axis.text = element_blank(), legend.key=element_rect(fill='grey39'), panel.background=element_rect(colour = 'black'), panel.grid.major=element_blank(), panel.spacing = unit(0.2, 'lines'), panel.border = element_rect(color="black", fill=NA, size=0.5)  ) 
 }
 
 plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NULL) {
@@ -262,7 +267,7 @@ plot.endo<-function(df, minM=NULL, maxM=NULL, bin=F) {
   }
 }
 
-vig.plot<-function(df, info, cols=c('green3','orange','red3'), pathology=F) {
+vig.plot<-function(df, info, cols=c('green3','orange','red3'), pathology=F, add.title=F) {
   scale = seq(min(info$Endoscopy.Year), max(info$Endoscopy.Year), 1)
   subtitle = with(info, paste(unique(Age.at.diagnosis),unique(Sex),': ', sep=''))
   if (!is.na(unique(info$Smoking)))                             
@@ -282,15 +287,18 @@ vig.plot<-function(df, info, cols=c('green3','orange','red3'), pathology=F) {
     geom_tile(aes(fill=Risk), color='white', size=1.5) + scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') 
   
   if (!pathology) {
-    p = p + geom_point(aes(shape=Pathology, color=Risk), fill='white', size=5) + scale_color_manual(values=c('white','black','white'), guide=F) + 
-    scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='black', color='black'))) 
+    p = p + geom_point(aes(shape=Pathology), color='white', size=5) + 
+    scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='white', color='white'))) 
     #scale_shape_manual(values=c('B','I','L','H','C'), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='black', color='black'))) +
   } else {
     p = p + geom_text(aes(label=Pathology, color=Risk), show.legend=F) + scale_color_manual(values=c('white','black','white')) 
   }
-    p = p + labs(y='Oesophageal Location',x='Months Prior to Endpoint', title=paste('Patient',unique(info$Patient)), subtitle=subtitle) + scale_x_continuous(breaks=scale) + 
-        plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='right') 
+    p = p + labs(y='Oesophageal Location',x='Months Prior to Endpoint') + scale_x_continuous(breaks=scale) + 
+        plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='right',  legend.key = element_rect(fill='grey39')) 
+    if (add.title)
+      p = p + labs(title=paste('Patient',unique(info$Patient)), subtitle=subtitle)
     
+  return(p)   
 }
 
 

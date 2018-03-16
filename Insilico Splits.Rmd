@@ -36,7 +36,7 @@ if (length(patient.file) != 1)
 demo.file = grep('Demographics_full.xlsx', data.files, value=T)
 
 all.patient.info = read.patient.info(patient.file, demo.file, set='all')$info
-head(all.patient.info)
+
 
 #sum.pt = summarise.patient.info(all.patient.info)
 
@@ -62,27 +62,28 @@ sp = sum.pt %>% group_by(Set) %>% summarize(
 
 ```{r echo=F, warning=F, message=F}
 
-cache.dir = paste(data, 'Analysis', sub('\\+','',paste(tile.w, collapse='_')), sep='/')
+#cache.dir = paste(data, 'Analysis', sub('\\+','',paste(tile.w, collapse='_')), sep='/')
+model.dir = paste(data, 'Analysis/5e6_arms_all_exAHM0320', sep='/')
+split.dir = '/Volumes/research1/gerstung/skillcoyne/Ellie/Analysis/5e6_arms_splits_exAHM0320'
 
-ins_splits = grep('val_', list.dirs(cache.dir), value=T)
-
-performance = data.frame()
-rocs = list()
-
+performance = data.frame(); rocs = list()
 select.alpha = '0.9'
 
-file = paste(cache.dir, 'insilico_splits.Rdata', sep='/')
+file = paste(model.dir, 'insilico_splits.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
   rocs = insilico.rocs
   performance = insilico.perf
 } else {
-  for (split in ins_splits) {
-    load(grep('all.*Rdata', list.files(split,full.names = T), value=T), verbose=F)
+  
+  split.dirs = list.files(split.dir, full.names = T)
+  for (split in 1:length(split.dirs)) {
+    print(split)  
+    load(list.files(split.dirs[split],full.names = T, pattern='all.*Rdata'), verbose=T)
     performance = rbind(performance, performance.at.1se[[select.alpha]])
-    rm(plots,coefs,performance.at.1se,models,cv.patient)
+    rm(plots,coefs,performance.at.1se,models,cvs)
     
-    load(grep('loo.*Rdata', list.files(split,full.names = T), value=T), verbose=F)
+    load(list.files(split.dirs[split],full.names = T, pattern='loo.*Rdata'), verbose=T)
     rm(plots, performance.at.1se,coefs,nzcoefs,fits)
   
     predictions = do.call(rbind, pg.samp)
@@ -91,8 +92,8 @@ if (file.exists(file)) {
     roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
     #rocs = rbind(rocs,c(ci.auc(roc), coords(roc, 'best') ))
     roc$model = 'in-silico'
-    roc$is = basename(split)
-    rocs[[basename(split)]] = roc
+    roc$is = split
+    rocs[[split]] = roc
   
     rm(dysplasia.df, labels)
   }
@@ -100,15 +101,18 @@ if (file.exists(file)) {
   
   insilico.rocs=rocs
   insilico.perf=performance
-  save(insilico.rocs, insilico.perf, file=paste(cache.dir, 'insilico_splits.Rdata', sep='/'))
+  save(insilico.rocs, insilico.perf, file=paste(model.dir, 'insilico_splits.Rdata', sep='/'))
 }
 
-load(grep('all.*Rdata',list.files(cache.dir, full.names = T), value=T), verbose=F)
-performance = rbind(performance, performance.at.1se[[select.alpha]])
-performance$split = c(basename(ins_splits), 'discovery')
-rm(plots,coefs,performance.at.1se,models,cv.patient,dysplasia.df,labels)
+n.splits = nrow(performance)
 
-load(grep('loo\\.Rdata', list.files(cache.dir,full.names = T), value=T), verbose=F)
+load(list.files(model.dir, full.names = T, pattern = 'all.*Rdata'))
+
+performance = rbind(performance, performance.at.1se[[select.alpha]])
+performance$split = c(paste('split',1:n.splits,sep='.'), 'discovery')
+rm(plots,coefs,performance.at.1se,models,cvs,dysplasia.df,labels)
+
+load(list.files(model.dir,full.names = T, pattern='loo.Rdata'))
 rm(plots, performance.at.1se,coefs,nzcoefs,fits)
 
 predictions = do.call(rbind, pg.samp)
@@ -162,7 +166,7 @@ mrplot <- function(rocList) {
     geom_line(data=subset(df, model == 'discovery'), color='red', size=1) +
     scale_x_reverse() +
     scale_color_brewer(palette='Blues') +
-    labs(title=title, x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme +
+    labs(title='', x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme +
     theme(legend.position = 'none')
 }
 
