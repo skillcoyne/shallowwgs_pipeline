@@ -146,12 +146,11 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   return(p)
 }
 
-pred.tiles <- function(df, probs=F, OR=F, cols=c('green3','orange','red3'), ylim=NULL, ...) {
+pred.tiles <- function(df, probs=F, OR=F, path=5, cols=c('green3','orange','red3'), ylim=NULL, ...) {
   if (is.null(ylim)) ylim = 1:max(as.integer(levels(droplevels(df$Block))))
 
   df$months.before.final = factor(df$months.before.final, ordered = T)
   df$months.before.final = factor(df$months.before.final, levels=rev(levels(df$months.before.final)))
-
   
   p = ggplot(df, aes(months.before.final, Block)) + scale_y_discrete(limits=ylim)
 
@@ -160,12 +159,14 @@ pred.tiles <- function(df, probs=F, OR=F, cols=c('green3','orange','red3'), ylim
   } else if (probs) {
     p = p + geom_tile(aes(fill=Prediction), color='white') + scale_fill_gradientn(colors = myPal, limits=c(0,1), name='P(P)') 
   } else {
-    p = p + geom_tile(aes(fill=Risk), color='white') + scale_fill_manual(values=cols, limits=levels(df$Risk), name='Progression')
+    p = p + geom_tile(aes(fill=Risk), color='white', size=2) + scale_fill_manual(values=cols, limits=levels(df$Risk), name='Progression')
   }
-  p + geom_point(aes(shape=Pathology), fill='white', color='white', size=5) + 
-    # scale_color_manual(values=c('white','black','white'), guide=F) +
-    scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='white', color='white'))) +
-    facet_grid(~Patient, ...) +
+  
+  if (!is.null(path)) {
+    p = p + geom_point(aes(shape=Pathology), fill='white', color='white', size=path) + 
+        scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), labels=c('NDBE','ID','LGD','HGD','IMC'), guide=guide_legend(override.aes=list(fill='white', color='white')))
+  }
+  p + facet_grid(~Patient, ...) +
     labs(y='Oesophageal Location (OGJ..)',x='Endoscopy (Base...End)', title='') +
     plot.theme + theme(axis.text = element_blank(), legend.key=element_rect(fill='grey39'), panel.background=element_rect(colour = 'black'), panel.grid.major=element_blank(), panel.spacing = unit(0.2, 'lines'), panel.border = element_rect(color="black", fill=NA, size=0.5)  ) 
 }
@@ -303,3 +304,54 @@ vig.plot<-function(df, info, cols=c('green3','orange','red3'), pathology=F, add.
 
 
 
+min.theme = theme(text=element_text(size=12), panel.background=element_blank(), strip.background=element_rect(fill="grey97"), 
+                  strip.text.y = element_text(size=6),
+                  strip.text.x = element_text(size=9), axis.text = element_blank(), axis.ticks = element_blank(),
+                  axis.line=element_line(color='grey', size=0.1), panel.grid.major=element_blank(), 
+                  panel.border = element_rect(color="grey", fill=NA, size=0.2), 
+                  panel.spacing.x = unit(0, 'lines'), 
+                  panel.spacing.y = unit(0.05, 'lines')   ) 
+
+
+mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
+  if (is.null(pal))
+    pal = RColorBrewer::brewer.pal(length(limits), 'Set2')
+  
+  df = merge(df, b[,c('Samplename','Endoscopy.Year','months.before.final','Block','ogj')], by.x='variable',by.y='Samplename')
+  df$ogj = factor(df$ogj, ordered = T)
+  df$ogj = factor(df$ogj, levels=rev(levels(df$ogj)), ordered = T)
+  #pal = pal[which(limits %in% levels(df$nl))]
+  
+  altcolor = c(RColorBrewer::brewer.pal(9, 'Greys')[2],RColorBrewer::brewer.pal(9, 'Greys')[4])
+  fills = c()
+  for (yr in sort(unique(df$Endoscopy.Year))) {
+    ac = (which(sort(unique(df$Endoscopy.Year)) == yr) %% 2) + 1
+    fills = c(fills, rep(altcolor[ac], length(which(table(subset(df, Endoscopy.Year == yr)$ogj) > 0))))
+  }
+  
+  blanklabel <- function(s) {
+    return('')
+  }
+  
+  p = ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
+    geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
+    scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
+    labs(title=title, x='') + min.theme  
+  
+  legend = get.legend(p)
+  p = p + theme(legend.position = 'none')
+  
+  g = ggplot_gtable(ggplot_build(p))
+  strips = grep('strip-r', g$layout$name)
+  
+  for (n in 1:length(strips)) {
+    i = strips[n]
+    j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+    g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[n]
+  }
+  
+  #grid.arrange(g)
+  return(list('grob'=g, 'legend'=legend))
+  #grid::grid.draw(g)  
+  #return(g)
+}
