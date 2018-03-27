@@ -677,6 +677,9 @@ Based on these curves we get our best AUC at ~0.36.  Currently we are using 0.5 
 preds = do.call(rbind.data.frame, lapply(pg.samp, function(df) df[c('Status','Prediction')]))
 roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
 roc$model = 'CN Model'
+
+pROC::ci.auc(roc)
+
 roc$is = 'all'
 
 ggsave(filename='plots/auc/all_roc.png', plot=roc.plot(roc), width=6, height=4, units='in', dpi=300)
@@ -725,6 +728,8 @@ cutoff = round(pROC::coords(roc, 'best')[['threshold']], 2)
 p53samples = subset(patient.info, !is.na(p53.Status), select=c('Samplename','p53.Status','Status'))
 p53roc = pROC::roc(as.numeric(p53samples$Status)-1, as.integer(p53samples$p53.Status)-1)
 
+pROC::ci.auc(p53roc)
+
 p53roc$model = 'p53 IHC'
 roc.plot(p53roc, 'p53 IHC')
 
@@ -739,10 +744,16 @@ Based on HGD/IMC/LGD
 pathsamples = patient.info[,c('Pathology','Status')]
 pathroc = pROC::roc((as.integer(pathsamples$Status)-1), ifelse(pathsamples$Pathology %in% c('LGD','HGD','IMC'), 1, 0) )
 pathroc$model = 'HGD & LGD'
+
+pROC::ci.auc(pathroc)
+
 ggsave('plots/auc/dysplasia_auc.png', plot=roc.plot(pathroc, title='Dysplasia (HGD & LGD)'), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
 hgdpathroc = pROC::roc((as.integer(pathsamples$Status)-1), ifelse(pathsamples$Pathology %in% c('HGD','IMC'), 1, 0) )
 hgdpathroc$model = 'HGD Only'
+
+pROC::ci.auc(hgdpathroc)
+
 ggsave('plots/auc/hgd_auc.png', plot=roc.plot(hgdpathroc, title='HGD Only'), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
 grid.arrange(roc.plot(pathroc, 'Pathology (LGD,HGD,IMC)'), roc.plot(hgdpathroc, 'Pathology (HGD,IMC)'), ncol=2)
@@ -786,7 +797,6 @@ multi.roc.plot(list(rocFirstEndo, rocLastEndo,rocEndoM, rocEndoA))
 
 ```
 
-
 ### Per Patient ROC
 
 ```{r echo=F, fig.height=4, fig.width=4}
@@ -810,8 +820,6 @@ ggsave('plots/auc/avgpt_auc.png', plot=roc.plot(rocPtA, title='Avg per Patient (
 multi.roc.plot(list(rocPtA, rocPtM))
 ```
 
-
-
 ### Compare ROCs
 
 ```{r echo=F, fig.height=8, fig.width=6}
@@ -829,12 +837,6 @@ get.roc.stat<-function(roc, x='best') {
   stat$Measure = rownames(stat)
   stat
 }
-
-get.auc.at<-function(roc, foc='spec', p=c(1,0.99)) {
-  # To find the auc at a given spec or sens
-  pROC::auc(roc, partial.auc=p, partial.auc.focus=foc, partial.auc.correct=T)
-}
-
 roc$model = "CN Model"
 m = rbind.data.frame(
   get.roc.stat(p53roc),
@@ -871,6 +873,9 @@ m = rbind.data.frame(
   get.roc.stat(rocPtM), get.roc.stat(rocPtA),
   get.roc.stat(rocFirstEndo), get.roc.stat(rocLastEndo))
 m$model = factor(m$model)
+
+subset(m, model %in% c(rocEndoA$model, rocEndoM$model) & Measure == 'AUC')
+
 
 cols = brewer.pal(11, 'Paired')
 dodge = position_dodge(width=0.9)
@@ -1539,6 +1544,9 @@ pi = patient.info
 pi$p11Loss = as.numeric(pi$Samplename %in% p11Loss$variable)
 
 plot(table(p11=pi$p11Loss, ihc=pi$p53.Status))
+
+
+fisher.test(table(pi$p11Loss, pi$p53.Status))
 
 cor.test(pi$p11Loss, (as.numeric(pi$p53.Status)-1))
 

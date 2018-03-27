@@ -1,10 +1,3 @@
-#
-# This is the server logic of a Shiny web application. You can run the 
-# application by clicking 'Run App' above.
-#
-# Find out more about building applications with Shiny here:
-# 
-#    http://shiny.rstudio.com/
 
 library(shiny)
 library(ggplot2)
@@ -86,61 +79,87 @@ loadModelData <- function() {
 shinyServer(function(input, output, session) {
   modelData = loadModelData()
   
-  dataInput <- reactive({
+  readDataFile <- reactive({
     req(input$file)
     dataFile <- input$file$datapath
-
-    norm = input$norm
-    hdr = input$header
-    
-    df <- read.table(dataFile, header=hdr, sep='\t')
+    print(dataFile)
+    df <- read.table(dataFile, header=T, sep='\t')
     samplenames = grep('chr|arm|start|end|probes', colnames(df), ignore.case=T, invert=T, value=T)
+    return(list('data'=df, 'samples'=samplenames))
+  })
+  
+  perSampleMeta <- reactive({
+    req(input$pathfile)
+    
+    fi = readDataFile()
+    samplenames = fi$samples
     
     if (!is.null(input$pathfile)) {
       pf = read.table(input$pathfile$datapath, sep='\t', header=T, stringsAsFactors=F)
       if (length(samplenames) < nrow(pf)) {
         warning("Samples do not match in data and path files, ignoring path.")
         pf = NULL
-      }
-      pp = predict.progression(df, modelData$be, modelData$fit, modelData$lambda.opt, hdr, norm)
-
-      samplenames = rownames(pp$rel.risk)
-
-      pR = cbind.data.frame(samplenames, sapply(pp$rel.risk, adjustRisk, offset=modelData$be@meanOffset, type='prob'), 
-                            sapply(pp$rel.risk, adjustRisk, offset=modelData$be@meanOffset))
-      colnames(pR) = c('Sample', 'Probability', 'Relative Risk')
-      rownames(pR) = 1:nrow(pR)
-      
-      pR$Risk = sapply(pR$Probability, risk)
-      
-      recommendations = rx(pR)
-
-      if (!is.null(pf)) {
-        pR = merge(pf, pR, by='Sample')
-        recommendations = rx(pR)
+      } else {
+        print(input$sampleMeta)
       }
     }
+    return(pf)
+  })
+  
+  generatePred <- reactive({
+    fi = readDataFile()
+    df = fi$data
+
+    pf = perSampleMeta()
+    pp = predict.progression(df, modelData$be, modelData$fit, modelData$lambda.opt, T, T)
+
+    samplenames = rownames(pp$rel.risk)
+
+    pR = cbind.data.frame(samplenames, sapply(pp$rel.risk, adjustRisk, offset=modelData$be@meanOffset, type='prob'), 
+                            sapply(pp$rel.risk, adjustRisk, offset=modelData$be@meanOffset))
+    colnames(pR) = c('Sample', 'Probability', 'Relative Risk')
+    rownames(pR) = 1:nrow(pR)
+      
+    pR$Risk = sapply(pR$Probability, risk)
+      
+    recommendations = rx(pR)
+
+    if (!is.null(pf)) {
+      pR = merge(pf, pR, by='Sample')
+      recommendations = rx(pR)
+    }
+    #}
     recommendations = recommendations[complete.cases(recommendations),]
     return(list('pR'=pR, 'rx'=recommendations))
   })
 
+  output$samples <- renderUI({
+    fi = readDataFile()
+    
+    if (is.null(input$pathfile))  {
+      samplenames = fi$samples
+
+      myTabs = lapply(samplenames, function(x) {
+        tabPanel(paste('Sample',x,sep=":"), 
+                 radioButtons('path','Sample pathology', 
+                              choices=list('Non-dysplastic BE'='ndbe','Indeterminate'='id','Low grade dysplasia'='lgd','High grade dysplasia'='hgd','Intermucosal carcinoma'='imc'), selected='ndbe'),
+                 radioButtons('p53','p53 IHC',
+                              choices=list('Not performed'=NA,'Normal'=0,'Aberrant'=1)))
+      })
+      do.call(tabsetPanel, c('sampleMeta',myTabs, type='pills'))
+    }
+    
+  })
+
   ## how to correctly deal with actual CN calls?  e.g. Total 2, Minor 1 etc
   output$example <- renderTable({
-    if (is.null(input$file)) {
-      df <- read.table('data/example_pt_segvals.txt', header=T, sep='\t')
-      return(head(df))
-    } else {
-      return(NULL)
-    }
+    df <- read.table('data/example_pt_segvals.txt', header=T, sep='\t')
+    return(head(df))
   })
 
   output$examplep53 <- renderTable({
-    if (is.null(input$file)) {
-      df <- read.table('data/path_p53_example.txt', header=T, sep='\t')
-      return(head(df))
-    } else {
-      return(NULL)
-    }
+    df <- read.table('data/path_p53_example.txt', header=T, sep='\t')
+    return(head(df))
   })
   
   output$contents <- renderTable({
@@ -153,7 +172,7 @@ shinyServer(function(input, output, session) {
   })     
   
   output$plot <- renderPlot({
-    di = dataInput()
+    di = generatePred()
     pR = di$pR
     
     plot = modelData$plot + geom_point(data=pR, aes(x=`Relative Risk`, y=3), size=2) +
@@ -169,7 +188,7 @@ shinyServer(function(input, output, session) {
    })
   
   output$riskTable <- renderPlot({
-    di = dataInput()
+    di = generatePred()
     rx = di$rx
     
     riskCols = RColorBrewer::brewer.pal(11, "RdYlBu")[seq(1,11, 3)]
