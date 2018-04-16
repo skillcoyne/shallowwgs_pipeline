@@ -9,26 +9,53 @@ source('lib/load_patient_metadata.R')
 
 chrlen = get.chr.lengths()
 
+adjustRisk <- function(RR, offset, type='risk') {
+  if (type == 'prob') {
+    x = 1/(1+exp(-RR+abs(offset)))
+  } else {
+    x = RR+offset
+  }
+  return(x)
+}
+
+
 dir = '~/Data/Ellie/Analysis/downsampled5G'
+dir = '~/Data/Ellie/Analysis/VAL_Cohort/'
 files = list.files(dir, full.names=T)
 
-
-file = '~/Data/Ellie/Analysis/5e6_arms_disc/model_data.Rdata'
+file = '~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/model_data.Rdata'
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
-file = '~/Data/Ellie/Analysis/5e6_arms_disc/all.pt.alpha.Rdata'
+file = '~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/all.pt.alpha.Rdata'
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
 rm(dysplasia.df,coefs,plots,labels)
+
+
+file = '~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/loo.Rdata'
+if (!file.exists(file))
+  stop(paste("Missing data file", file))
+load(file, verbose=T)
+rm(plots, coefs, nzcoefs, fits)
+
+pg.samp = do.call(rbind, pg.samp)
+pg.samp$Hospital.Research.ID = NULL
+
+status = unique(pg.samp[,c('Patient','Status')])$Status
+
+cases = table(status)['P']
+m = round((table(status)['P']/(0.0225*100))*100)
+offsetMean = log(cases/m)
+
 
 select.alpha = '0.9'
 fitV = models[[select.alpha]]
 lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
 
 sampleNames = sub('_raw.txt', '', basename(files))
-dspred = data.frame(matrix(ncol=2, nrow=length(samples), dimnames=list(samples,c('Prob','RR'))))
+dspred = data.frame(matrix(ncol=4, nrow=length(sampleNames), dimnames=list(sampleNames,c('Prob','RR', 'AdjProb','AdjRR'))))
 
 for (n in 1:length(files)) {
   print(n)
@@ -68,7 +95,7 @@ for (n in 1:length(files)) {
   preds = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='response')
   RR = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='link')
   
-  dspred[n,] = c(preds[,1],RR[,1])
+  dspred[n,] = c(preds[,1],RR[,1],adjustRisk(RR, offsetMean, 'prob'),adjustRisk(RR, offsetMean))
   print(dspred[1:n,])
 }
 

@@ -170,7 +170,6 @@ print(paste("Missing patients:", paste(setdiff(sum.patient.data$Hospital.Researc
 sum.patient.data = subset(sum.patient.data, Hospital.Research.ID %in% names(patient.data))
 table(sum.patient.data$Status)
 
-
 ## Check that all of the samples are there
 patient.info = arrange(patient.info, Status, Patient, Hospital.Research.ID, Endoscopy.Year,Samplename)
 msgs = sapply(names(patient.data), function(pt) {
@@ -234,7 +233,7 @@ gen = do.call(rbind, lapply(patient.data, function(df) {
         'mean.seg.len'=mean(df$seg.vals[,c('end.pos')] - df$seg.vals[,c('start.pos')]), 
         'sd.seg.len'=sd(df$seg.vals[,c('end.pos')] - df$seg.vals[,c('start.pos')]))
 }))
-rownames(gen)  = names(patient.data)
+rownames(gen) = names(patient.data)
 
 sum.patient.data = merge(sum.patient.data, gen, by.x='Hospital.Research.ID', by.y='row.names')
 sum.patient.data = arrange(sum.patient.data, Status, total.samples)
@@ -284,8 +283,8 @@ These are regions that are called as "variant" based on cutoffs derived from a s
 prog.pt = subset(sum.patient.data, Status == 'P')$Hospital.Research.ID
 np.pt = subset(sum.patient.data, Status == 'NP')$Hospital.Research.ID
 
-var.seg.lengths = lapply(patient.data, function(df) {
-  cbind('chr'=df$variable.regions$chrom, 'start'=df$variable.regions$start.pos, 'end'=df$variable.regions$end.pos, 'seg.len'=df$variable.regions$end.pos - df$variable.regions$start.pos)
+var.seg.lengths = lapply(patient.data, function(pt) {
+  cbind('chr'=pt$variable.regions$chrom, 'start'=pt$variable.regions$start.pos, 'end'=pt$variable.regions$end.pos, 'seg.len'=pt$variable.regions$end.pos - pt$variable.regions$start.pos)
 })
 
 segment.lengths = lapply(patient.data, function(df) {
@@ -312,42 +311,37 @@ pander(sum.var, caption='Segment stats between progressors and non-progressors')
 df = rbind(cbind(do.call(rbind.data.frame, var.seg.lengths[prog.pt]), 'status'='Progressor'), cbind(do.call(rbind.data.frame, var.seg.lengths[np.pt]), 'status'='Non-Progressor'))
 lenWT = wilcox.test(subset(df, status == 'Progressor')$seg.len, subset(df, status == 'Non-Progressor')$seg.len)
 
-ggplot(df, aes(status, seg.len)) + geom_jitter(aes(color=status), alpha=0.5, show.legend = F, width=.2) +
-  geom_boxplot(aes(group=status, fill=status), show.legend=F, outlier.colour = NA) + 
-  geom_label(data=subset(df, status == 'Progressor'), aes(status, max(seg.len)-2*sd(seg.len), label=paste('median\n',scientific(median(seg.len),3),sep='') )) +
-  geom_label(data=subset(df, status == 'Non-Progressor'), aes(status, max(seg.len), label=paste('median\n',scientific(median(seg.len),3),sep=''))) +
-  labs(y='Variable segment length', x='', title='Variable regions', caption=paste('Wilcox p-value', signif(lenWT$p.value, digits=3) ))
-
-ggplot(df, aes(status, seg.len)) + 
-  geom_jitter(aes(color=status), show.legend=F) + geom_violin(aes(group=status, fill=status), show.legend=F) +
-  geom_label(data=subset(df, status == 'Progressor'), aes(status, max(seg.len)-2*sd(seg.len),label=paste('median\n',scientific( median(seg.len) , 3),sep='') ))  +
-    geom_label(data=subset(df, status == 'Non-Progressor'), aes(status, max(seg.len), label=paste('median\n',scientific( median(seg.len) , 3),sep=''))) +
-    labs(y='Variable segment length', x='', title='Variable regions', caption=paste('Wilcox p-value', signif(lenWT$p.value, digits=3) ))
+m = (melt(df, id.vars = 'status', measure.vars = 'seg.len'))
+m2 = m %>% group_by(status) %>% summarise( median=median(value), n=length(status), value=max(value) )
+ggplot(m, aes(status, value, group=status, fill=status)) + geom_jitter(aes(color=status), width=.2) + geom_violin(alpha=0.5) +
+  geom_label(data=m2, aes(status, value, label=paste("median=",scientific(median,3),'\nn=',n, sep='')), fill='white') + 
+  theme(legend.position = 'none') + labs(y='Variable segment length', x='', title=paste('Length of variable regions (all samples n=',length(patient.info$Samplename),')',sep=''), subtitle=paste('Wilcox p-value', signif(lenWT$p.value, digits=3) ))
 
 ```
 
 ```{r, echo=F, warning=F, message=F}
 df = rbind(cbind.data.frame('n'=sapply(var.seg.lengths[prog.pt], nrow), 'status'='Progressor'), cbind.data.frame('n'=sapply(var.seg.lengths[np.pt], nrow), 'status'='Non-Progressor'))
-nWT = wilcox.test(subset(df, status == 'Progressor')$n, subset(df, status == 'Non-Progressor')$n)
-
-ggplot(df, aes(status, n, group=status)) + geom_jitter(aes(color=status), width=0.2) +
-  geom_boxplot(aes(fill=status), position = 'dodge', show.legend = F, outlier.colour = NA) +
-  geom_label(data=subset(df, status == 'Progressor'), 
-             aes(status, max(n)-2*sd(n), label=paste('median\n',sprintf("%.1f",median(n)),sep=''), fill=status ), color='white' ) +
-  geom_label(data=subset(df, status == 'Non-Progressor'), 
-             aes(status, max(n)+2*sd(n), label=paste('median\n',sprintf("%.1f",median(n)),sep=''), fill=status), color='white') +
-  labs(y='Number of segments', title="Total number of segments", caption=paste('Wilcox p-value', signif(nWT$p.value, digits=3)) ) +
-  theme(legend.position = 'none')
+nWT = t.test(subset(df, status == 'Progressor')$n, subset(df, status == 'Non-Progressor')$n)
 
 
 ggplot(df, aes(status, n, group=status)) + geom_jitter(aes(color=status), width=0.2) +
-  geom_violin(aes(fill=status, group=status)) +
-  geom_label(data=subset(df, status == 'Progressor'), 
-             aes(status, max(n)-2*sd(n), label=paste('median\n',sprintf("%.1f",median(n)),sep=''), fill=status ), color='white' ) +
-  geom_label(data=subset(df, status == 'Non-Progressor'), 
-             aes(status, max(n)+2*sd(n), label=paste('median\n',sprintf("%.1f",median(n)),sep=''), fill=status), color='white') +
-  labs(y='Number of segments', title="Total number of segments", caption=paste('Wilcox p-value', signif(nWT$p.value, digits=3)) ) +
+  geom_violin(aes(fill=status, group=status), alpha=0.5) +
+  geom_label(data=(df %>% group_by(status) %>% summarise(y=max(n), med=median(n))), 
+             aes(status, y, label=paste('median\n',sprintf("%.1f", med, sep='')))) +
+  labs(y='Number of segments', title="Number of segments per patient", subtitle=paste('t-test p-value', signif(nWT$p.value, digits=3)) ) +
   theme(legend.position = 'none')
+
+
+nohgd.var.seg.lengths = lapply(patient.data, function(pt) {
+  samples = subset(pt$info, Pathology %in% c('BE','ID','LGD'))$Samplename
+  cols = c('chrom','start.pos','end.pos', grep(paste(samples, collapse='|'), colnames(pt$variable.regions), value=T))
+  vr = pt$variable.regions[,cols]
+  
+  cbind('chr'=vr$chrom, 'start'=vr$start.pos, 'end'=vr$end.pos, 'seg.len'=vr$end.pos - vr$start.pos)
+})
+
+
+
 
 ```
 

@@ -4,8 +4,8 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required params: <data dir> <out dir> <blacklist file> <overwrite: default F>")
 
-suppressPackageStartupMessages(source('lib/fastPCF.R'))
-suppressPackageStartupMessages(source('lib/data_func.R'))
+suppressPackageStartupMessages(source('../lib/fastPCF.R'))
+suppressPackageStartupMessages(source('../lib/data_func.R'))
 
 
 chrlen = get.chr.lengths()
@@ -14,7 +14,7 @@ dir = args[1]
 outdir = args[2]
 exclude.file = args[3]
 overwrite = F
-if (length(args) == 4) overwrite = args[4]
+if (length(args) == 4) overwrite =  as.logical(args[4])
 
 # dir = '~/Data/Ellie/QDNAseq/DownsampledBE/20180206_KillcoyneS_RF_BarrettsCN/qdnaseq/'
 # outdir = '~/Data/Ellie/Analysis/downsampled5G_BEAdjacent_normal/'

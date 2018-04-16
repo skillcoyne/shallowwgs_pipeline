@@ -1,4 +1,6 @@
 predict.progression <- function(rs,beObj, fitV, lambda, hdr=T, model.norm=T) {
+  
+  
   if (is.null(beObj) | is.null(fitV) | is.null(lambda))
     stop("No computation possible without model object or glmnet fit")
 
@@ -16,6 +18,7 @@ predict.progression <- function(rs,beObj, fitV, lambda, hdr=T, model.norm=T) {
   segM = t(segM)
   
   if (model.norm) {
+    message('Using model generated mean/sd to unit norm')
     for (i in 1:ncol(segM)) 
       segM[,i] = unit.var(segM[,i], beObj@z.mean[i], beObj@z.sd[i])
   } else {
@@ -82,9 +85,9 @@ rx<-function(pR) {
       rule = 1
     } else if ( risks['High'] == 1 || (!is.null(p53) && p53['1'] > 0) ) {
       rule = 2
-    } else if ( risks['Moderate'] > 0 ) {
+    } else if ( risks['Moderate'] > 0 || (risks['Low'] ==1 && nrow(pR) == 1)) {
       rule = 3
-    } else if ( risks['Low'] == 2) {
+    } else if ( risks['Low'] == 2 ) {
       rule = 4
     }
     rules[i,] = cbind( pR$Sample[i], pR$Sample[(i+1)], as.integer(rule) )

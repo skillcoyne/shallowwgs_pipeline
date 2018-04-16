@@ -18,10 +18,11 @@ adjustRisk <- function(RR, offset, type='risk') {
 }
 
 loadModelData <- function() {
+  message("Loading model data.")
   chr.info = read.table('data/chr_hg19.txt', sep='\t', header=T)
   
   load('data/model_data.Rdata', verbose=T)
-  rm(dysplasia.df, labels)
+  rm(dysplasia.df, allDf, labels)
   
   load('data/all.pt.alpha.Rdata', verbose=T)
   select.alpha = '0.9'
@@ -72,6 +73,8 @@ loadModelData <- function() {
                                                'minOffset'="numeric", 'maxOffset'="numeric", 'meanOffset'="numeric"))
   beModel = new("BEModel", 'mn.cx'=mn.cx, 'sd.cx'=sd.cx, 'z.mean'=z.mean,'z.sd'=z.sd,'z.arms.mean'=z.arms.mean, 'z.arms.sd'=z.arms.sd, 
                 'minOffset'=offsetMin, 'maxOffset'=offsetMax, 'meanOffset'=offsetMean)
+  
+  message("Model data loading completed.")
   return(list('be'=beModel, 'fit'=fitV, 'lambda.opt'=lambda.opt, 'plot'=adjRRplot))
 }
 
@@ -82,6 +85,7 @@ shinyServer(function(input, output, session) {
   readDataFile <- reactive({
     req(input$file)
     dataFile <- input$file$datapath
+    message(paste("Reading data file", dataFile))
     print(dataFile)
     df <- read.table(dataFile, header=T, sep='\t')
     samplenames = grep('chr|arm|start|end|probes', colnames(df), ignore.case=T, invert=T, value=T)
@@ -89,28 +93,32 @@ shinyServer(function(input, output, session) {
   })
   
   perSampleMeta <- reactive({
-    req(input$pathfile)
-    
-    fi = readDataFile()
-    samplenames = fi$samples
-    
     if (!is.null(input$pathfile)) {
-      pf = read.table(input$pathfile$datapath, sep='\t', header=T, stringsAsFactors=F)
-      if (length(samplenames) < nrow(pf)) {
-        warning("Samples do not match in data and path files, ignoring path.")
-        pf = NULL
-      } else {
-        print(input$sampleMeta)
+      fi = readDataFile()
+      samplenames = fi$samples
+      
+      if (!is.null(input$pathfile)) {
+        pf = read.table(input$pathfile$datapath, sep='\t', header=T, stringsAsFactors=F)
+        if (length(samplenames) < nrow(pf)) {
+          warning("Samples do not match in data and path files, ignoring path.")
+          pf = NULL
+        } else {
+          print(input$sampleMeta)
+        }
       }
+    } else {
+      pf = NULL
     }
     return(pf)
   })
   
   generatePred <- reactive({
+    message("Generating predictions")
     fi = readDataFile()
     df = fi$data
 
     pf = perSampleMeta()
+    print(paste("per sample meta:", is.null(pf)))
     pp = predict.progression(df, modelData$be, modelData$fit, modelData$lambda.opt, T, T)
 
     samplenames = rownames(pp$rel.risk)
@@ -121,15 +129,15 @@ shinyServer(function(input, output, session) {
     rownames(pR) = 1:nrow(pR)
       
     pR$Risk = sapply(pR$Probability, risk)
-      
+    
     recommendations = rx(pR)
 
     if (!is.null(pf)) {
       pR = merge(pf, pR, by='Sample')
       recommendations = rx(pR)
     }
-    #}
-    recommendations = recommendations[complete.cases(recommendations),]
+
+    #recommendations = recommendations[complete.cases(recommendations),]
     return(list('pR'=pR, 'rx'=recommendations))
   })
 
