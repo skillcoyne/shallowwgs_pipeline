@@ -7,6 +7,8 @@ require(tibble)
 #source("fastPCF.R")
 
 
+
+
 binSWGS<-function(raw.data, fit.data, blacklist) {
   require(copynumber)
   
@@ -192,7 +194,7 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL) {
       bin = currentChr[i]
       
       segments = gr[subjectHits(curov[queryHits(curov) == i])]
-      weights = lapply(segments,  function(r) {
+      weights = lapply(as(segments,'GRangesList'),function(r) {
         width(pintersect(bin, r))/width(bin)
       })
       
@@ -283,4 +285,39 @@ get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='
   chr.lengths$genome.length = cumsum(as.numeric(chr.lengths$chr.length))
   
   return(chr.lengths)
+}
+
+
+modelMatrixSetup <- function(rs, chr.info, segMeans=NULL, segSDs=NULL, armMeans=NULL, armSDs=NULL) {
+  segs <- tile.segmented.data(rs, size=5e6, chr.info=chrlen)
+  segM = as.matrix(segs[,-c(1:3)])
+  rownames(segM) = paste(segs$chr, ':', segs$start, '-', segs$end, sep='')
+  segM = t(segM)
+  
+  if (!is.null(segMeans) && !is.null(segSDs)) {
+    for (i in 1:ncol(segM)) 
+      segM[,i] = unit.var(segM[,i], segMeans[i], segSDs[i])
+  } else {
+    segM = unit.var(segM)
+  }
+  
+  arms <- tile.segmented.data(rs, size='arms', chr.info=chrlen)
+  armsM = as.matrix(arms[,-c(1:3)])
+  rownames(armsM) = paste(arms$chr, ':', arms$start, '-', arms$end, sep='')
+  armsM = t(armsM)
+  
+  if (!is.null(armMeans) && !is.null(armSDs)) {
+    for (i in 1:ncol(armsM)) 
+      armsM[,i] = unit.var(armsM[,i], z.arms.mean[i], z.arms.sd[i])
+  } else {
+    armsM = unit.var(armsM)
+  }
+  
+  nrow(armsM) == nrow(segM)
+  
+  cx.score = score.cx(segM,1)
+  
+  mergedDf = subtract.arms(segM, armsM)
+  mergedDf = cbind(mergedDf, 'cx' = unit.var(cx.score, mn.cx, sd.cx))
+  return(mergedDf)
 }

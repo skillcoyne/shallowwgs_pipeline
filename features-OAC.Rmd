@@ -14,22 +14,22 @@ output:
 
 library(pander)
 library(gridExtra)
-library(plyr)
 library(ggplot2)
 library(reshape2)
 library(GenomicRanges)
 library(ggrepel)
 library(ggfortify)
 library(readxl)
-
+library(plyr)
+library(dplyr)
 
 source('lib/load_patient_metadata.R')
 
 plot.theme = theme(text=element_text(size=14, face='bold'), panel.background=element_blank(), axis.line=element_line(color='black'), panel.grid.major=element_line(color='grey90')) 
 
 ## Lists the sequenced patients
-sequenced = read_excel('~/Documents/OneDrive/OneDrive - MRC Cancer Unit at University of Cambridge/skillcoyne/OC Data/WGS_Phase 1 complete - cleaned.xlsx', trim_ws=T)
-sequenced = subset(sequenced, grepl('^OC', OCCAMS_ID)  )[,c(1:8)]
+sequenced = read_xlsx('~/Documents/OneDrive/OneDrive - MRC Cancer Unit at University of Cambridge/skillcoyne/Documents/Sequencing Batch Info/occams_sequenced_20180426.xlsx')
+sequenced = subset(sequenced, grepl('^OC', OCCAMS_ID) )
 sequenced$Sample_type = as.factor(tolower(sequenced$Sample_type))
 sequenced = subset(sequenced, grepl('barret|normal|tumour', Sample_type))
 
@@ -40,37 +40,37 @@ length(unique(sequenced$OCCAMS_ID))
 # ------------------------------ #
 
 
-# OCCAMS ID to Illumina ID
-paired = read.table('~/Documents/OneDrive/MRC Cancer Unit at University of Cambridge/icgc group - icgc_shared/icgc-group/batch_progress/reports/g37/PairedOverviewSummary_g37_bwa.txt', header=T, sep='\t', stringsAsFactors = F)
-paired = subset(paired, aligned == '*')
-pairedg37 = subset(paired, OCCAMS %in% unique(sequenced$OCCAMS_ID), select=c('OCCAMS','SampleId'))
-length(unique(pairedg37$OCCAMS))
-
-paired = read.table('~/Documents/OneDrive/MRC Cancer Unit at University of Cambridge/icgc group - icgc_shared/icgc-group/batch_progress/reports/g1k//PairedOverviewSummary_g1k_bwa.txt', header=T, sep='\t', stringsAsFactors = F)
-paired = subset(paired, aligned == '*')
-pairedg1k = subset(paired, OCCAMS %in% unique(sequenced$OCCAMS_ID), select=c('OCCAMS','SampleId'))
-
-paired = rbind(pairedg37, pairedg1k)
-paired = unique(paired)
-
-length(unique(paired$OCCAMS))
-
-paired[] = lapply(paired[], strip.whitespace)
-length(unique(paired$OCCAMS))
-
-sp = do.call(rbind, lapply(paired$SampleId, function(x) unlist(strsplit(x, '_vs_'))))
-colnames(sp) = c('tb.sample', 'normal')
-
-paired = cbind(paired, sp)
-
-barretts.pairs = subset(paired, tb.sample %in% be.seq$Illumina_Barcode)
-
-paired = paired[-which(paired$tb.sample %in% be.seq$Illumina_Barcode),]
+# # OCCAMS ID to Illumina ID
+# paired = read.table('~/Documents/OneDrive/MRC Cancer Unit at University of Cambridge/icgc group - icgc_shared/icgc-group/batch_progress/reports/g37/PairedOverviewSummary_g37_bwa.txt', header=T, sep='\t', stringsAsFactors = F)
+# paired = subset(paired, aligned == '*')
+# pairedg37 = subset(paired, OCCAMS %in% unique(sequenced$OCCAMS_ID), select=c('OCCAMS','SampleId'))
+# length(unique(pairedg37$OCCAMS))
+# 
+# paired = read.table('~/Documents/OneDrive/MRC Cancer Unit at University of Cambridge/icgc group - icgc_shared/icgc-group/batch_progress/reports/g1k//PairedOverviewSummary_g1k_bwa.txt', header=T, sep='\t', stringsAsFactors = F)
+# paired = subset(paired, aligned == '*')
+# pairedg1k = subset(paired, OCCAMS %in% unique(sequenced$OCCAMS_ID), select=c('OCCAMS','SampleId'))
+# 
+# paired = rbind(pairedg37, pairedg1k)
+# paired = unique(paired)
+# 
+# length(unique(paired$OCCAMS))
+# 
+# paired[] = lapply(paired[], strip.whitespace)
+# length(unique(paired$OCCAMS))
+# 
+# sp = do.call(rbind, lapply(paired$SampleId, function(x) unlist(strsplit(x, '_vs_'))))
+# colnames(sp) = c('tb.sample', 'normal')
+# 
+# paired = cbind(paired, sp)
+# 
+# barretts.pairs = subset(paired, tb.sample %in% be.seq$Illumina_Barcode)
+# 
+# paired = paired[-which(paired$tb.sample %in% be.seq$Illumina_Barcode),]
 
 
 # ------------------------------ #
 # Clinical data
-load('~/Data/ICGC/OAC/clinical/labkey_20172706.Rdata', verbose=T)
+load('~/Data/ICGC/OAC/clinical/labkey_20180111.Rdata', verbose=T)
 demo = occams$patients
 cols = c(grep('Reason',colnames(demo), value=T),
          grep('Planned',colnames(demo),value=T),
@@ -94,78 +94,65 @@ ba[which(ba$caitrona == "N"), 'caitrona'] = "no"
 changed = which(ba[,'labkey'] != ba[,'caitrona'] | is.na(ba[,'labkey']) & !is.na(ba[,'caitrona']))
 
 demo[rownames(ba[changed,]), 'RP.BarrettsAdjacent'] = ba[changed,'caitrona']
+
+
 # ------------------------------ #
-
-# Copy number data - tumour
-read.caveman<-function(s) {
-  files = sample.list[[s]]
-  if (length(files) < 2) {
-    warning(s)
-    stop()
-  }
-  stats = read.table(grep('samplestatistics.csv', files, value=T), row.names=1)
-  
-  caveman = read.csv(grep('copynumber.caveman.csv$', files, value=T))
-  caveman$ploidy = stats['Ploidy',]
-  caveman$rho = stats['rho',]
-  caveman$contamination = stats['NormalContamination',]
-
-  caveman$Illumina.Barcode.full = s
-  caveman
-}
 
 # Tumours
-dir = '~/Data/ICGC/BE_OAC_Cohort/tumour/data/ascat'
-files = list.files(dir, full.names=T, recursive=T)
-samples = list.files(dir, full.names=F)
+# there are some duplicates in the patient samples so I've selected one tumor for each of those. That means that there are a few less samples to be analysed than the files initially might suggest
+tumors = subset(sequenced, Sample_type == 'tumour') 
 
-sample.list = lapply(samples, function(x) {
-  grep(x, files, value=T)
-} )
-names(sample.list) = samples
+cnv = read.table('~/Data/ICGC/BE_OAC_Cohort/tumour/data/ascat/totalCNV.txt', sep='\t', header=T, stringsAsFactors=F)
 
-cnv = do.call(rbind, lapply(samples, read.caveman))
-totalCNV = merge(cnv, paired, by.x='Illumina.Barcode.full', by.y='SampleId')
+barcodes = do.call(rbind, strsplit(cnv$Illumina.Barcode, '_vs_'))
+colnames(barcodes) = c('Tumor.Barcode','Normal.Barcode')
 
-demo.cols = c('StudySubjectID','RP.TStage.PrimaryTumour','RP.BarrettsAdjacent','Weeks.Survival','RP.TumourDifferentiation','DI.ageAtDiagnosis','DI.PatientGender','FE.Patient.Died')
-totalCNV = merge(totalCNV, demo[,demo.cols], by.y='StudySubjectID', by.x='OCCAMS')
+cnv = cbind(cnv, barcodes)
+cnv[colnames(barcodes)] = lapply(cnv[colnames(barcodes)], as.character)
+length(unique(cnv$Tumor.Barcode))
 
-oacCNV = makeGRangesFromDataFrame(totalCNV, keep.extra.columns = T)
+#subset(tumors, Illumina_Barcode %in% setdiff(cnv$Tumor.Barcode, tumors$Illumina_Barcode))
 
+cnv = base::merge(cnv, tumors, by.x='Tumor.Barcode', by.y='Illumina_Barcode') 
+
+tumorcnv = makeGRangesFromDataFrame(cnv, keep.extra.columns = T)
+
+# Not a problem at the moment
+#which(!cnv$Tumor.Barcode %in% tumors$Illumina_Barcode)
 
 # Barretts ADJACENT SAMPLES
-dir = '~/Data/ICGC/BE_OAC_Cohort/BA/data/ascat'
-files = list.files(dir, full.names=T, recursive=T)
-samples = list.files(dir, full.names=F)
+becnv = read.table('~/Data/ICGC/BE_OAC_Cohort/BA/data/ascat/totalCNV.txt', sep='\t', header=T, stringsAsFactors=F)
+length(unique(becnv$Illumina.Barcode))
 
-sample.list = lapply(samples, function(x) {
-  grep(x, files, value=T)
-} )
-names(sample.list) = samples
+barcodes = do.call(rbind, strsplit(becnv$Illumina.Barcode, '_vs_'))
+colnames(barcodes) = c('Tumor.Barcode','Normal.Barcode')
 
+becnv = cbind(becnv, barcodes)
 
-cnv = do.call(rbind, lapply(samples, read.caveman))
-beCNV = merge(cnv, barretts.pairs, by.x='Illumina.Barcode.full', by.y='SampleId')
-beCNV = merge(beCNV, demo[,demo.cols], by.y='StudySubjectID', by.x='OCCAMS')
-beCNV = makeGRangesFromDataFrame(beCNV, keep.extra.columns = T)
+becnv[colnames(barcodes)] = lapply(becnv[colnames(barcodes)], as.character)
+
+becnv = base::merge(becnv, subset(sequenced, grepl('barr', Sample_type)) , by.x='Tumor.Barcode', by.y='Illumina_Barcode') 
+#becnv = merge(becnv, demo[,cols], by.y='StudySubjectID', by.x='OCCAMS')
+becnv = makeGRangesFromDataFrame(becnv, keep.extra.columns = T)
 # ------------------------------ #
 
 
-oac.demo = subset(demo, StudySubjectID %in% unique(oacCNV$OCCAMS))
-be.demo = subset(demo, StudySubjectID %in% unique(beCNV$OCCAMS))
+#oac.demo = subset(demo, StudySubjectID %in% unique(tumorcnv$OCCAMS))
+#be.demo = subset(demo, StudySubjectID %in% unique(becnv$OCCAMS))
 
 ## Shallow WGS data 
-load('~/Data/Ellie/Analysis/5e06/loo.Rdata', verbose=T)
+load('~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/loo.Rdata', verbose=T)
 swgsPredictions = pg.samp
-rm(pg.samp)
+rm(pg.samp, plots, coefs, fits)
 
-load('~/Data/Ellie/Analysis/5e06/all.pt.alpha.Rdata', verbose=T)
+load('~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/all.pt.alpha.Rdata', verbose=T)
 rawSWGSdf = dysplasia.df
 a = '0.9'
 coefs = coefs[[a]]; model = models[[a]]
 
+# CV(RR)
 hazards = apply( exp(t(rawSWGSdf[, rownames(coefs)])*coefs[,1]), 1, function(x) { sd(x)/mean(x) })
-rm(dysplasia.df,fits,plots,performance.at.1se)
+rm(dysplasia.df,models,plots,performance.at.1se)
 # ------------------------------ #
 
 ch = as.data.frame(hazards)
@@ -173,27 +160,12 @@ ch$coef = coefs[,1]
 ch$stability = rowSums(coefs[,-1])/50
 ch$label = rownames(ch)
 
-
-analysis.files = list.files('~/Data/Ellie/Analysis', full.names=T)
-load(grep('Training_patients.Rdata', analysis.files, value=T), verbose=T)
-
-labels = unlist(sapply(patient.data, function(df) {
-  df$info = arrange(df$info, Endoscopy.Year, Pathology)
-  label = as.integer(df$info$Status == 'P') #as.integer(df$info$Pathology %in% c('HGD', 'IMC'))
-  names(label) = df$info$Samplename
-  return(label)
-}))
-names(labels) = sub('.*\\.', '',  names(labels))
-
-labels = labels[which(names(labels) %in% rownames(rawSWGSdf))]
-
-rm(patient.data)
 ```
 
 # Questions in the Shallow WGS data
 
 Load the coefficients from the selected model and merge with the copynumber regions identified in (some) of the OAC patients
-```{r, echo=F}
+```{r, echo=F, warning=F, message=F}
 regions = do.call(rbind.data.frame, c(strsplit(grep('\\d+', ch$label, value=T), ':|-'), stringsAsFactors=F))
 colnames(regions) = c('chr','start','stop')
 regions[colnames(regions)] = lapply(regions[colnames(regions)], function(x) as.numeric(x))
@@ -214,16 +186,17 @@ We would expect them to be since these are the regions that the model selects as
 
 Certainly they are found at a different rate in gains for P vs NP. Which we would expect.
 
-```{r}
+```{r, echo=T}
 # positive coefficients were related to gains in progressors
 gains = subset(ch, coef > 0)
 
+# counts of gains per coef
 gain = do.call(rbind, lapply(gains$label, function(reg) {
   values = rawSWGSdf[,reg] 
   table(labels[which(values > 1)])
 }))
-
-t.test(gain[,1], gain[,2])
+rownames(gain) = gains$label
+wilcox.test(gain[,1], gain[,2])
 
 # negative coefficients were related to losses in non-progressors
 losses = subset(ch, coef < 0)
@@ -232,10 +205,8 @@ loss = do.call(rbind, lapply(losses$label, function(reg) {
   values = rawSWGSdf[,reg] 
   table(labels[which(values < -1)])
 }))
-
-t.test(loss[,1], loss[,2])
-
-
+rownames(loss) = losses$label
+wilcox.test(loss[,1], loss[,2])
 ```
 
 This is true of randomly selected regions as well, which we also expect based on the general trend towards disorder we see in P vs NP.
@@ -247,32 +218,29 @@ randomGains = do.call(rbind, lapply(sample.reg, function(reg) {
   values = rawSWGSdf[,reg] 
   table(labels[which(values > 1)])
 }))
+wilcox.test(randomGains[,1], randomGains[,2])
 
-t.test(randomGains[,1], randomGains[,2])
 
 randomLosses = do.call(rbind, lapply(sample.reg, function(reg) {
   values = rawSWGSdf[,reg] 
   table(labels[which(values < -1)])
 }))
-
-t.test(randomLosses[,1], randomLosses[,2])
-
+wilcox.test(randomLosses[,1], randomLosses[,2])
 ```
 
-However, while there appears to be no difference in the gains found in NP for randomly selected regions vs the coefficients:
 
-pander(wilcox.test(gain[,'0'], randomGains[,'0']), caption="Non progressors, coeffiecents vs randomly selected")
+```{r echo=F}
+rg = wilcox.test(gain[,'0'], randomGains[,'0'])
+rl = wilcox.test(loss[,'0'], randomLosses[,'0'])
+```
+There appears to be no difference in gains (P=`r rg$p.value`) or losses (P=`r rl$p.value`) for Non-progressors as compared to random.
 
 
-pander(wilcox.test(loss[,'0'], randomLosses[,'0']), caption="Non progressors, coeffiecents vs randomly selected")
-
-
-There is a significant difference in the selected regions for progressors. Again this is mostly a sanity check:
-
-pander(wilcox.test(gain[,'1'], randomGains[,'1']), caption="Progressors, coeffiecents vs randomly selected gains")
-
-pander(wilcox.test(loss[,'1'], randomLosses[,'1']), caption="Progressors, coeffiecents vs randomly selected losses")
-
+```{r echo=F}
+rg = wilcox.test(gain[,'1'], randomGains[,'1'])
+rl = wilcox.test(loss[,'1'], randomLosses[,'1'])
+```
+However, there is a significant difference in the selected regions for progressors as compared to random (gains P=`r rg$p.value` and losses P=`r rl$p.value`). This is mostly a sanity check.
 
 ## Two groups of patients?
 
@@ -329,8 +297,6 @@ ggplot(m, aes(x=Var1, y=value,fill=Var2)) +
   geom_bar(stat="identity", width=.5, position = "dodge") + coord_flip() + 
   labs(title='Ratio of final sample predictions vs all previous samples')
 ```
-
-
 
 For ~~samples~~ endoscopies predicted prior to the final our mean ratio is `r mean(final.vs.prev$previous)` so most are predicted. 
 ```{r, echo=F}
@@ -520,29 +486,30 @@ These may be more nuanced, as we need to be aware of gains that reflect WGD vs g
 ```{r, fig.height=16, fig.width=16}
 plot.gains<-function(df) {
   df = lapply(df, function(x) {
-    x = arrange(x, -width)
+    x = plyr::arrange(x, -width)
     x$order = factor(1:nrow(x))
     return(x)
   })
 
   m = do.call(rbind.data.frame, df)
-  m = m %>% group_by(seqnames) %>% ungroup() %>% arrange(segment, seqnames, width, start) %>% mutate(segorder = row_number())
-m$isWGD = as.factor(m$isWGD)
+  m = m %>% group_by(seqnames) %>% dplyr::ungroup() %>% 
+    dplyr::arrange(segment, seqnames, width, start) %>% dplyr::mutate(segorder = row_number()) 
+  m$isWGD = as.factor(m$isWGD)
 
-m$CN = cut(m$Total_CN, include.lowest=T, ordered_result=T, breaks=c(3, 5, 7, 9, 10, max(m$Total_CN)))
-ggplot(data=m, aes(x=order, y=start)) +  
-  facet_wrap(~segment, scales='free') +
-  geom_segment(aes(x=order, xend=order, y=start, yend=end, color=CN)) + 
-  geom_segment(aes(x=0,xend=0, y=seg.start, yend=seg.end), color='red', size=2) +
-  scale_colour_brewer(palette='YlGnBu', direction=-1) +
-  coord_flip() + plot.theme +
-  theme(legend.position='bottom', axis.text=element_blank(),panel.grid.major = element_blank()) + labs(y='chr position', x='Patient', title='Gains')
+  m$CN = cut(m$Total_CN, include.lowest=T, ordered_result=T, breaks=c(3, 5, 7, 9, 10, max(m$Total_CN)))
+  ggplot(data=m, aes(x=order, y=start)) +  
+    facet_wrap(~segment, scales='free') +
+    geom_segment(aes(x=order, xend=order, y=start, yend=end, color=CN)) + 
+    geom_segment(aes(x=0,xend=0, y=seg.start, yend=seg.end), color='red', size=2) +
+    scale_colour_brewer(palette='YlGnBu', direction=-1) +
+    coord_flip() + plot.theme +
+    theme(legend.position='bottom', axis.text=element_blank(),panel.grid.major = element_blank()) + labs(y='chr position', x='Patient', title='Gains')
 }
   
 
 # WGD
-oacCNV$isWGD = oacCNV$ploidy > 3.2 
-beCNV$isWGD = beCNV$ploidy > 3.2
+tumorcnv$isWGD = tumorcnv$ploidy > 3.2 
+becnv$isWGD = becnv$ploidy > 3.2
 
 #average genome ploidy <= 2.7 AND total copy number >= 5
 #OR average genome ploidy > 2.7 AND total copy number >= 9
@@ -568,17 +535,24 @@ gain.for<-function(gg, cnv) {
 gr = which(swgRegions$coef > 0)
 
 ## gains in patients -- issues with WGD samples?
-gains = lapply(swgRegions[gr], gain.for, cnv=oacCNV)
+gains = lapply(as(swgRegions[gr], "GRangesList"), gain.for, cnv=tumorcnv)
 names(gains) = as.character(swgRegions[gr])
 plot.gains(gains) + labs(title='Gains in OAC samples')
 
-be.gains = lapply(swgRegions[gr], gain.for, cnv=oacCNV[which(oacCNV$RP.BarrettsAdjacent == 'yes')])
-names(be.gains) = as.character(swgRegions[gr])
-plot.gains(be.gains[sapply(be.gains, nrow) > 0]) + labs(title='Gains in BE Adjacent samples') 
 
-non.be.gains = lapply(swgRegions[gr], gain.for, cnv=oacCNV[which(oacCNV$RP.BarrettsAdjacent == 'no')])
+sequenced = base::merge(sequenced, demo, by.x='OCCAMS_ID', by.y='StudySubjectID')
+subset(sequenced, RP.BarrettsAdjacent == 'yes')$Illumina_Barcode
+
+be.cnvs = subset(tumorcnv, Tumor.Barcode %in%  subset(sequenced, RP.BarrettsAdjacent == 'yes')$Illumina_Barcode)
+non.be.cnvs = subset(tumorcnv, Tumor.Barcode %in%  subset(sequenced, RP.BarrettsAdjacent == 'no')$Illumina_Barcode)
+
+be.gains = lapply(as(swgRegions[gr], 'GRangesList'), gain.for, cnv=be.cnvs)
+names(be.gains) = as.character(swgRegions[gr])
+plot.gains(be.gains[sapply(be.gains, nrow) > 0]) + labs(title='Gains in BE Adjacent OAC samples') 
+
+non.be.gains = lapply(as(swgRegions[gr], 'GRangesList'), gain.for, cnv=non.be.cnvs)
 names(non.be.gains) = as.character(swgRegions[gr])
-plot.gains(non.be.gains[sapply(non.be.gains, nrow) > 0]) + labs(title='Gains in NO BE Adjacent samples') 
+plot.gains(non.be.gains[sapply(non.be.gains, nrow) > 0]) + labs(title='Gains in Non-BE Adjacent OAC samples') 
 
 
 ```
@@ -588,16 +562,16 @@ plot.gains(non.be.gains[sapply(non.be.gains, nrow) > 0]) + labs(title='Gains in 
 ```{r, fig.height=8, fig.width=12}
 
 # Per patient
-gfreq = sort(sapply(gains, function(x) length(unique(x$OCCAMS)))/length(unique(sequenced$OCCAMS_ID)))
+gfreq = sort(sapply(gains, function(x) length(unique(x$Illumina.Barcode)))/length(unique(sequenced$OCCAMS_ID)))
 ggplot(melt(as.matrix(gfreq)), aes(Var1, value)) + geom_col(fill='darkblue') + ylim(0,0.5) + coord_flip() + 
   labs(x='', y='Frequency', title='Gain frequency in OAC') + theme_bw() + theme(text=element_text(size=14))
 
 
-gfreq1 = sort(sapply(be.gains, function(x) length(unique(x$OCCAMS)))/length(unique(oacCNV[which(oacCNV$RP.BarrettsAdjacent == 'yes')]$OCCAMS)))
+gfreq1 = sort(sapply(be.gains, function(x) length(unique(x$Illumina.Barcode)))/length(unique(be.cnvs$Illumina.Barcode)))
 gfreq1 = gfreq1[names(gfreq)]
 
 
-gfreq2 = sort(sapply(non.be.gains, function(x) length(unique(x$OCCAMS)))/length(unique(oacCNV[which(oacCNV$RP.BarrettsAdjacent == 'no')]$OCCAMS)))
+gfreq2 = sort(sapply(non.be.gains, function(x) length(unique(x$Illumina.Barcode)))/length(unique(non.be.cnvs$Illumina.Barcode)))
 gfreq2 = gfreq2[names(gfreq)]
 
 
@@ -620,19 +594,19 @@ plot.losses<-function(df) {
   if (!is.data.frame(df)) {
     df = lapply(df, function(x) {
       if(nrow(x) <= 0) return(NULL)
-      x = arrange(x, -width)
+      x = plyr::arrange(x, -width)
       x$order = factor(1:nrow(x))
       return(x)
     })
     m = do.call(rbind.data.frame, df)
   } else {
     m = df
-    m = arrange(m, -width)
+    m = plyr::arrange(m, -width)
     m$order = factor(1:nrow(m))
   }
   #m$segnames = ordered(m$seqnames, levels=c(1:22))
 
-  m = m %>% group_by(seqnames) %>% ungroup() %>% arrange(segment, seqnames, width, start) %>% mutate(segorder = row_number())
+  m = m %>% dplyr::group_by(seqnames) %>% ungroup() %>% dplyr::arrange(segment, seqnames, width, start) %>% dplyr::mutate(segorder = row_number())
   m$isWGD = as.factor(m$isWGD)
   m$CN = as.factor(m$Total_CN)
   #m = transform(m, segment=reorder(segment, segnames))
@@ -671,15 +645,15 @@ loss.for<-function(gg, cnv){
   
 lr = which(swgRegions$coef < 0)
 
-losses = lapply(swgRegions[lr], loss.for, oacCNV)
+losses = lapply(as(swgRegions[lr], 'GRangesList'), loss.for, tumorcnv)
 names(losses) = as.character(swgRegions[lr])
 plot.losses(losses)
 
-be.losses = lapply(swgRegions[lr], loss.for, oacCNV[which(oacCNV$RP.BarrettsAdjacent == 'yes')])
+be.losses = lapply(as(swgRegions[lr], 'GRangesList'), loss.for, be.cnvs)
 names(be.losses) = as.character(swgRegions[lr])
 plot.losses(be.losses) + labs(title="Losses in (YES) BE Adjacent samples") 
 
-non.be.losses = lapply(swgRegions[lr], loss.for, cnv=oacCNV[which(oacCNV$RP.BarrettsAdjacent == 'no')])
+non.be.losses = lapply(as(swgRegions[lr], 'GRangesList'), loss.for, non.be.cnvs)
 names(non.be.losses) = as.character(swgRegions[lr])
 plot.losses(non.be.losses) + labs(title='Losses in (NO) BE Adjacent samples') 
 
@@ -690,15 +664,15 @@ plot.losses(non.be.losses) + labs(title='Losses in (NO) BE Adjacent samples')
 
 ```{r, fig.height=8, fig.width=12}
 
-lfreq = sort(sapply(losses, function(x) length(unique(x$OCCAMS)))/length(unique(sequenced$OCCAMS_ID)))
+lfreq = sort(sapply(losses, function(x) length(unique(x$Illumina.Barcode)))/length(unique(sequenced$OCCAMS_ID)))
 ggplot(melt(as.matrix(lfreq)), aes(Var1, value)) + geom_col(fill='darkgreen') + ylim(0,1) + coord_flip() + 
   labs(x='', y='Frequency', title='Loss frequency in OAC') + theme_bw() + theme(text=element_text(size=14))
 
 
-lfreq1 = sapply(be.losses, function(x) length(unique(x$OCCAMS)))/length(unique(oacCNV[which(oacCNV$RP.BarrettsAdjacent == 'yes')]$OCCAMS))
+lfreq1 = sapply(be.losses, function(x) length(unique(x$Illumina.Barcode)))/length(unique(be.cnvs$Illumina.Barcode))
 lfreq1 = lfreq1[names(lfreq)]
 
-lfreq2 = sort(sapply(non.be.losses, function(x) length(unique(x$OCCAMS)))/length(unique(oacCNV[which(oacCNV$RP.BarrettsAdjacent == 'no')]$OCCAMS)))
+lfreq2 = sort(sapply(non.be.losses, function(x) length(unique(x$Illumina.Barcode)))/length(unique(non.be.cnvs$Illumina.Barcode)))
 lfreq2 = lfreq2[names(lfreq)]
 
 
@@ -715,22 +689,19 @@ ggplot(melt(m), aes(region, value, group=variable, fill=variable)) + facet_grid(
 
 
 
-
+TODO: This should really separate the focal losses in 17p from the large-scale losses.
 
 ```{r fig.height=6,fig.width=8}
-
-## Note it's a subset of the 321 patients (66) that have this
 chr17 = get.chr.lengths()[17,]
 
-#chr17losses = lapply(makeGRangesFromDataFrame( cbind.data.frame('start'=0, 'end'=chr17$chr.length, 'chr'='17') ), loss.for)[[1]]
-#m = arrange(chr17losses, width, start)
+chr17losses = losses[grep('^17:', names(losses))][[1]]
 
-plot.losses(losses$`17:1-4776188`) + geom_hline(data=chr17, aes(yintercept=(chr.cent-cent.gap)), color='red', linetype='dashed') +
-  labs(y='chr17 position', x='Patient', title='Chr17 Losses in OAC Patients', subtitle=paste(round(length(unique(losses$`17:1-4776188`$OCCAMS))/length(unique(oacCNV$OCCAMS)), 2)*100, '% of OAC patients', sep=''))
+plot.losses(chr17losses) + geom_hline(data=chr17, aes(yintercept=(chr.cent-cent.gap)), color='red', linetype='dashed') +
+  labs(y='chr17 position', x='Patient', title='17p Losses in (all) OAC Patients', subtitle=paste(round(length(unique(chr17losses$Illumina.Barcode))/length(unique(tumorcnv$Illumina.Barcode)), 2)*100, '% of OAC patients', sep=''))
 
 ```
 
-So is there a difference between the gains/losses in the selected regions?  
+There does not appear to be a difference in gains vs losses.
 ```{r}
 wilcox.test(sapply(gains, nrow), sapply(losses, nrow))
 one.way.aov(sapply(gains, nrow), sapply(losses, nrow))
@@ -760,26 +731,43 @@ sample.regions = do.call(c, lapply(tiles[chr.samples], function(x) sample(x, len
 
 ### Gains
 
-These may be more nuanced, as we need to be aware of gains that reflect WGD vs gains that are new amplifications. At the moment there's no distinction
+These may be more nuanced, as we need to be aware of gains that reflect WGD vs gains that are new amplifications. At the moment there's no distinction.
 
-```{r}
-randomGains = lapply(sample.regions, gain.for, cnv=oacCNV)
+There's no clear difference between the randomly selected regions and gains overall.  But there does appear to be a difference when comparing the randomly selected regions to the regions split by BE/non-BE.  I'm not sure this is real considering the overall case though.
+
+```{r, echo=F}
+randomGains = lapply(as(sample.regions,'GRangesList'), gain.for, cnv=tumorcnv)
 names(randomGains) = as.character(sample.regions)
+randomGains = randomGains[which(sapply(randomGains, nrow) > 2)]
+
 
 plot.gains(randomGains[sample(length(randomGains), 20)])
 
 # Maybe a difference in # gains in the selected features vs random
-wilcox.test(sapply(randomGains, nrow), sapply(gains, nrow))
+# wilcox.test(sapply(randomGains, nrow), sapply(gains, nrow))
+# 
+# tests = matrix(ncol=2, nrow=10, dimnames=list(c(1:10), c('Rand.vs.BE.Gain', 'Rand.v.Non.Be.Gain')))
+# for (i in 1:10) {
+#   
+#   sr = randomGains[sample(1:length(randomGains), length(be.gains))]
+#   wt1 = wilcox.test(sapply(sr, nrow), sapply(be.gains,nrow))
+#   
+#   sr = randomGains[sample(1:length(randomGains), length(non.be.gains))]
+#   wt2 = wilcox.test(sapply(sr, nrow), sapply(non.be.gains,nrow))
+#   
+#   tests[i,] = c(wt1$p.value, wt2$p.value)
+# }
+# tests < 0.005
+# 
+# #wilcox.test(sapply(randomGains, nrow), sapply(be.gains,nrow))
+# #wilcox.test(sapply(randomGains, nrow), sapply(non.be.gains,nrow))
+# 
+# # Not a difference here though
+# wilcox.test(sapply(gains, function(df) length(unique(df$Illumina.Barcode))), 
+#             sapply(randomGains, function(df) length(unique(df$Illumina.Barcode))))
 
-wilcox.test(sapply(randomGains, nrow), sapply(be.gains,nrow))
-wilcox.test(sapply(randomGains, nrow), sapply(non.be.gains,nrow))
-
-# Not a difference here though
-wilcox.test(sapply(gains, function(df) length(unique(df$OCCAMS))), 
-            sapply(randomGains, function(df) length(unique(df$OCCAMS))))
-
-df = rbind(cbind.data.frame('counts'=sapply(gains, function(df) length(unique(df$OCCAMS))), 'type'='selected') , 
-      cbind.data.frame('counts'=sapply(randomGains, function(df) length(unique(df$OCCAMS))), 'type'='random'))
+df = rbind(cbind.data.frame('counts'=sapply(gains, function(df) length(unique(df$Illumina.Barcode))), 'type'='selected') , 
+      cbind.data.frame('counts'=sapply(randomGains, function(df) length(unique(df$Illumina.Barcode))), 'type'='random'))
 ggplot(df, aes(type, counts, group=type, fill=type)) + geom_boxplot() + geom_jitter(width=0.3) + labs(title='Patient counts by region') + plot.theme
 
 
@@ -810,26 +798,37 @@ wilcox.test(subset(df, type == 'random')$counts, subset(df, type == 'all.selecte
 
 ### Losses
 
-```{r}
-randomLosses = lapply(sample.regions, loss.for, cnv=oacCNV)
+```{r, echo=F}
+randomLosses = lapply(as(sample.regions,'GRangesList'), loss.for, cnv=tumorcnv)
 names(randomLosses) = as.character(sample.regions)
+
+randomLosses = randomLosses[which(sapply(randomLosses, nrow) > 2)]
 
 plot.losses(randomLosses[sample(length(randomLosses), 15)])
 
 # Definite difference between the numbers of gains and losses in randomly selected regions
 wilcox.test(sapply(randomGains, nrow), sapply(randomLosses, nrow))
 
-# No difference in # losses in the selected features
-wilcox.test(sapply(randomLosses, nrow), sapply(losses, nrow))
-
-
-wilcox.test(sapply(randomLosses, nrow), sapply(be.losses,nrow))
-wilcox.test(sapply(randomLosses, nrow), sapply(non.be.losses,nrow))
+# # No difference in # losses in the selected features
+# wilcox.test(sapply(randomLosses, nrow), sapply(losses, nrow))
+# 
+# 
+# tests = matrix(ncol=2, nrow=10, dimnames=list(c(1:10), c('Rand.vs.BE.Loss', 'Rand.v.Non.Be.Loss')))
+# for (i in 1:10) {
+#   sr = randomLosses[sample(1:length(randomLosses), length(be.losses))]
+#   wt1 = wilcox.test(sapply(sr, nrow), sapply(be.losses,nrow))
+#   
+#   sr = randomLosses[sample(1:length(randomLosses), length(non.be.losses))]
+#   wt2 = wilcox.test(sapply(sr, nrow), sapply(non.be.losses,nrow))
+#   
+#   tests[i,] = c(wt1$p.value, wt2$p.value)
+# }
+# tests < 0.005
 
 
 # No difference between the two
-df = rbind(cbind.data.frame('counts'=sapply(losses, function(df) length(unique(df$OCCAMS))), 'type'='selected') , 
-      cbind.data.frame('counts'=sapply(randomLosses, function(df) length(unique(df$OCCAMS))), 'type'='random'))
+df = rbind(cbind.data.frame('counts'=sapply(losses, function(df) length(unique(df$Illumina.Barcode))), 'type'='selected') , 
+      cbind.data.frame('counts'=sapply(randomLosses, function(df) length(unique(df$Illumina.Barcode))), 'type'='random'))
 ggplot(df, aes(type, counts, group=type, fill=type)) + geom_boxplot() + geom_jitter(width=0.3) + labs(title='Loss counts by patient') + plot.theme
 
 
@@ -844,32 +843,201 @@ ggplot(df, aes(type, counts, group=type, fill=type, color=type)) + geom_boxplot(
 
 ```
 
-## Cox 
+## Focal vs Large CN
+
+It's worth looking to see if focal/large changes are enriched in the gains particularly as the plots seemed to suggest they may be.
+
+#### Gains
+
+```{r, echo=F, fig.width=8}
+size = unlist(sapply(gains, function(df) df$width))
+hist(size)
+abline(v = 3e6, col='red')
+
+#chr.lengths$chr.length*.01
+
+
+# Focal changes < 1% or the chromosome?
+countBySize <-function(df) {
+  s = round(subset(chr.lengths, chrom == unique(df$seqnames))$chr.length *.01)
+  cbind('focal'=nrow(subset(df, width < s)),
+        'large'=nrow(subset(df, width >= s)))
+}
+
+sizebyPatient<-function(df) {
+  s = round(subset(chr.lengths, chrom == unique(df$seqnames))$chr.length *.01)
+  cbind('focal'=length(unique(subset(df, width < s)$OCCAMS)),
+        'large'=length(unique(subset(df, width >= s)$OCCAMS)))
+}
+
+# sizebyPatient<-function(x) {
+#   cbind('focal'=length(unique(subset(x, width <= quantile(width)[['25%']])$OCCAMS)),
+#         'large'=length(unique(subset(x, width > quantile(width)[['25%']])$OCCAMS)) )
+# }
+
+# countBySize<-function(x) {
+#   cbind('focal'=nrow(subset(x, width < quantile(width)[['25%']])),
+#         'large'=nrow(subset(x, width >= quantile(width)[['25%']])) )
+# }
+
+## Still in the regions selected
+sizeGainsByPatient = do.call(rbind.data.frame,lapply(gains, sizebyPatient))
+sizeGains = do.call(rbind.data.frame,lapply(gains, countBySize))
+
+#  enrichment for some focal changes
+x = which(p.adjust(apply(sizeGains, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
+# CI
+apply(sizeGains, 1, function(x) binom.test(x[1], sum(x), 0.5)$conf.int )[,x]
+
+
+## Not sure what to do with this really. Regions are shared, nonBE has two additional
+sizeGainsBE = do.call(rbind.data.frame, lapply(be.gains, countBySize))
+which(p.adjust(apply(sizeGainsBE, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
+sizeGainsNonBE = do.call(rbind.data.frame, lapply(non.be.gains, countBySize))
+which(p.adjust(apply(sizeGainsNonBE, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
+
+
+# Same is true for gains of type by patient
+xx = which(p.adjust(apply(sizeGainsByPatient, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
+apply(sizeGainsByPatient, 1, function(x) binom.test(x[1], sum(x), 0.5)$conf.int )[,xx]
+
+
+## Not sure what to do with this really. Again shared regions, two addition in the nonBE
+sizeGainsBEByPt = do.call(rbind.data.frame, lapply(be.gains, sizebyPatient))
+which(p.adjust(apply(sizeGainsBEByPt, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
+sizeGainsNonBEByPt = do.call(rbind.data.frame, lapply(non.be.gains, sizebyPatient))
+which(p.adjust(apply(sizeGainsNonBEByPt, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
+
+
+## TODO Here we need to compare to randomly selected regions. I don't think you'd expect that regions with many focal would also show large  or vice versa
+sizeGainsRatio = sizeGains %>% rowwise() %>% dplyr::summarise( 'focal.r'=focal/sum(focal,large), 'large.r'=large/sum(focal,large) )
+sizeGainsRatio$feature = rownames(sizeGains)
+
+grid.arrange(
+  ggplot(melt(sizeGainsRatio), aes(feature, value, fill=variable) ) + geom_col() + coord_flip() + labs(title='Ratio of overall gains per region'),
+  ggplot(melt(sizeGainsByPatient), aes(variable, value, group=variable, fill=variable)) + 
+    geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
+    labs(title="Patients per region", subtitle=paste('p=',format.pval(one.way.aov(sizeGainsByPatient$focal, sizeGainsByPatient$large)$p.value,digits=3), sep=''), y='patients per region', x=''),
+top='Gains in selected regions', ncol=2)
+```
+
+#### Losses
+
+```{r, echo=F, fig.width=8}
+sizeLossesByPatients = do.call(rbind.data.frame,lapply(losses, sizebyPatient))
+sizeLosses = do.call(rbind.data.frame,lapply(losses, countBySize))
+
+sizeLossBE = do.call(rbind.data.frame, lapply(be.losses, countBySize))
+sizeLossNoBE = do.call(rbind.data.frame, lapply(non.be.losses, countBySize))
+
+wilcox.test(sizeLossBE$large, sizeLossNoBE$large)
+
+# True for losses as well
+which(p.adjust(apply(sizeLosses, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
+apply(sizeLosses, 1, function(x) binom.test(x[1], sum(x), 0.5)$conf.int )
+
+## Again, wouldn't expect a lot of focal losses if there are large ones already so need to think about what to test
+sizeLossRatio = sizeLosses %>% rowwise() %>% summarise( 'focal.r'=focal/sum(focal,large), 'large.r'=large/sum(focal,large) )
+sizeLossRatio$feature = rownames(sizeLosses)
+
+ggplot(melt(sizeLossRatio, id.vars='feature'), aes(feature, value, fill=variable) ) + geom_col() + coord_flip() + labs(title='Overall losses')
+
+grid.arrange(
+ggplot(melt(sizeLosses), aes(variable, value, group=variable, fill=variable)) + 
+  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
+  labs(title="Counts per region", subtitle=paste('p=',format.pval(one.way.aov(sizeLosses$focal, sizeLosses$large)$p.value,3), sep=''), y='counts per region', x=''),
+
+ggplot(melt(sizeLossesByPatients), aes(variable, value, group=variable, fill=variable)) + 
+  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
+  labs(title="Patients per region", subtitle=paste('p=',format.pval(one.way.aov(sizeLossesByPatients$focal, sizeLossesByPatients$large)$p.value,3), sep=''), y='patients per region', x=''),
+top='Losses in selected regions', ncol=2)
+
+```
+
+
+### Compared to random focal/large changes?
+
+#### Losses
+
+Basically losses tend to be large (>1% of the chromosome) and patients are more likely to have large losses rather than focal ones
+
+```{r, echo=F, fig.width=8}
+randomLossesByPt = do.call(rbind.data.frame,lapply(randomLosses, sizebyPatient))
+randomLossesBySize = do.call(rbind.data.frame,lapply(randomLosses, countBySize))
+
+grid.arrange(
+ggplot(melt(randomLossesBySize), aes(variable, value, group=variable, fill=variable)) + 
+  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
+  labs(title="Counts per region", subtitle=paste('p=',format.pval(one.way.aov(randomLossesBySize$focal, randomLossesBySize$large)$p.value,digits=3), sep=''), y='counts per region', x='') + theme(legend.position = 'none'),
+
+ggplot(melt(randomLossesByPt), aes(variable, value, group=variable, fill=variable)) + 
+  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
+  labs(title="Patients per region", subtitle=paste('p=',format.pval(one.way.aov(randomLossesByPt$focal, randomLossesByPt$large)$p.value,digits=3), sep=''), y='patients per region', x='') + theme(legend.position = 'none'),
+top='Losses in randomly selected regions', ncol=2)
+
+
+# No real difference in randomly selected regions for focal losses
+wilcox.test(randomLossesBySize$focal, sizeLosses$focal) 
+#one.way.aov(randomLossesBySize$focal, sizeLosses$focal) 
+
+## Difference in large losses
+wilcox.test(randomLossesBySize$large, sizeLosses$large)
+#one.way.aov(randomLossesBySize$large, sizeLosses$large)
+```
+
+
+#### Gains
+
+Looks like gains show no particular enrichment for focal vs large alterations.
+
+```{r, echo=F, fig.width=8}
+randomGainsByPt = do.call(rbind.data.frame,lapply(randomGains, sizebyPatient))
+randomGainsBySize = do.call(rbind.data.frame,lapply(randomGains, countBySize))
+
+grid.arrange(
+ggplot(melt(randomGainsBySize), aes(variable, value, group=variable, fill=variable)) + 
+  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
+  labs(title="Counts per region", subtitle=paste('p=',format.pval(one.way.aov(randomGainsBySize$focal, randomGainsBySize$large)$p.value,3), sep=''), y='counts per region', x='') + theme(legend.position = 'none'),
+
+ggplot(melt(randomGainsByPt), aes(variable, value, group=variable, fill=variable)) + 
+  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
+  labs(title="Patients per region", subtitle=paste('p=',format.pval(one.way.aov(randomGainsByPt$focal, randomGainsByPt$large)$p.value,3), sep=''), y='patients per region', x='') + theme(legend.position = 'none'),
+top='Gains in randomly selected regions', ncol=2)
+
+
+wilcox.test(randomGainsBySize$focal, sizeGains$focal) 
+wilcox.test(randomGainsBySize$large, sizeGains$large) 
+wilcox.test(sizeGainsByPatient$focal, sizeGainsByPatient$large) 
+
+```
+
+# Cox 
 
 ```{r}
 library(survival)
 library(GGally)
 
 
+oac.demo = subset(demo, StudySubjectID %in% sequenced$OCCAMS_ID)
+
+
 pt.gains = do.call(rbind, lapply(oac.demo$StudySubjectID, function(id) {
-  rbind(sapply(gains, function(g)  nrow(subset(g, OCCAMS == id))))
+  rbind(sapply(gains, function(g)  nrow(subset(g, OCCAMS_ID == id))))
 }))
 rownames(pt.gains) = oac.demo$StudySubjectID
 colnames(pt.gains) = paste('gain_', gsub(':|-', '\\.', colnames(pt.gains)), sep='')
   
-
-      
 pt.losses = do.call(rbind, lapply(oac.demo$StudySubjectID, function(id) {
-  rbind(sapply(losses, function(g)  nrow(subset(g, OCCAMS == id))))
+  rbind(sapply(losses, function(g)  nrow(subset(g, OCCAMS_ID == id))))
 }))
 rownames(pt.losses) = oac.demo$StudySubjectID
 colnames(pt.losses) = paste('loss_',gsub(':|-', '\\.', colnames(pt.losses)), sep='')
 
+demo.cols = c('StudySubjectID','Weeks.Survival', 'FE.Patient.Died', 'RP.BarrettsAdjacent', 'DI.PatientGender', 'DI.ageAtDiagnosis', 'RP.TStage.PrimaryTumour', 'RP.TumourDifferentiation', 'RP.Tumour.Growth')
 
 x = merge(pt.gains, pt.losses, by='row.names', all=T)
 
-
-x = merge(x,oac.demo[,demo.cols], by.x='Row.names', by.y='StudySubjectID')
+x = base::merge(x,oac.demo[,demo.cols], by.x='Row.names', by.y='StudySubjectID')
 x$Row.names = NULL
 
 time = 'Weeks.Survival';  event='FE.Patient.Died'; type = '"right"'
@@ -887,14 +1055,15 @@ sfit = survfit(terms, data=x,conf.int=0.95, conf.type='log', na.action=na.omit)
 ggsurv(sfit)
 
 
-f1 = paste(demo.cols[c(3,5:7)], collapse='+')
+#f1 = paste(demo.cols[c(3,5:7)], collapse='+')
+f1 = paste(demo.cols[4:6], collapse='+')
 f2 = paste(paste('`', grep('^gain|loss', colnames(x), value=T), '`', sep=''), collapse='+')
-
 f = paste(f1,f2, sep='+')
 
 terms = as.formula(paste("Surv(",time,",",event,", type=",type,") ~", f, sep=""))
 cox = coxph(terms, data=x,na.action=na.omit,ties='breslow')
 cfit = survfit(cox)
+summary(cox)
 ggsurv(cfit) + labs(title=paste(length(grep('gain|loss', colnames(x))), 'copy number + demo'))
 
 pander(cox)
@@ -911,16 +1080,22 @@ library(CoxHD)
 x = x[,c(grep('gain|loss',colnames(x), invert=T), grep('gain|loss',colnames(x)))]
 xs = x
 
+xs = xs[,grep('Tumour', colnames(xs), invert=T)]
+
+
+
 surv = with(xs, Surv(Weeks.Survival, FE.Patient.Died))
 ggsurv(survfit(surv~1,data=xs))
 
 xs = xs[,-grep('Weeks|Died',colnames(xs))]
 
 xs$RP.BarrettsAdjacent = as.integer(xs$RP.BarrettsAdjacent)-1
-xs$RP.TumourDifferentiation = as.integer(as.factor(xs$RP.TumourDifferentiation))-1
+#xs$RP.TStage.PrimaryTumour = as.integer(factor(xs$RP.TStage.PrimaryTumour))-1
+#xs$RP.TumourDifferentiation = as.integer(factor(xs$RP.TumourDifferentiation))-1
 xs$DI.PatientGender = as.integer(as.factor(xs$DI.PatientGender))-1
 
-groups = c(rep('clin', 4), rep('cn',(ncol(pt.gains)+ncol(pt.losses)) ))
+
+groups = c(rep('clin', 3), rep('cn',(ncol(pt.gains)+ncol(pt.losses)) ))
 
 rfx = CoxRFX(xs, surv, groups, nu=1, verbose=T)
 summary(rfx)
@@ -939,197 +1114,6 @@ PlotVarianceComponents(rfx)
 
 
 
-
-## Focal vs Large CN
-
-It's worth looking to see if focal/large changes are enriched in the gains particularly as the plots seemed to suggest they may be.
-
-#### Gains
-
-```{r, fig.width=8}
-size = unlist(sapply(gains, function(df) df$width))
-hist(size)
-abline(v = 3e6, col='red')
-
-#chr.lengths$chr.length*.01
-
-
-# Focal changes 1% or the chromosome?
-countBySize <-function(df) {
-  s = round(subset(chr.lengths, chrom == unique(df$seqnames))$chr.length *.01)
-  cbind('focal'=nrow(subset(df, width < s)),
-        'large'=nrow(subset(df, width >= s)))
-}
-
-sizebyPatient<-function(df) {
-  s = round(subset(chr.lengths, chrom == unique(df$seqnames))$chr.length *.01)
-  cbind('focal'=length(unique(subset(df, width < s)$OCCAMS)),
-        'large'=length(unique(subset(df, width >= s)$OCCAMS)))
-}
-
-
-
-# sizebyPatient<-function(x) {
-#   cbind('focal'=length(unique(subset(x, width <= quantile(width)[['25%']])$OCCAMS)),
-#         'large'=length(unique(subset(x, width > quantile(width)[['25%']])$OCCAMS)) )
-# }
-
-# countBySize<-function(x) {
-#   cbind('focal'=nrow(subset(x, width < quantile(width)[['25%']])),
-#         'large'=nrow(subset(x, width >= quantile(width)[['25%']])) )
-# }
-
-
-
-
-sizeGainsByPatient = do.call(rbind.data.frame,lapply(gains, sizebyPatient))
-sizeGains = do.call(rbind.data.frame,lapply(gains, countBySize))
-
-
-#  enrichment for some focal changes
-x = which(p.adjust(apply(sizeGains, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
-apply(sizeGains, 1, function(x) binom.test(x[1], sum(x), 0.5)$conf.int )[,x]
-
-
-## Not sure what to do with this really
-sizeGainsBE = do.call(rbind.data.frame, lapply(be.gains, countBySize))
-which(p.adjust(apply(sizeGainsBE, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
-sizeGainsNonBE = do.call(rbind.data.frame, lapply(non.be.gains, countBySize))
-which(p.adjust(apply(sizeGainsNonBE, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
-
-
-
-
-# Same is true for gains of type by patient
-xx = which(p.adjust(apply(sizeGainsByPatient, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
-apply(sizeGainsByPatient, 1, function(x) binom.test(x[1], sum(x), 0.5)$conf.int )[,xx]
-
-
-## Not sure what to do with this really
-sizeGainsBEByPt = do.call(rbind.data.frame, lapply(be.gains, sizebyPatient))
-which(p.adjust(apply(sizeGainsBEByPt, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
-sizeGainsNonBEByPt = do.call(rbind.data.frame, lapply(non.be.gains, sizebyPatient))
-which(p.adjust(apply(sizeGainsNonBEByPt, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value )) < 0.05)
-
-
-# Clear difference between focal/large
-wilcox.test(sizeGainsByPatient$focal, sizeGainsByPatient$large)
-one.way.aov(sizeGainsByPatient$focal, sizeGainsByPatient$large)
-
-
-sizeGainsRatio = sizeGains %>% rowwise() %>% summarise( 'focal.r'=focal/sum(focal,large), 'large.r'=large/sum(focal,large) )
-sizeGainsRatio$feature = rownames(sizeGains)
-
-
-# No difference in the overall number of gains per region
-ggplot(melt(sizeGains), aes(variable, value, group=variable, fill=variable)) + 
-  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) 
-  labs(title="Types of gain per region", subtitle=paste('p=',format.pval(one.way.aov(sizeGains$focal, sizeGains$large)$p.value,3), sep=''), y='patients per region', x='')
-
-
-grid.arrange(
-  ggplot(melt(sizeGainsRatio), aes(feature, value, fill=variable) ) + geom_col() + coord_flip() + labs(title='Ratio of overall gains per region'),
-  ggplot(melt(sizeGainsByPatient), aes(variable, value, group=variable, fill=variable)) + 
-    geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
-    labs(title="Patients per region", subtitle=paste('p=',format.pval(one.way.aov(sizeGainsByPatient$focal, sizeGainsByPatient$large)$p.value,digits=3), sep=''), y='patients per region', x=''),
-top='Gains in selected regions', ncol=2)
-```
-
-#### Losses
-
-```{r, fig.width=8}
-sizeLossesByPatients = do.call(rbind.data.frame,lapply(losses, sizebyPatient))
-sizeLosses = do.call(rbind.data.frame,lapply(losses, countBySize))
-
-
-sizeLossBE = do.call(rbind.data.frame, lapply(be.losses, countBySize))
-sizeLossNoBE = do.call(rbind.data.frame, lapply(non.be.losses, countBySize))
-
-wilcox.test(sizeLossBE$large, sizeLossNoBE$large)
-
-
-# True for losses as well
-p.adjust(apply(sizeLosses, 1, function(x) binom.test(x[1], sum(x), 0.5)$p.value ))
-apply(sizeLosses, 1, function(x) binom.test(x[1], sum(x), 0.5)$conf.int )
-
-wilcox.test(sizeLosses$focal, sizeLosses$large)
-one.way.aov(sizeLosses$focal, sizeLosses$large)
-
-
-sizeLossRatio = sizeLosses %>% rowwise() %>% summarise( 'focal.r'=focal/sum(focal,large), 'large.r'=large/sum(focal,large) )
-sizeLossRatio$feature = rownames(sizeLosses)
-
-ggplot(melt(sizeLossRatio), aes(feature, value, fill=variable) ) + geom_col() + coord_flip() + labs(title='Overall losses')
-
-grid.arrange(
-ggplot(melt(sizeLosses), aes(variable, value, group=variable, fill=variable)) + 
-  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
-  labs(title="Counts per region", subtitle=paste('p=',format.pval(one.way.aov(sizeLosses$focal, sizeLosses$large)$p.value,3), sep=''), y='counts per region', x=''),
-
-ggplot(melt(sizeLossesByPatients), aes(variable, value, group=variable, fill=variable)) + 
-  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
-  labs(title="Patients per region", subtitle=paste('p=',format.pval(one.way.aov(sizeLossesByPatients$focal, sizeLossesByPatients$large)$p.value,3), sep=''), y='patients per region', x=''),
-top='Losses in selected regions', ncol=2)
-
-wilcox.test(sizeLossesByPatients$focal, sizeLossesByPatients$large)
-```
-
-
-### Compared to random focal/large changes?
-
-#### Losses
-```{r, fig.width=8}
-randomLossesByPt = do.call(rbind.data.frame,lapply(randomLosses, sizebyPatient))
-randomLossesBySize = do.call(rbind.data.frame,lapply(randomLosses, countBySize))
-
-grid.arrange(
-ggplot(melt(randomLossesBySize), aes(variable, value, group=variable, fill=variable)) + 
-  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
-  labs(title="Counts per region", subtitle=paste('p=',format.pval(one.way.aov(randomLossesBySize$focal, randomLossesBySize$large)$p.value,digits=3), sep=''), y='counts per region', x='') + theme(legend.position = 'none'),
-
-ggplot(melt(randomLossesByPt), aes(variable, value, group=variable, fill=variable)) + 
-  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
-  labs(title="Patients per region", subtitle=paste('p=',format.pval(one.way.aov(randomLossesByPt$focal, randomLossesByPt$large)$p.value,digits=3), sep=''), y='patients per region', x='') + theme(legend.position = 'none'),
-top='Losses in randomly selected regions', ncol=2)
-
-
-# No real difference in randomly selected regions for focal losses
-wilcox.test(randomLossesBySize$focal, sizeLosses$focal) 
-one.way.aov(randomLossesBySize$focal, sizeLosses$focal) 
-wilcox.test(randomLossesByPt$focal, sizeLossesByPatients$focal) 
-
-
-## Difference in large losses
-wilcox.test(randomLossesBySize$large, sizeLosses$large)
-one.way.aov(randomLossesBySize$large, sizeLosses$large)
-wilcox.test(randomLossesByPt$large, sizeLossesByPatients$large) 
-```
-
-#### Gains
-
-```{r, fig.width=8}
-randomGainsByPt = do.call(rbind.data.frame,lapply(randomGains, sizebyPatient))
-randomGainsBySize = do.call(rbind.data.frame,lapply(randomGains, countBySize))
-
-grid.arrange(
-ggplot(melt(randomGainsBySize), aes(variable, value, group=variable, fill=variable)) + 
-  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
-  labs(title="Counts per region", subtitle=paste('p=',format.pval(one.way.aov(randomGainsBySize$focal, randomGainsBySize$large)$p.value,3), sep=''), y='counts per region', x='') + theme(legend.position = 'none'),
-
-ggplot(melt(randomGainsByPt), aes(variable, value, group=variable, fill=variable)) + 
-  geom_boxplot(alpha=0.5, outlier.colour = NA) + geom_jitter(width=0.2, aes(color=variable)) + 
-  labs(title="Patients per region", subtitle=paste('p=',format.pval(one.way.aov(randomGainsByPt$focal, randomGainsByPt$large)$p.value,3), sep=''), y='patients per region', x='') + theme(legend.position = 'none'),
-top='Gains in randomly selected regions', ncol=2)
-
-
-# But maybe a difference in random regions vs selected ones?
-wilcox.test(randomGainsBySize$focal, sizeGains$focal) 
-wilcox.test(randomGainsBySize$large, sizeGains$large) 
-
-wilcox.test(randomGainsByPt$focal, sizeGainsByPatient$focal) # maybe
-wilcox.test(randomGainsByPt$large, sizeGainsByPatient$large) # maybe
-```
-
 *** 
 # Summary to this point
 
@@ -1139,228 +1123,3 @@ There's a significant difference in the rate of large-scale alterations vs focal
 
 ***
 
-# Barrett's Adjacency & CNA
-
-Is there a relationship between BA patients and CNA in selected regions?
-
-
-## Selected Regions
-
-```{r, eval=F}
-# A lot more gains than losses as expected
-sapply(gains, nrow)
-sapply(losses, nrow)
-
-
-population = table(oac.demo$RP.BarrettsAdjacent)
-
-# Check for enrichment of gains/losses in BA
-gainsBAPts = as.data.frame(do.call(rbind, lapply(gains, function(g) {
- table(g$RP.BarrettsAdjacent)
-})))
-
-wilcox.test(gainsBAPts$no, gainsBAPts$yes)
-
-# Separated by BA status
-gainsBA = lapply(gains, function(g) {
-  subset(g, RP.BarrettsAdjacent == 'yes')
-})
-  
-gainsNoBA = lapply(gains, function(g) {
-  subset(g, RP.BarrettsAdjacent == 'no')
-})
-
-wilcox.test( sapply(be.gains, nrow), sapply(non.be.gains, nrow))
-# No difference
-one.way.aov(sapply(gainsBA, nrow) , sapply(gainsNoBA, nrow))
-# TODO Is this due to numberof patients? Might be
-one.way.aov(sapply(gainsBA, nrow)/gainsBAPts[,'yes'] , sapply(gainsNoBA, nrow)/gainsBAPts[,'no'] )
-
-
-# No enrichment of gains in selected regions for BA 
-p.adjust( apply(gainsBAPts, 1, function(x) {
-  bt = binom.test(x[['no']], sum(x), population[['no']]/sum(population))  
-  bt$p.value
-}) )
-
-
-cnBA = do.call(rbind, lapply(subset(oac.demo, !is.na(RP.BarrettsAdjacent))$StudySubjectID, function(s) {
-  cbind.data.frame(
-    'ID'=s,
-    'BarrettsAdjacent'=subset(oac.demo, StudySubjectID == s)$RP.BarrettsAdjacent,
-    'TotalCN'=length(subset(oacCNV, OCCAMS == s)),
-    'Gains'=length(subset(oacCNV, OCCAMS == s  & ploidy > 2 & Total_CN > round(ploidy))),
-    'Losses'=length(subset(oacCNV, OCCAMS == s  & Total_CN < 2)) 
-  )
-}))
-  
-arrange(cnBA, -TotalCN)
-
-
-populationGains = apply(oacCNV, 1, function(x) {
-  yes = subset(oac.demo, StudySubjectID %in% x$OCCAMS & RP.BarrettsAdjacent == 'yes')$StudySubjectID
-  subset(g, OCCAMS %in% yes)
-
-})
-
-apply(cbind(sapply(gainsBA, nrow), sapply(gainsNoBA, nrow)), 1, function(x) {
-  print(x)
-  bt = binom.test(x[1], sum(x), .5)
-  bt$p.value
-})
-
-   
-# But there is a significant difference between adjacent BA -- but is this true across random selected regions as well?
-gainCtBA = as.data.frame(do.call(rbind, lapply(losses, function(g) {
- table(subset(oac.demo, StudySubjectID %in% g$OCCAMS)$RP.BarrettsAdjacent)
-})))
-
-
-one.way.aov(gainCtBA$no, gainCtBA$yes)
-wilcox.test(gainCtBA$no, gainCtBA$yes) 
-summary(aov(gainCtBA$no~gainCtBA$yes)) # significant difference between adjacent BA -- but is this true across random selected regions as well?
-# But not when adjusted for the population size, though not sure I should do that.  Binom instead?
-one.way.aov(gainCtBA$no/population[['no']], gainCtBA$yes/population[['yes']])
-
-lossCtBA = as.data.frame(do.call(rbind, lapply(losses, function(g) {
- table(subset(oac.demo, StudySubjectID %in% g$OCCAMS)$RP.BarrettsAdjacent)
-})))
-
-wilcox.test(lossCtBA$no, lossCtBA$yes) # significant difference between adjacent BA -- but is this true across random selected regions as well?
-summary(aov(lossCtBA$no~lossCtBA$yes)) # significant difference between adjacent BA -- but is this true across random selected regions as well?
-
-
-overlaps = rbind(gainCtBA, lossCtBA) %>% rowwise() %>% mutate(
-   'yes.CI.1'=binom.test(yes, sum(yes,no), population[['yes']]/sum(population) )$conf.int[1],
-   'yes.CI.2'=binom.test(yes, sum(yes,no), population[['yes']]/sum(population) )$conf.int[2],
-   'yes.pval'=binom.test(yes, sum(yes,no), population[['yes']]/sum(population) )$p.value,
-   'no.pval'=binom.test(no, sum(yes,no), population[['no']]/sum(population) )$p.value
-) 
-overlaps$regions = c(rownames(gainsBA), rownames(lossBA))
-  
-# not significant though
-p.adjust(overlaps$yes.pval, method='bonferroni', n=nrow(overlaps))
-p.adjust(overlaps$no.pval, method='bonferroni', n=nrow(overlaps))
-
-df = transform(overlaps, regions=reorder(regions, (yes.CI.2-yes.CI.1)) )
-ggplot(df , aes(x=regions)) + 
-    geom_segment(data=df, aes(y=yes.CI.1, yend=yes.CI.2, x=regions,xend=regions), color='blue') +
-    coord_flip() + labs(x='', y='CI (yes)')
-
-
-```
-
-
-
-
-General gains vs losses
-```{r,eval=F}
-
-head(perms)
-# No difference in the numbers of gains/losses
-wilcox.test(sapply(gains, nrow), perms$amp)
-wilcox.test(sapply(losses, nrow), perms$del)
-
-# There is a difference (these are the sampled regions, not selected) between the BA categories, yes -> more disordered??
-wilcox.test(perms$amp.no, perms$amp.yes)
-wilcox.test(perms$del.no, perms$del.yes)
-
-ggplot(melt(perms[,c('amp.yes','amp.no')]), aes(variable, value, group=variable, fill=variable)) + geom_boxplot()
-ggplot(melt(perms[,c('del.yes','del.no')]), aes(variable, value, group=variable, fill=variable)) + geom_boxplot()
-
-
-random = as.data.frame(t(apply(perms[,grep('yes|no', colnames(perms))], 1, function(row) {
-  
-  yes = sum(row[c('amp.yes','del.yes')])
-  no = sum(row[c('amp.no','del.no')])
-  
-  cbind('yes' = binom.test(yes, sum(yes,no), population[['yes']]/sum(population))$conf.int,
-        'no' = binom.test(no, sum(yes,no), population[['yes']]/sum(population))$conf.int)
-  # binom.test(yes, sum(yes,no), population[['yes']]/sum(population))$conf.int
-})))
-colnames(random) = c('yes.CI.1','yes.CI.2','no.CI.1','no.CI.2')
-
-summary( with(random, yes.CI.2-yes.CI.1)  )
-summary( with(overlaps, yes.CI.2-yes.CI.1)  )
-
-summary( with(random, no.CI.2-no.CI.1)  )
-summary( with(overlaps, no.CI.2-no.CI.1)  )
-
-
-
-# No difference between the features selected and random regions though
-wilcox.test(gainsBA$yes, perms$amp.yes)
-wilcox.test(gainsBA$no, perms$amp.no)
-
-
-# Nope
-colSums(lossBA)/nrow(lossBA)
-colSums(perms[,c('del.no','del.yes')])/nrow(perms)
-
-t.test(lossBA$yes, perms$del.yes)
-t.test(lossBA$no, perms$del.no)
-
-
-wilcox.test(gfreq, perms$freq.gain)
-wilcox.test(lfreq, perms$freq.loss)
-
-m = rbind(
-cbind.data.frame('freq'=gfreq, 'type'='gain', 'feature'='swgs'),
-cbind.data.frame('freq'=lfreq, 'type'='loss', 'feature'='swgs'),
-
-cbind.data.frame('freq'=perms$freq.gain, 'type'='gain', 'feature'='random'),
-cbind.data.frame('freq'=perms$freq.loss, 'type'='loss', 'feature'='random') 
-)
-
-# No difference
-ggplot(m, aes(feature, freq, group=feature, fill=feature)) + facet_grid(~type) + geom_jitter(width=0.2) +  geom_violin(alpha=0.8) 
-```
-
-```{r, eval=F}
-all = swgRegions
-
-swgRegions = swgRegions[swgRegions$hazard > quantile(swgRegions$hazard)['75%']]
-
-cols = c('RP.BarrettsAdjacent', 'RP.TStage.PrimaryTumour', 'Weeks.Survival', 'FE.Patient.Died')
-tmp = oac.demo[,cols]
-
-
-tmp = tmp[-which(is.na(tmp$Weeks.Survival)),]
-
-
-swgRegions = swgRegions[order(-swgRegions$hazard)]
-
-```
-
-
-```{r, eval=F}
-
-#summary(as.data.frame(swgRegions)[,c('num.amp.CN','num.del.CN')])
-
-library(gridExtra)
-source('../ICGC-Clinical/libs/surv.R')
-
-tmp$FE.Patient.Died = as.numeric(tmp$FE.Patient.Died)-1
-
-tmp[which(is.na(tmp$FE.Patient.Died)), 'FE.Patient.Died'] = 0
-
-sp = survival.plots(tmp, 'RP.BarrettsAdjacent', verbose=F)
-grid.arrange(sp$kapmei)
-
-time='Weeks.Survival'; event='FE.Patient.Died'
-f = paste('`',paste(grep('AMP|DEL',colnames(tmp), value=T), collapse='`+`'), '`', sep='')
-
-#f = paste('`AMP_', as.character(seqnames(swgRegions[1])), ':', start(swgRegions[1]), '-', end(swgRegions[1]), '`', sep='')
-
-# surv =  Surv(tmp[[time]],tmp[[event]],type='right')
-# terms = as.formula(paste("Surv(",time,",",event,", type='right') ~", 'RP.BarrettsAdjacent', sep=""))
-# 
-# cox = coxph(terms, data=tmp,na.action=na.omit,ties='breslow')
-# cfit = survfit(cox)
-#  
-# ggsurv(cfit,cens.shape=3,lty.est=1,back.white=F, xlab="Time (weeks)") + 
-#       annotate("text", x=200, y=.8,label=paste('Score (logrank) pvalue =', signif(cox.pvalue(cox),2),"\n", nrow(tmp), 'samples'))
-# summary(cox)
-
-
-```

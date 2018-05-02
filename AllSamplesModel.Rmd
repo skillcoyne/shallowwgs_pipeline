@@ -494,9 +494,12 @@ rm(plots, performance.at.1se)
 
 featureStability = rowSums(coefs[[select.alpha]][,-1])/(splits*folds)
 
-hazards = apply( exp(t(dysplasia.df[, rownames(coefs[[select.alpha]])]) *  coefs[[select.alpha]][,1]), 1, function(x) {
+hazards = apply( exp(t(dysplasia.df[,rownames(coefs[[select.alpha]])]) *  coefs[[select.alpha]][,1]), 1, function(x) {
   sd(x)/mean(x)
+  #mad(x) # The CV(RR) is pretty sensitive to extremes I think. But I'm not sure if MAD(RR would be better)
 })
+
+
 ch = as.data.frame(hazards)
 ch$coef = coefs[[select.alpha]][,1]
 ch$stability = featureStability
@@ -1556,8 +1559,8 @@ table(subset(pi, p11Loss == 1 & p53.Status == 1)$Pathology)
 
 ```
 
-## Top Features
-```{r, echo=T}
+# Top Features
+```{r, echo=F, message=F, warning=F}
 m = data.frame(matrix(nrow=nrow(chh), ncol=0))
 
 for (i in 1:nrow(chh)) {
@@ -1594,9 +1597,67 @@ cor.test(chh$hazards, m$n.samples)
 
 # Samples with a gain vs all samples
 
+write.table(chh, sep='\t', quote=F, row.names=F, file='features.txt')
+
 ```
 
+Clearly need to interpret those "hazards" carefully.  Some of the really high ones are driven by some of the extreme samples.
+
+```{r, fig.width=10, fig.height=10}
+
+gains = subset(chh, coef > 0)
+
+y = cbind.data.frame(labels, dysplasia.df[,gains$label])
+y$labels = factor(y$labels)
+y$labels = plyr::revalue(y$labels, c('0'='NP','1'='P'))
+
+m = melt(y, id.vars='labels')
+colnames(m) = c('status','label','value')
+m = base::merge(m, gains, by='label')
+m$chr = factor(m$chr, levels=chr.lengths$chrom, ordered = T)
+
+p = ggplot(m) + facet_wrap(chr~label, scales='free_y') +
+  geom_jitter(aes(status, value, group=status, color=status), width=0.01) + 
+  geom_violin(aes(status, value, group=status, fill=status, color=status), alpha=0.5) + 
+  geom_hline(yintercept=c(1,-1), color='grey39', linetype='dotted') +
+  geom_label(data=subset(gains, hazards >= 1), aes('P',0, label=round(hazards,2)), color='red') + 
+  geom_label(data=subset(gains, hazards < 1), aes('P',0, label=round(hazards,2)), color='grey') + 
+  labs(y='',x='',title='Gains') +
+  plot.theme + theme(legend.position = 'none', strip.text=element_text(size=9)) 
+p
+ggsave('plots/gains.png', plot=p, width=10, height=10, unit='in', dpi=300)
+
+
+losses = subset(chh, coef < 0)
+
+y = cbind.data.frame(labels, dysplasia.df[,losses$label])
+y$labels = factor(y$labels)
+y$labels = plyr::revalue(y$labels, c('0'='NP','1'='P'))
+
+m = melt(y, id.vars='labels')
+colnames(m) = c('status','label','value')
+m = base::merge(m, losses, by='label')
+m$chr = factor(m$chr, levels=chr.lengths$chrom, ordered = T)
+
+
+p = ggplot(m) + facet_wrap(chr~label, scales='free_y') +
+  geom_jitter(aes(status, value, group=status, color=status), width=0.01) + 
+  geom_violin(aes(status, value, group=status, fill=status, color=status), alpha=0.5) + 
+  geom_hline(yintercept=c(1,-1), color='grey39', linetype='dotted') +
+  geom_label(data=subset(losses, hazards >= 1), aes('P',3, label=round(hazards,2)), color='red') + 
+  geom_label(data=subset(losses, hazards < 1), aes('P',3, label=round(hazards,2)), color='grey') + 
+  labs(y='',x='',title='Losses') +
+  plot.theme + theme(legend.position = 'none', strip.text=element_text(size=9)) 
+p
+ggsave('plots/losses.png', plot=p, width=10, height=10, unit='in', dpi=300)
+
+```
+
+
+
+
 One way of looking at the p53 prediction (e.g. Adam Bass) is to see how predictive the p-arm loss in chr17 is.
+
 ```{r, echo=F, warning=F, message=F, fig.height=5, fig.width=10}
 ccgenes = read.table('~/Data/CosmicCensusGenes.tsv', sep='\t', header=T, stringsAsFactors=F)
 ccgenes = ccgenes[-grep('^X|Y', ccgenes$Genome.Location),]
@@ -2015,15 +2076,13 @@ offsetMax = log(cases/mx)
 #p1 = 1/(1+exp(-linPred+abs(offset))) # calculates probs from risk (offset)
 
 cols = c('Hospital.Research.ID','Patient','Status','PID', 'Samplename','Endoscopy.Year','Pathology','Prediction','OR')
+dspred$Illumina.ID = rownames(dspred)
 dspred = dspred %>% dplyr::mutate( 'Adj. RR'=RR+offsetMean )
-
 dspred = dspred %>% dplyr::mutate( 'Adj. Prob'=1/(1+exp(-RR+abs(offsetMean)) ))
 
-ggplot(dspred, aes(Type, `Adj. Prob`)) + geom_jitter() 
+x = 'LP6005691-DNA_A02'
+subset(dspred, Illumina.ID == x)
 
-ggplot(dspred, aes(Type, `Adj. RR`)) + geom_jitter() + geom_boxplot(outlier.color = NA) 
-
-head(dspred)
 m = melt(dspred, measure.vars=c('RR','Adj. RR'))
 colors = myPal[seq(2, length(myPal), round(length(myPal)/4))]
 pr = ggplot(m, aes(variable, value, fill=Type)) + facet_grid(~Type, scales='fixed') + 

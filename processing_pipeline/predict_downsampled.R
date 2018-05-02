@@ -19,8 +19,9 @@ adjustRisk <- function(RR, offset, type='risk') {
 }
 
 
-dir = '~/Data/Ellie/Analysis/downsampled5G'
-dir = '~/Data/Ellie/Analysis/VAL_Cohort/'
+dir = '~/Data/Ellie/Analysis/downsampled5G_NDBE/'
+dir = '~/Data/Ellie/Cleaned/AH0329_segmentedCoverage_fitted_gamma250/'
+#dir = '~/Data/Ellie/Analysis/VAL_Cohort/'
 files = list.files(dir, full.names=T)
 
 file = '~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/model_data.Rdata'
@@ -32,6 +33,10 @@ if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
 rm(dysplasia.df,coefs,plots,labels)
+
+select.alpha = '0.9'
+fitV = models[[select.alpha]]
+lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
 
 
 file = '~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/loo.Rdata'
@@ -50,12 +55,8 @@ m = round((table(status)['P']/(0.0225*100))*100)
 offsetMean = log(cases/m)
 
 
-select.alpha = '0.9'
-fitV = models[[select.alpha]]
-lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
-
 sampleNames = sub('_raw.txt', '', basename(files))
-dspred = data.frame(matrix(ncol=4, nrow=length(sampleNames), dimnames=list(sampleNames,c('Prob','RR', 'AdjProb','AdjRR'))))
+dspred = data.frame(matrix(ncol=4, nrow=length(sampleNames), dimnames=list(sampleNames,c('Prob','RR', 'Adj.Prob','Adj.RR'))))
 
 for (n in 1:length(files)) {
   print(n)
@@ -94,23 +95,16 @@ for (n in 1:length(files)) {
   
   preds = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='response')
   RR = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='link')
-  
+
   dspred[n,] = c(preds[,1],RR[,1],adjustRisk(RR, offsetMean, 'prob'),adjustRisk(RR, offsetMean))
   print(dspred[1:n,])
 }
 
 save(dspred, file=paste(dir, 'predictions.Rdata', sep='/'))
 
-range(dspred$RR)
 
-#load(paste(dir, 'predictions.Rdata', sep='/'))
 
-file = '~/Data/Ellie/Analysis/5e6_arms_disc/loo.Rdata'
-if (!file.exists(file))
-  stop(paste("Missing data file", file))
-load(file, verbose=T)
-
-pg.samp = do.call(rbind, pg.samp)
+load(paste(dir, 'predictions.Rdata', sep='/'), verbose=T)
 
 riskPal = rev(RColorBrewer::brewer.pal(11, 'RdYlBu'))
 unadjRisk = ggplot(pg.samp, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, show.legend = T) +
@@ -118,18 +112,15 @@ unadjRisk = ggplot(pg.samp, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, 
   labs(y='n Samples', x='Relative Risk', title='Unadjusted relative risk') + theme_light(base_size = 14)
 unadjRisk
 
-unadjRisk + geom_point(data=dspred, aes(x=RR, y=1)) + xlim(-15, 15)
+m = melt(dspred, measure.vars=c('RR','Adj.RR'))
+unadjRisk + geom_point(data=m, aes(x=value,y=Adj.Prob*30, color=variable))
+  
 
-ggplot(pg.samp, aes(Prediction)) + geom_histogram(aes(fill=..x..), bins=10, show.legend = T) +
-  scale_fill_gradientn(colors = riskPal,  name='RR') + 
-  labs(y='n Samples', x='Relative Risk', title=' relative risk') + theme_light(base_size = 14)
-unadjRisk
+# preds = ggplot(pg.samp, aes(Prediction)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1), show.legend = F) + 
+#   scale_fill_distiller(palette = 'RdYlBu', name='P(P)') +
+#   labs(title='Sample predictions', y='n Samples', x='Probability') + theme_light(base_size = 14)
+# preds
 
-
-
-preds = ggplot(pg.samp, aes(Prediction)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1), show.legend = F) + 
-  scale_fill_distiller(palette = 'RdYlBu', name='P(P)') +
-  labs(title='Sample predictions', y='n Samples', x='Probability') + theme_light(base_size = 14)
-preds
-
-preds + geom_point(data=dspred, aes(x=Prob, y=(1:nrow(dspred))))
+m = melt(dspred, measure.vars=c('Prob','Adj.Prob'))
+preds + geom_point(data=m, aes(x=value, y=value*10, color=variable)) 
+  
