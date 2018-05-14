@@ -798,14 +798,14 @@ endos.r$Status = plyr::revalue(endos.r$Status, c('NP'='Non-Progressor', 'P'='Pro
 
 rp = ggplot(endos.r, aes(x=brks, y=pred.r*100, ymin=(pred.r-`sem(P)`)*100, ymax=(pred.r+`sem(P)`)*100, group=brks)) + ylim(0,110) +
   facet_grid(~Status) +
-  geom_bar(stat='identity', show.legend = F) + 
+  geom_bar(stat='identity', show.legend = F, fill=riskCols[2]) + 
   geom_errorbar(color='grey21', width=0.2, alpha=0.5) +
   geom_text(aes(y=pred.r*100+2, label=paste(round(pred.r*100), '%', sep='')), color='black') +
-  geom_text(aes(y=10, label=paste('n=',n.endo,'\ns=',n.samp,sep='')), color='white') + 
+  geom_text(aes(y=5, label=paste('n=',n.endo,'\ns=',n.samp,sep='')), color='white') + 
   labs(x='Months prior to endpoint', y='Percent predicted', title='High risk predictions prior to final endoscopy', subtitle='n = #endoscopies, s = #samples') +
   theme( axis.text.x=element_text(angle=45,hjust=1) ) 
 rp
-ggsave(filename='thesis/pred_endo.png', plot=rp, width=11, height=5, units='in', dpi=300, scale=1)
+ggsave(filename='thesis/pred_endo.png', plot=rp, width=11, height=8, units='in', dpi=300, scale=1)
 
 ```
 
@@ -1148,6 +1148,9 @@ or = predict(fitV, newx=repeat.df, s=lambda.opt, type='link')
 repeats$Probability = pred[repeats$Samplename,]
 repeats$OR = or[repeats$Samplename,]
 
+repeats$Probability = round(repeats$Probability, 2)
+
+write.table(repeats, sep='\t', quote=F, row.names=F, file='tech_repeats.txt')
 
 ```
 

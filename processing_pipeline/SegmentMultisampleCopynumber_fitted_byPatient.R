@@ -18,6 +18,7 @@ suppressPackageStartupMessages( library(dplyr) )
 
 source("../lib/fastPCF.R")
 source('../lib/load_patient_metadata.R')
+source('../lib/data_func.R')
 
 
 data = args[1]

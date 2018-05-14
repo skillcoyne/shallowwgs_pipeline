@@ -19,6 +19,7 @@ summarise.patient.info<-function(df) {
         total.endos=length(unique(PID)),
         initial.endo = unique(Initial.Endoscopy),
         final.endo = unique(Final.Endoscopy),
+        initial.path=sort(Pathology, decreasing=F)[1],
         highest.path=sort(Pathology, decreasing=T)[1],
         first.batch=sort(Batch.Name)[1],
         med.cellularity=median(Barretts.Cellularity,na.rm=T),

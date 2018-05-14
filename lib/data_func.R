@@ -6,10 +6,7 @@ require(tibble)
 
 #source("fastPCF.R")
 
-
-
-
-binSWGS<-function(raw.data, fit.data, blacklist) {
+binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
   require(copynumber)
   
   if (is.null(blacklist)) 
@@ -25,6 +22,15 @@ binSWGS<-function(raw.data, fit.data, blacklist) {
   fit.data = fit.data[rows,]
 
   window.depths = raw.data[,countCols]/fit.data[,countCols]
+  # QDNAseq does this in 'correctBins' but it's too late to use this now, so will adjust ours the same way (we weren't 14-May-2018)
+  #corrected <- counts / fit
+  #corrected[fit <= 0] <- 0
+  negs = apply(fit.data[,depth.cols], 2, function(x) which(x<=0))
+  window.depths[] = lapply(names(negs), function(n) {
+    window.depths[negs[[n]],n] = 0
+    window.depths[,n]
+  })
+  
   dim(window.depths)
   message(paste(nrow(blacklist), "genomic regions in the exclusion list."))
   fit.data$in.blacklist = F
@@ -41,6 +47,8 @@ binSWGS<-function(raw.data, fit.data, blacklist) {
     window.depths = as.data.frame(window.depths)
   
   window.depths.standardised = as.data.frame(window.depths[which(!fit.data$in.blacklist),])
+  if (logTransform)
+    window.depths.standardised = log2( window.depths.standardised+abs(min(window.depths.standardised, na.rm=T))+1 )
 
   fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
   sdevs = sapply(c(1:length(countCols)), function(s) {
@@ -80,11 +88,8 @@ prep.matrix<-function(dt) {
   return(output)
 }
 
-load.segment.matrix<-function(segFile) {
-  dt = read.table(segFile, sep='\t', header=T)
-  
-  if (length(which(grepl('chr|start|end', colnames(dt)))) < 3)
-    stop("Cannot load without chr, start, end columns")
+segment.matrix<-function(dt) {
+  dt = as.data.frame(dt)
   
   chrCol = grep('chr',colnames(dt))
   startCol = grep('start',colnames(dt))
@@ -97,6 +102,15 @@ load.segment.matrix<-function(segFile) {
   rownames(dt) = rows
   colnames(dt) = cols
   return( t(dt) )
+}
+
+load.segment.matrix<-function(segFile) {
+  dt = read.table(segFile, sep='\t', header=T)
+  
+  if (length(which(grepl('chr|start|end', colnames(dt)))) < 3)
+    stop("Cannot load without chr, start, end columns")
+  
+ return(segment.matrix(dt))
 }
 
 unit.var <- function(x, mean=NULL, sd=NULL) {
@@ -211,6 +225,7 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL) {
   }
   message(paste("Mean number of CN segments per genome bin:", round(mean(meanSegs, na.rm=T), 2), "median:", round(median(meanSegs, na.rm=T), 2)))
   
+  # Not sure if this should be NA or 0
   mergedDf[is.na(mergedDf)] = 0
   
   return(as_tibble(mergedDf))
