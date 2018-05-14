@@ -26,7 +26,7 @@ patient.name = args[2]
 outdir = args[3]
 
 #data = '~/Data/Ellie/QDNAseq'
-#patient.name = 'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
+#patient.name = 'PR1/HIN/042' #AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
 #outdir = '~/Data/Ellie/Analysis'
 data.dirs = list.dirs(data, full.names=T, recursive=F)
 data.files = list.files(data, full.names=T, recursive=T)
@@ -34,7 +34,7 @@ data.files = list.files(data, full.names=T, recursive=T)
 patient.name = gsub('\\/', '_', patient.name )
 
 
-plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
+plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient2', sep='/')
 print(paste("Plot directory:", plot.dir))
 if (!dir.exists(plot.dir))  
   dir.create(plot.dir, recursive=T)
@@ -111,6 +111,10 @@ sdevs = sapply(c(1:no.samples), function(s) getMad( window.depths.standardised[!
 sdevs[sdevs==0] = NA
 sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) # geometric mean across all sample sds, doesn't work when there's only one...
 
+sdevsL = sapply(c(1:no.samples), function(s) getMad( log2(window.depths.standardised[!is.na(window.depths.standardised[,s]),s]), k=25))
+sdevsL[sdevsL==0] = NA
+sdevL = exp(mean(log(sdevsL[!is.na(sdevsL)]))) # geometric mean across all sample sds, doesn't work when there's only one...
+
 print("sdevs")
 print(sdevs)
 print(sdev)
@@ -127,6 +131,7 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
   filename = paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep="")
   
   data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
+
   if (ncol(data) < 4) { # Single sample
     #colnames(data)[3] = patient.info$Samplename
     res = pcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
