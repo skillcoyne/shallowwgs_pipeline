@@ -19,8 +19,8 @@ adjustRisk <- function(RR, offset, type='risk') {
 }
 
 
-dir = '~/Data/Ellie/Analysis/downsampled5G_NDBE/'
-dir = '~/Data/Ellie/Cleaned/AH0329_segmentedCoverage_fitted_gamma250/'
+dir = '~/Data/Ellie/Cleaned/Downsampled'
+#dir = '~/Data/Ellie/Cleaned/AH0329_segmentedCoverage_fitted_gamma250/'
 #dir = '~/Data/Ellie/Analysis/VAL_Cohort/'
 files = list.files(dir, full.names=T)
 
@@ -53,7 +53,6 @@ status = unique(pg.samp[,c('Patient','Status')])$Status
 cases = table(status)['P']
 m = round((table(status)['P']/(0.0225*100))*100)
 offsetMean = log(cases/m)
-
 
 sampleNames = sub('_raw.txt', '', basename(files))
 dspred = data.frame(matrix(ncol=4, nrow=length(sampleNames), dimnames=list(sampleNames,c('Prob','RR', 'Adj.Prob','Adj.RR'))))
@@ -100,9 +99,8 @@ for (n in 1:length(files)) {
   print(dspred[1:n,])
 }
 
+save(dspred, file='dowsampled_predictions.Rdata')
 save(dspred, file=paste(dir, 'predictions.Rdata', sep='/'))
-
-
 
 load(paste(dir, 'predictions.Rdata', sep='/'), verbose=T)
 
@@ -115,12 +113,20 @@ unadjRisk
 m = melt(dspred, measure.vars=c('RR','Adj.RR'))
 unadjRisk + geom_point(data=m, aes(x=value,y=Adj.Prob*30, color=variable))
   
+ids = readxl::read_excel('~/Data/Ellie/Analysis/downsampled_ids.xlsx', sheet=1)
 
-# preds = ggplot(pg.samp, aes(Prediction)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1), show.legend = F) + 
-#   scale_fill_distiller(palette = 'RdYlBu', name='P(P)') +
-#   labs(title='Sample predictions', y='n Samples', x='Probability') + theme_light(base_size = 14)
-# preds
 
-m = melt(dspred, measure.vars=c('Prob','Adj.Prob'))
-preds + geom_point(data=m, aes(x=value, y=value*10, color=variable)) 
-  
+preds = base::merge(dspred, ids, by.x='row.names', by.y='Illumina ID', all=T) 
+# ignore the three LGD cases, they're not clear NP or P in any case (downsampled just out of interest)
+preds = subset(preds, Grade_biopsy != 'LGD')
+
+
+preds[ which(subset(preds, `Expected Risk` == 'Low')$Adj.Prob > 0.3) ,]
+
+preds[ which(subset(preds, `Expected Risk` == 'High')$Adj.Prob < 0.6) ,]
+
+
+
+
+
+
