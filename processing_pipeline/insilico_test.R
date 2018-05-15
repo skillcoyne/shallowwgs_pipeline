@@ -9,9 +9,9 @@ suppressPackageStartupMessages(library(reshape2))
 suppressPackageStartupMessages(library(GenomicRanges))
 
 
-suppressPackageStartupMessages(source('/homes/skillcoy/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
-suppressPackageStartupMessages(source('/homes/skillcoy/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
-suppressPackageStartupMessages(source('/homes/skillcoy/workspace/shallowwgs_pipeline/lib/data_func.R'))
+suppressPackageStartupMessages(source('lib/load_patient_metadata.R'))
+suppressPackageStartupMessages(source('lib/cv-pt-glm.R'))
+suppressPackageStartupMessages(source('lib/data_func.R'))
 
 
 
@@ -26,9 +26,17 @@ outdir = args[2]
 #outdir = '~/Data/Ellie/Analysis'
 infodir = args[3]
 #infodir = '~/Data/Ellie/QDNAseq'
+logT = F
+if (length(args) == 4)
+  logT = as.logical(args[4])
+
+
 
 x = (unclass(Sys.time()) + sample(1:1000, 1))
-cache.dir = paste(outdir, '5e6_arms_splits_exAHM0320', as.character(x) , sep='/')
+cache.dir = paste(outdir, '5e6_arms_splits', sep='/')
+if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
+cache.dir = paste(cache.dir, as.character(x) , sep='/')
+
 dir.create(cache.dir, showWarnings = F, recursive = T)
 
 ## Hospital.Research.ID info file
@@ -74,6 +82,8 @@ tiled.segs = do.call(rbind, lapply(segs, function(f) {
   fx
 }))
 dim(tiled.segs)
+
+if (logT) tiled.segs = t(apply(tiled.segs, 1, logTransform))
 segsList = prep.matrix(tiled.segs)
 
 z.mean = segsList$z.mean
@@ -92,6 +102,8 @@ tiled.arms = do.call(rbind, lapply(arms, function(f) {
   fx
 }))
 dim(tiled.arms)
+
+if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
 armsList = prep.matrix(tiled.arms)
 arms = armsList$matrix
 
@@ -155,7 +167,7 @@ if (file.exists(file)) {
   }
   save(plots, coefs, performance.at.1se, dysplasia.df, models, cvs, labels, file=file)
   p = do.call(grid.arrange, c(plots[ as.character(alpha.values) ], top='All samples, 10fold, 5 splits'))
-  ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
+  ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 2, width = 15, height = 10, units = "in", dpi = 300)
 }
 all.coefs = coefs
 # ----------------- #

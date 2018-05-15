@@ -36,6 +36,7 @@ if (length(args) == 4)
 #cache.dir = paste(outdir, '5e6_arms_disc_exAHM0320', sep='/')
 #if (allPts)
 cache.dir = paste(outdir, '5e6_arms_all', sep='/')
+if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 ## Hospital.Research.ID info file
@@ -92,26 +93,21 @@ sampleVar = do.call(rbind, lapply(raw, function(f) {
 # Load segment files
 tiled.segs = do.call(rbind, lapply(segs, function(f) {
   fx = load.segment.matrix(f)
-  #if (nrow(fx) <= 2) return(NULL)
   fx
 }))
 dim(tiled.segs)
 
 ## Log?
-logged = t(apply(tiled.segs, 1, logTransform))
-
-hist(tiled.segs[1,])
-hist(logTransform(tiled.segs[1,]))
+if (logT) tiled.segs = t(apply(tiled.segs, 1, logTransform))
 
 segsList = prep.matrix(tiled.segs)
-logsegsList = prep.matrix(logged)
 
-hist(segsList$matrix[1,])
-hist(logsegsList$matrix[1,])
+# After mean centering set all NA values to 0
+segs = segsList$matrix
+segs[is.na(segs)] = 0
 
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
-segs = segsList$matrix
 
 # Complexity score
 cx.score = score.cx(segs,1)
@@ -121,12 +117,14 @@ sd.cx = sd(cx.score)
 # Load arm files  
 tiled.arms = do.call(rbind, lapply(arms, function(f) {
   fx = load.segment.matrix(f)
-  #if (nrow(fx) <= 2) return(NULL)
   fx
 }))
 dim(tiled.arms)
+
+if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
 armsList = prep.matrix(tiled.arms)
 arms = armsList$matrix
+arms[is.na(arms)] = 0
 
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd
@@ -184,7 +182,7 @@ if (file.exists(file)) {
   }
   save(plots, coefs, performance.at.1se, dysplasia.df, models, cvs, labels, file=file)
   p = do.call(grid.arrange, c(plots[ as.character(alpha.values) ], top='All samples, 10fold, 5 splits'))
-  ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
+  ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 2, width = 12, height = 10, units = "in", dpi = 300)
 }
 all.coefs = coefs
 # ----------------- #
@@ -207,8 +205,8 @@ if (file.exists(file)) {
     fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl, standardize = F) 
     
     l = fitNoHGD$lambda
-    if (a == 0)
-      l = more.l(fitNoHGD$lambda)
+    #if (a == 0)
+    #  l = more.l(fitNoHGD$lambda)
     
     cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(sets, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD, standardize=F)
     
@@ -223,7 +221,7 @@ if (file.exists(file)) {
   }
   save(no.hgd.plots, coefs, performance.at.1se, models, file=file)
   p = do.call(grid.arrange, c(no.hgd.plots, top='No HGD/IMC samples'))
-  ggsave(paste(cache.dir, '/', 'nohgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
+  ggsave(paste(cache.dir, '/', 'nohgd_samples_cv.png',sep=''),  plot = p, scale = 2, width = 12, height = 10, units = "in", dpi = 300)
 }
 # ----------------- #
 
@@ -241,9 +239,7 @@ if (file.exists(file)) {
     fitNoLGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl, standardize = F) # all patients
     
     l = fitNoLGD$lambda
-    if (a == 0)
-      l = more.l(fitNoLGD$lambda)
-    
+
     cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(sets, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD, standardize = F)
     
     nolgd.plots[[as.character(a)]] = arrangeGrob(cv.nolgd$plot+ggtitle('Classification'), cv.nolgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
@@ -255,7 +251,7 @@ if (file.exists(file)) {
   }
   save(nolgd.plots, coefs, performance.at.1se, file=file)
   p = do.call(grid.arrange, c(nolgd.plots, top='No LGD/HGD/IMC samples, 10fold, 5 splits'))
-  ggsave(paste(cache.dir, '/', 'nolgd_samples_cv.png',sep=''), plot = p, scale = 1, width = 10, height = 10, units = "in", dpi = 300)
+  ggsave(paste(cache.dir, '/', 'nolgd_samples_cv.png',sep=''),   plot = p, scale = 2, width = 12, height = 10, units = "in", dpi = 300)
 }
 ## --------------------- ##
 
