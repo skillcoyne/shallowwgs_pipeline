@@ -18,7 +18,7 @@ suppressPackageStartupMessages(source('../lib/data_func.R'))
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 4)
-  stop("Missing required params: <data dir> <outdir> <info file dir> <all>")
+  stop("Missing required params: <data dir> <outdir> <info file dir> <log transform DEF: FALSE>")
 
 data = args[1]
 #data = '~/Data/Ellie/Cleaned'
@@ -26,27 +26,30 @@ outdir = args[2]
 #outdir = '~/Data/Ellie/Analysis'
 infodir = args[3]
 #infodir = '~/Data/Ellie/QDNAseq'
+logT = F
+if (length(args) == 4)
+  logT = as.logical(args[4])
 
 # Discovery or all
-allPts = ifelse (length(args) == 2, as.logical(args[2]), F)
+#allPts = ifelse (length(args) == 2, as.logical(args[2]), F)
 
-cache.dir = paste(outdir, '5e6_arms_disc_exAHM0320', sep='/')
-if (allPts)
-  cache.dir = paste(outdir, '5e6_arms_all_exAHM0320', sep='/')
+#cache.dir = paste(outdir, '5e6_arms_disc_exAHM0320', sep='/')
+#if (allPts)
+cache.dir = paste(outdir, '5e6_arms_all', sep='/')
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 ## Hospital.Research.ID info file
 patient.file = list.files(infodir, pattern='All_patient_info.xlsx', recursive=T, full.names=T)
 demo.file = list.files(infodir, pattern='Demographics_full.xlsx', recursive=T, full.names=T)
 
-if ( length(patient.file) < 1 | length(demo.file) < 1)
+if ( length(patient.file) != 1 | length(demo.file) != 1)
   stop("Missing files in info dir: All_patient_info.xlsx and Demographics_full.xlsx")
 
-if (allPts) {
-  patient.info = read.patient.info(patient.file, demo.file, set='All')$info
-} else {
-  patient.info = read.patient.info(patient.file, demo.file, set='Training')$info
-}
+#if (allPts) {
+patient.info = read.patient.info(patient.file, demo.file, set='All')$info
+#} else {
+#  patient.info = read.patient.info(patient.file, demo.file, set='Training')$info
+#}
 
 patient.info = plyr::arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
 sum.patient.data = summarise.patient.info(patient.info)
@@ -58,11 +61,15 @@ raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
 cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
 raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
 
-cleaned = grep('AHM0320', cleaned, value=T, invert=T)
-raw = grep('AHM0320', raw, value=T, invert=T)
+if (length(raw) != nrow(sum.patient.data))
+  stop("Files don't match")
 
-sum.patient.data = subset(sum.patient.data, Hospital.Research.ID != 'AHM0320')
-patient.info = subset(patient.info, Hospital.Research.ID != 'AHM0320')
+#cleaned = grep('AHM0320', cleaned, value=T, invert=T)
+#raw = grep('AHM0320', raw, value=T, invert=T)
+
+# Excluded in the spreadsheet
+#sum.patient.data = subset(sum.patient.data, Hospital.Research.ID != 'AHM0320')
+#patient.info = subset(patient.info, Hospital.Research.ID != 'AHM0320')
 
 arms = grep('arms', cleaned, value=T)
 segs = grep('arms', cleaned, invert=T, value=T)
@@ -89,7 +96,18 @@ tiled.segs = do.call(rbind, lapply(segs, function(f) {
   fx
 }))
 dim(tiled.segs)
+
+## Log?
+logged = t(apply(tiled.segs, 1, logTransform))
+
+hist(tiled.segs[1,])
+hist(logTransform(tiled.segs[1,]))
+
 segsList = prep.matrix(tiled.segs)
+logsegsList = prep.matrix(logged)
+
+hist(segsList$matrix[1,])
+hist(logsegsList$matrix[1,])
 
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd

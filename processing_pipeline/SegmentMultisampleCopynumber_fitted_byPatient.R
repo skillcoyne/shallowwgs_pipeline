@@ -111,10 +111,6 @@ sdevs = sapply(c(1:no.samples), function(s) getMad( window.depths.standardised[!
 sdevs[sdevs==0] = NA
 sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) # geometric mean across all sample sds, doesn't work when there's only one...
 
-sdevsL = sapply(c(1:no.samples), function(s) getMad( log2(window.depths.standardised[!is.na(window.depths.standardised[,s]),s]), k=25))
-sdevsL[sdevsL==0] = NA
-sdevL = exp(mean(log(sdevsL[!is.na(sdevsL)]))) # geometric mean across all sample sds, doesn't work when there's only one...
-
 print("sdevs")
 print(sdevs)
 print(sdev)

@@ -5,6 +5,21 @@ require(tibble)
 
 
 #source("fastPCF.R")
+logTV<-function(x) {
+  x = log2(x)
+  x[x==-Inf] = 0
+  x
+}
+
+logTransform<-function(x,inf=F) {
+  if (is.matrix(x) | is.data.frame(x)) {
+    x[] = apply(x, 2, logTV)
+  } else {
+    x = logTV(x)
+  }
+  return(x)
+}
+  
 
 binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
   require(copynumber)
@@ -76,8 +91,8 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
 prep.matrix<-function(dt) {
   output = list()
   
-  means = apply(dt,2, mean)
-  sd = apply(dt,2, sd)
+  means = apply(dt,2, mean, na.rm=T)
+  sd = apply(dt,2, sd, na.rm=T)
   
   output[['z.mean']] = means
   output[['z.sd']] = sd
@@ -114,24 +129,25 @@ load.segment.matrix<-function(segFile) {
 }
 
 unit.var <- function(x, mean=NULL, sd=NULL) {
-  if (is.null(mean) | is.null(sd)) {
+  if ((is.null(mean) | is.null(sd)) || (is.na(mean) | is.na(sd))) {
     warning("No mean or sd provided.")
-    if (length(x) == 1 | sd(x, na.rm=T) == 0) {
+    if (length(x) == 1 | length(which(is.na(x))) == length(x) | sd(x, na.rm=T) == 0) {
       warning("Unit normalization can't be performed with less than 2 samples or SD was 0")
       return(x)
     } else {
-      return((x-mean(x,na.rm=T))/sd(x,na.rm=T) )
+      return( (x-mean(x,na.rm=T))/sd(x,na.rm=T) )
     }
+  } else {
+    uv = (x-mean)/sd 
+    if (sd == 0) uv = 0
+    return(uv)
   }
-  
-  uv = (x-mean)/sd 
-  if (sd == 0) uv = 0
-  
-  return(uv)
 }
 
 score.cx <- function(df, MARGIN) {  
-  cx = apply(df, MARGIN, function(x) length(which(x >= sd(x)*2 | x <= -sd(x)*2)))
+  cx = apply(df, MARGIN, function(x) {
+    length(which(x >= sd(x,na.rm=T)*2 | x <= -sd(x,na.rm=T)*2))
+  })
   return(cx)
 }
 
@@ -226,7 +242,7 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL) {
   message(paste("Mean number of CN segments per genome bin:", round(mean(meanSegs, na.rm=T), 2), "median:", round(median(meanSegs, na.rm=T), 2)))
   
   # Not sure if this should be NA or 0
-  mergedDf[is.na(mergedDf)] = 0
+  #mergedDf[is.na(mergedDf)] = 0
   
   return(as_tibble(mergedDf))
 }

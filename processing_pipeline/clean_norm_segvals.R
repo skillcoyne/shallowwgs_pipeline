@@ -1,5 +1,7 @@
 #!/usr/bin/env Rscript
 
+# Step 3
+
 args = commandArgs(trailingOnly=TRUE)
 
 
@@ -23,6 +25,10 @@ args = sapply(args, strsplit, '=')
 fitted_file = args[[fileI]][2] 
 outdir = args[[outI]][2] 
 
+#fitted_file='~/Data/Ellie/Analysis/multipcf_plots_fitted_perPatient/AHM1290/AHM1290_segmentedCoverage_fitted_gamma250.txt'
+#outdir='~/Data/Ellie/Cleaned'
+
+
 outdir = paste(outdir, sub('\\..*', '', basename(fitted_file)), sep='/')
 print(paste("Writing to ", outdir, sep=''))
 
@@ -41,7 +47,7 @@ tile.w = 5e6
 if (length(tileI) > 0)
   tile.w = as.numeric(args[[tileI]][2])
 
-print(paste("Reading file:", fitted_file, '\nMin probes:', min.probes, ' Tile width:', tile.w, sep=''))
+message(paste("Reading file:", fitted_file, '\nMin probes:', min.probes, ' Tile width:', tile.w, sep=''))
 
 gain.threshold = 1.1; loss.threshold = 0.9
 
@@ -57,7 +63,6 @@ message( paste(probes, ' probes (', round(probes/nrow(segvals),2)*100, '%)',' be
 
 # get values
 segvals = segvals[segvals[,probesCol] >= min.probes,]
-
 write.table(segvals, quote=F, sep='\t', row.names = F, file=paste(outdir, 'raw_probefiltered_segvals.txt', sep='/'))
 
 
@@ -65,30 +70,6 @@ if (nrow(segvals) < 100)
   warning(paste(fitted_file, 'has fewer than 100 genomic regions with segmented values:', nrow(segvals)))
 
 sample.cols = intersect(grep('chr|arm|pos|probes', colnames(segvals), invert=T, ignore.case=T), which(sapply(segvals, is.numeric)))
-
-if (length(sample.cols) > 0) {
-  if (length(sample.cols) > 2) {  
-    #HC = hclust(dist(t(segvals[,sample.cols])))
-    #gg1 = ggdendrogram(HC, rotate=T) + labs(title = paste(basename(fitted_file),": fitted segment coverage"),x="")
-    #print(gg1)
-  }
-  
-  # Normalize  (value-mean(value))/sd(value)
-  normalised.segvals = segvals[,sample.cols]
-  if (length(sample.cols) > 1) {  
-    for(c in 1:nrow(normalised.segvals)) 
-      normalised.segvals[c,] = (normalised.segvals[c,]-mean(unlist(normalised.segvals[c,])))/sd(unlist(normalised.segvals[c,]))
-    
-    #HC = hclust(dist(t(normalised.segvals)))
-    #gg2 = ggdendrogram(HC, rotate=T) + labs(title=paste(basename(fitted_file),": normalised fitted segment coverage", x=""))
-    
-    #grid.arrange(gg1, gg2, ncol=2)
-  }
-  
-}
-
-write.table(normalised.segvals, quote=F, sep='\t', row.names = F, file=paste(outdir, 'normalized_probefiltered_segvals.txt', sep='/'))
-
 
 chr.lengths = get.chr.lengths()
 
