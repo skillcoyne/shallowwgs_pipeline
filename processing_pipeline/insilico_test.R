@@ -78,7 +78,6 @@ sampleVar = do.call(rbind, lapply(raw, function(f) {
 # Load segment files
 tiled.segs = do.call(rbind, lapply(segs, function(f) {
   fx = load.segment.matrix(f)
-  #if (nrow(fx) <= 2) return(NULL)
   fx
 }))
 dim(tiled.segs)
@@ -98,7 +97,6 @@ sd.cx = sd(cx.score)
 # Load arm files  
 tiled.arms = do.call(rbind, lapply(arms, function(f) {
   fx = load.segment.matrix(f)
-  #if (nrow(fx) <= 2) return(NULL)
   fx
 }))
 dim(tiled.arms)
@@ -119,6 +117,7 @@ leaveoutSamples = subset(patient.info, Patient %in% leaveout)
 
 patient.info = subset(patient.info, !Patient %in% leaveout)
 sum.patient.data = summarise.patient.info(patient.info)
+nrow(sum.patient.data)
 
 leaveoutDf = allDf[leaveoutSamples$Samplename,]
 
