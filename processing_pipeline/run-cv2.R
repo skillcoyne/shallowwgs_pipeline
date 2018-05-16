@@ -104,7 +104,6 @@ segsList = prep.matrix(tiled.segs)
 
 # After mean centering set all NA values to 0
 segs = segsList$matrix
-segs[is.na(segs)] = 0
 
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
@@ -124,7 +123,7 @@ dim(tiled.arms)
 if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
 armsList = prep.matrix(tiled.arms)
 arms = armsList$matrix
-arms[is.na(arms)] = 0
+
 
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd

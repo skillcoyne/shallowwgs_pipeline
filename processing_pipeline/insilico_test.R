@@ -89,6 +89,7 @@ z.mean = segsList$z.mean
 z.sd = segsList$z.sd
 segs = segsList$matrix
 
+
 # Complexity score
 cx.score = score.cx(segs,1)
 mn.cx = mean(cx.score)

@@ -88,7 +88,7 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
   return(res)
 }
 
-prep.matrix<-function(dt) {
+prep.matrix<-function(dt, na.replace=0) {
   output = list()
   
   means = apply(dt,2, mean, na.rm=T)
@@ -99,6 +99,9 @@ prep.matrix<-function(dt) {
   
   dt = apply(dt, 2, unit.var)
   
+  if (!is.null(na.replace))
+    dt[is.na(dt)] = na.replace
+
   output[['matrix']] = dt
   return(output)
 }
