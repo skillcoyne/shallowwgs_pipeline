@@ -40,13 +40,14 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
   # QDNAseq does this in 'correctBins' but it's too late to use this now, so will adjust ours the same way (we weren't 14-May-2018)
   #corrected <- counts / fit
   #corrected[fit <= 0] <- 0
-  negs = apply(fit.data[,depth.cols], 2, function(x) which(x<=0))
-  window.depths[] = lapply(names(negs), function(n) {
-    window.depths[negs[[n]],n] = 0
-    window.depths[,n]
-  })
+  negs = apply(as.matrix(fit.data[,countCols]), 2, function(x) which(x<=0))
+  if (length(negs) > 0) {
+    window.depths[] = lapply(names(negs), function(n) {
+      window.depths[negs[[n]],n] = 0
+      window.depths[,n]
+    })
+  }
   
-  dim(window.depths)
   message(paste(nrow(blacklist), "genomic regions in the exclusion list."))
   fit.data$in.blacklist = F
   for(r in 1:nrow(blacklist)) {

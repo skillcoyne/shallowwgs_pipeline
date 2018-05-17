@@ -33,7 +33,7 @@ source('lib/data_func.R')
 
 data = '~/Data/Ellie'
 
-cache.dir = paste(data, 'Analysis/5e6_arms_all_exAHM0320', sep='/')
+cache.dir = paste(data, 'Analysis/5e6_arms_all_logR', sep='/')
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
 #analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
@@ -472,7 +472,7 @@ Even without dysplastic samples our model is well able to classify samples as ei
 #classification.rate$x = 1:nrow(classification.rate)
 
 p = ggplot(classification.rate, aes(model, mean, group=model, fill=model)) + geom_col() +
-  geom_text( aes(label=round(mean, 2)), vjust=2, size=5, color='gray39', show.legend=F) +
+  geom_text( aes(label=round(mean, 3)), vjust=2, size=5, color='gray39', show.legend=F) +
   geom_text( aes(y=0.6, label=paste(all.coef, " coef\n(", stable.coef, ")", sep='') ), color='gray39', size=5) +
   geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme),color='grey39', width=0.1, size=1) + 
 #  geom_point(size=2) +
@@ -481,7 +481,7 @@ p = ggplot(classification.rate, aes(model, mean, group=model, fill=model)) + geo
   ylim(0,1)
 p
 
-#ggsave('plots/performance/compare_classification.png', plot=p, height=5, width=3, units='in', dpi=300 )
+ggsave('plots/performance/compare_classification.png', plot=p, height=5, width=3, units='in', dpi=300 )
 ```
 
 
@@ -606,69 +606,6 @@ p = ggplot(df, aes(y=performance.at.1se, x='LOO')) +
   plot.theme
 p
 ggsave('plots/performance_loo.png', plot=p, width=5, height=5, units='in', dpi=300)
-
-# oddPt = names(pg.samp)[which.max(performance.at.1se)]
-# subset(sum.patient.data, Hospital.Research.ID == oddPt)
-# pg.samp[[oddPt]]$Prediction
-# 
-# oddPt = names(pg.samp)[which.min(performance.at.1se)]
-
-# Not the pt with the most samples or endos
-#sum.patient.data[which.max(sum.patient.data$total.samples),]
-```
-
-
-```{r echo=F, eval=F}
-## All LOO
-files = list.files('~/Data/Ellie/Analysis/5e6_arms_LOO', full.names = T)
-
-sum.patient.data$Hospital.Research.ID[1]
-
-
-pg.samp = list()
-performance = vector(length=nrow(sum.patient.data), mode='numeric')
-names(performance) = sum.patient.data$Hospital.Research.ID
-
-for (pt in sum.patient.data$Hospital.Research.ID) {
-  ptF = grep(pt, files, value=F)
-  load(grep('loo\\.Rdata', ptF, value=T), verbose=T)
-  #load(grep('model_data\\.Rdata', ptF, value=T), verbose=T)
-  performance[pt] = performance.at.1se
-  pg.samp[[pt]] = info
-}
-rm(plots,coefs,nzcoefs,fits,info)
-
-#load("/Users/skillcoy/Data/Ellie/Analysis/5e6_arms_LOO/PR1_HIN_042_loo.Rdata", verbose=T)
-#load("/Users/skillcoy/Data/Ellie/Analysis/5e6_arms_LOO/PR1_HIN_042_model_data.Rdata", verbose=T)
-
-#load("/Users/skillcoy/Data/Ellie/Analysis/5e6_arms_LOO/AHM0320_loo.Rdata", verbose=T)
-#load("/Users/skillcoy/Data/Ellie/Analysis/5e6_arms_LOO/AHM0320_model_data.Rdata", verbose=T)
-
-
-fitLOO <- glmnet(dysplasia.df, labels[rownames(dysplasia.df)], alpha=0.9, family='binomial', nlambda=500, standardize=F) 
-
-pm = predict(fitLOO, newx=allDf, s=fits$lambda.1se, type='response')
-or = predict(fitLOO, newx=allDf, s=fits$lambda.1se, type='link')
-
-hist(pm)
-hist(or)
-
-pm[subset(patient.info, Hospital.Research.ID == 'AHM0320')$Samplename,]
-or[subset(patient.info, Hospital.Research.ID == 'AHM0320')$Samplename,]
-
-sort(performance)
-
-pg.samp[which.max(performance)]
-
-pg.samp[which.min(performance)]
-
-back = do.call(rbind, pg.samp)
-
-subset(sum.patient.data, Status == 'NP' & total.endos <=2)
-
-pm[pg.samp[['AD0309']]$Samplename,]
-pg.samp[['AD0309']]$Prediction
-
 ```
 
 
@@ -684,43 +621,47 @@ roc$model = 'CN Model'
 pROC::ci.auc(roc)
 
 roc$is = 'all'
+roc.plot(roc)
 
 ggsave(filename='plots/auc/all_roc.png', plot=roc.plot(roc), width=6, height=4, units='in', dpi=300)
 
+insilico.rocs = list()
+ifile = paste(cache.dir, 'insilico_splits.Rdata', sep='/')
+if (file.exists(ifile)) {
+  load(ifile, verbose=T)
+  insilico.rocs[['all']] = roc
+  
+  df = do.call(rbind, lapply(insilico.rocs, function(r) 
+      cbind.data.frame('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'auc'=rep(r$auc, length(r$sensitivities)),'model'=r$model,'is'=r$is) 
+  ))
+  
+  p = ggplot(df, aes(Specificity, Sensitivity,color=is)) + geom_line(size=1) + 
+      geom_line(data=subset(df, is == 'all'), color='red', size=1) +
+      scale_x_reverse() +
+      scale_color_brewer(palette='Blues') +
+      labs(title='ROC, all splits', x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme +
+      theme(legend.position = 'none')
+  p
+  ggsave(filename='plots/auc/splits_roc.png', plot=p, width=6, height=6, units='in', dpi=300)
 
-load(file=paste(cache.dir, 'insilico_splits.Rdata', sep='/'), verbose=T)
-insilico.rocs[['all']] = roc
-
-df = do.call(rbind, lapply(insilico.rocs, function(r) 
-    cbind.data.frame('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'auc'=rep(r$auc, length(r$sensitivities)),'model'=r$model,'is'=r$is) 
-))
-
-p = ggplot(df, aes(Specificity, Sensitivity,color=is)) + geom_line(size=1) + 
-    geom_line(data=subset(df, is == 'all'), color='red', size=1) +
-    scale_x_reverse() +
-    scale_color_brewer(palette='Blues') +
-    labs(title='ROC, all splits', x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme +
+  best = do.call(rbind, lapply(insilico.rocs, function(r) {
+    cbind.data.frame(t(as.data.frame(pROC::coords(r, 'best'))), 'auc'=r$auc)
+  }))
+  best$model = rownames(best)
+  
+  rr = ggplot(subset(df, is == 'all' | auc %in% c(range(auc))), aes(Specificity, Sensitivity)) + 
+    geom_line(aes(color=factor(model)), size=1) + 
+    geom_line(data=subset(df, auc == min(auc)), color='darkblue', linetype='dotted') + 
+    geom_line(data=subset(df, auc == max(auc)), color='darkblue', linetype='dotted') +
+    scale_x_reverse() + scale_color_brewer(palette='Paired') + 
+    geom_label(data=subset(best, model == 'all' | auc %in% c(min(auc), max(auc)) ), aes(specificity, sensitivity, label=paste('AUC ',round(auc, 2), sep='\n'))) +
+    labs(title='ROC CI', x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme +
     theme(legend.position = 'none')
-p
-ggsave(filename='plots/auc/splits_roc.png', plot=p, width=6, height=6, units='in', dpi=300)
-
-
-best = do.call(rbind, lapply(insilico.rocs, function(r) {
-  cbind.data.frame(t(as.data.frame(pROC::coords(r, 'best'))), 'auc'=r$auc)
-}))
-best$model = rownames(best)
-
-rr = ggplot(subset(df, is == 'all' | auc %in% c(range(auc))), aes(Specificity, Sensitivity)) + 
-  geom_line(aes(color=factor(model)), size=1) + 
-  geom_line(data=subset(df, auc == min(auc)), color='darkblue', linetype='dotted') + 
-  geom_line(data=subset(df, auc == max(auc)), color='darkblue', linetype='dotted') +
-  scale_x_reverse() + scale_color_brewer(palette='Paired') + 
-  geom_label(data=subset(best, model == 'all' | auc %in% c(min(auc), max(auc)) ), aes(specificity, sensitivity, label=paste('AUC ',round(auc, 2), sep='\n'))) +
-  labs(title='ROC CI', x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme +
-  theme(legend.position = 'none')
-rr  
-ggsave(filename='plots/auc/roc_CI.png', plot=rr, width=4, height=4, units='in', dpi=300, scale=1.5)
-
+  rr  
+  ggsave(filename='plots/auc/roc_CI.png', plot=rr, width=6, height=6, units='in', dpi=300, scale=1.5)
+} else {
+  message("No insilico split file.")
+}
 
 cutoff = round(pROC::coords(roc, 'best')[['threshold']], 2)
 ```
@@ -957,21 +898,22 @@ qt = as.data.frame.matrix(table(back$quants, back$Status))
 qt$quant = rownames(qt)
 
 ft.fun<-function(NP,P) {
-  f = chisq.test(rbind(cbind(NP,P),table(sum.patient.data$Status)))
+  #f = chisq.test(rbind(cbind(NP,P),table(sum.patient.data$Status)))
+  f = chisq.test(c(NP,P))
   cbind.data.frame('p.value'=f$p.value)
   #cbind.data.frame('p.value'=f$p.value, 'odds.ratio'=f$estimate)
 }
 
-qt = cbind(qt, back %>% group_by(quants) %>% dplyr::summarise ( 'mn'=mean(Prediction), 'sd'=sd(Prediction) ))#, 
-pred.confidence = qt %>% as.data.frame.matrix %>% group_by(quant) %>% dplyr::mutate( 
-  'perc'=P/sum(NP,P), 'p.value'=ft.fun(NP,P)$p.value,  'conf'=ifelse(p.value < 0.05, '*', '') )
+qt = cbind(qt, back %>% group_by(quants) %>% dplyr::summarise ( 'mn'=mean(Prediction), 'sd'=sd(Prediction) ))
+pred.confidence = qt %>% as.data.frame.matrix %>% rowwise() %>% dplyr::mutate( 
+  'perc'=P/sum(NP,P), 'p.value'=ft.fun(NP,P)$p.value, 'conf'=ifelse(p.value < 0.05, '*', '') )
 
 pred.confidence[c('r1','r2')] = NA
 for (i in 1:(length(cuts)-1)) 
   pred.confidence[i, c('r1','r2')] = round(range(cuts[i:(i+1)]), 3)
 
 pred.confidence$Risk = 'Moderate'
-pred.confidence$Risk[ which(with(pred.confidence, p.value < 0.05 & perc < .5)) ] = 'Low'
+pred.confidence$Risk[ which(with(pred.confidence, p.value < 0.05 & perc < .3)) ] = 'Low'
 pred.confidence$Risk[ which(with(pred.confidence, p.value < 0.05 & perc > .5)) ] = 'High'
 
 
@@ -1002,7 +944,7 @@ mods = chisq.test(rbind(colSums(pred.confidence[4:7,c('NP','P')]),table(sum.pati
 ```{r pcalib, echo=F, warning=F, message=F, fig.width=8, fig.height=6}
 #pred.confidence$Risk[1:5] = 'Low'
 #pred.confidence$Risk[6:10] = 'High'
-pred.confidence$Risk[4:7] = 'Moderate'
+#pred.confidence$Risk[4:7] = 'Moderate'
 
 pcal = ggplot(pred.confidence, aes(mn, perc)) + 
   geom_rect(aes(xmin=r1, xmax=r2, ymin=0,ymax=1, fill=Risk), alpha=0.6) + scale_fill_manual(values=riskCols, limits=levels(pred.confidence$Risk) ) +
@@ -1063,7 +1005,7 @@ df = merge(globalCNdf, back[,c('Samplename','Endoscopy.Year', 'ogj', 'months.bef
 df = arrange(df, chr, start, Endoscopy.Year)
 
 ## count arms differently than segs??
-df2 = df %>% group_by(Status, Patient, Endoscopy.Year) %>% summarise( 
+df2 = df %>% group_by(Status, Patient, Endoscopy.Year) %>% dplyr::summarise( 
   'max.Pred'=max(Prediction),
   'max.RR'=max(OR),
   'max.Path'=max(Pathology),
@@ -1074,7 +1016,7 @@ df2 = df %>% group_by(Status, Patient, Endoscopy.Year) %>% summarise(
 #as.data.frame(df2)
 #df2 = subset(df2, max.Path %in% c('BE','ID','LGD'))
 
-df2 = df2 %>% group_by(Status, Patient) %>% mutate(
+df2 = df2 %>% group_by(Status, Patient) %>% dplyr::mutate(
   'early'= Endoscopy.Year == min(Endoscopy.Year),
   'late' = Endoscopy.Year == max(Endoscopy.Year)
 )
@@ -1082,7 +1024,7 @@ df2 = subset(df2, Patient %in% names(which(table(df2$Patient) > 1)))
 
 
 el = subset(df2, early | late)
-el2 = el %>% group_by(Status, Patient) %>% summarise( diff(arms), diff(CNA) )
+el2 = el %>% group_by(Status, Patient) %>% dplyr::summarise( diff(arms), diff(CNA) )
 wtA = round(wilcox.test(subset(el2, Status == 'Progressor')$`diff(arms)`, subset(el2, Status == 'Non-Progressor')$`diff(arms)`)$p.value, 3)
 if (wtA < 0.0001) wtA = '< 0.0001'
 #wilcox.test(subset(el2, Status == 'Progressor')$`diff(CNA)`, subset(el2, Status == 'Non-Progressor')$`diff(CNA)`)
@@ -1185,7 +1127,7 @@ ggsave(filename='plots/feature_jacknife.png', plot=p, width=6, height=10, unit='
 
 ```{r, echo=F, warning=F, message=F, fig.height=10, fig.width=12}
 riskPath = rbind( cbind.data.frame( table(subset(back, Status == 'P', select=c('Pathology','Risk'))), 'Status'='Progressor' ), 
-cbind.data.frame( table(subset(back, Status == 'NP', select=c('Pathology','Risk'))), 'Status'='Non-Progressor' ))
+  cbind.data.frame( table(subset(back, Status == 'NP', select=c('Pathology','Risk'))), 'Status'='Non-Progressor' ))
 
 pathTotal = back %>% group_by(Status, Pathology) %>% dplyr::summarise( 'nPath'=length(Pathology))
 pathTotal$Status = ifelse(pathTotal$Status == 'P', 'Progressor','Non-Progressor')
@@ -1996,15 +1938,13 @@ round(table(subset(penult, Status == 'NP')$rule)/nrow(subset(penult, Status == '
 
 second = subset(rules,  t2 != 'Endpoint') %>% 
   group_by(Patient, Status) %>% 
-  summarise(  max(t2), 'rule'=rule[t2 == max(t2)]  )
+  dplyr::summarise(  max(t2), 'rule'=rule[t2 == max(t2)]  )
 
 # At least 2 endos
 pander(rbind('Progressors'=table(subset(second, Status == 'P')$rule),
              'Non-Progressors'=table(subset(second, Status == 'NP')$rule)), caption='Two endos, applied rules')
 
 
-
-with(second, table(Status, rule))
 ```
 
 ## Incidence
@@ -2053,7 +1993,7 @@ rrp
 ```
 
 
-```{r 5yrrisk, echo=F, fig.height=8, fig.width=12}
+```{r 5yrrisk, echo=F, fig.height=8, fig.width=12, eval=F}
 cases = table(sum.patient.data$Status)['P']
 
 mn = round((table(sum.patient.data$Status)['P']/(0.01*100))*100)
@@ -2186,14 +2126,6 @@ pop*.05
 
 
 ```
-
-
-
-
-
-
-
-
 
 ## Cox model - Time to progress?
 

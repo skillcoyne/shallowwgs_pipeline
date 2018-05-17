@@ -139,7 +139,8 @@ save(allDf, dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arm
 
 nl = 1000; folds = 10; splits = 5 
 sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2) 
-alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
+#alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
+alpha.values = c(0.9)
 
 ## ----- All ----- ##
 coefs = list(); plots = list(); performance.at.1se = list(); models = list(); cvs = list()
@@ -258,13 +259,14 @@ if (file.exists(file)) {
   save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.samp, file=file)
 }
 
-file = paste(cache.dir, 'model_data.Rdata', sep='/')
+
+file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
 
-fitV = models[[select.alpha]]
-lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
+fitV = models[[as.character(select.alpha)]]
+lambda.opt = performance.at.1se[[as.character(select.alpha)]][, 'lambda']
 
 pred = predict(fitV, newx=leaveoutDf, s=lambda.opt, type='response')
 or = predict(fitV, newx=leaveoutDf, s=lambda.opt, type='link')
@@ -275,8 +277,7 @@ vpd = lapply(unique(leaveoutSamples$Hospital.Research.ID), function(pt) {
   info$OR = NA
   info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
   
-  info = cbind(info, v.sampleVar[info$Samplename,])
-  
+  #info = cbind(info, v.sampleVar[info$Samplename,])
   return(info)
 })
 names(vpd) = unique(leaveoutSamples$Hospital.Research.ID)

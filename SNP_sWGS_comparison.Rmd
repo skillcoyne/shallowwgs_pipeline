@@ -1,0 +1,87 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r, include=FALSE}
+library(copynumber)
+library(tibble)
+library(dplyr)
+
+```
+
+
+
+```{r}
+
+
+relCNV = read.table('~/Data/Ellie/Cleaned/AD0027_segmentedCoverage_fitted_gamma250/raw_probefiltered_segvals.txt', sep='\t', header=T)
+head(relCNV)
+#counts = read.table('~/Data/Ellie/QDNAseq/SLX-12452/SLX-12452.binSize15.readCounts.txt')
+#corrected = read.table('~/Data/Ellie/QDNAseq/SLX-12452/SLX-12452.binSize15.correctedReadCounts.txt')
+
+summary(relCNV)
+
+segCNV = read.table('~/Data/Ellie/Cleaned/AD0027_segmentedCoverage_fitted_gamma250/5e+06_cleaned_tiled_segvals.txt', sep='\t', header=T)
+head(segCNV)
+
+
+```
+
+
+
+```{r, warnings=F}
+sa = data.table::fread('~/Downloads/GSE99429_normalized_data.txt')
+#colnames(sa)
+# baseline, hgd  final, EA
+infocol = grep('SNP|Chr|Pos', colnames(sa), value=T)
+
+ptcol = grep('391', colnames(sa), value=T)
+
+pt = sa[, c(infocol, ptcol), with=F]
+
+samplenames = unique( sub('\\.[Log|B\\.Allele].*', '', ptcol))
+perpt = lapply (samplenames , function(sname) {
+  x = pt[, c(infocol,grep(paste(sname, '.*Log', sep=''), ptcol, value=T),grep(paste(sname, '.*Allele', sep=''), ptcol, value=T)), with=F  ]
+  colnames(x) = c('rs.id', 'chr','position', 'Log.R','B.Allele.Freq')
+
+  x = subset(x, !chr %in% c('0','XY','MT') & !is.na(Log.R))
+  
+  x[which(x$chr == 'X'), 'chr'] = 23
+  if (length(which(x$chr == 'YY')) > 0)
+    x[which(x$chr == 'Y'), 'chr'] = 24
+  
+  x$chr = as.numeric(x$chr)
+  x = dplyr::arrange(x, chr, position)
+
+  as_tibble(cbind('sample'=sname, x))
+})
+names(perpt) = samplenames
+
+data = perpt$`391_67K_SS6_2_2_22654`[,c('chr','position','Log.R')]
+colnames(data)[3] = '391_67K_SS6_2_2_22654'
+data$chr = as.numeric(data$chr)
+segdata = copynumber::pcf(as.data.frame(subset(data, chr %in% c(1:22))), gamma=28, fast=T, verbose=T)
+hist(segdata$mean)
+
+
+head(perpt$`391_67K_SS6_2_2_22654`)
+head(perpt$`391_73P__normal_5350N_5ng`)
+
+hist(perpt$`391_67K_SS6_2_2_22654`$Log.R)
+ks.test(perpt$`391_67K_SS6_2_2_22654`$Log.R, 'pnorm')
+
+ks.test(rnorm(500, mean(perpt$`391_67K_SS6_2_2_22654`$Log.R), sd(perpt$`391_67K_SS6_2_2_22654`$Log.R)), 'pnorm')
+
+ks.test(perpt$`391_67K_SS6_2_2_22654`$Log.R, rnorm(500, mean(perpt$`391_67K_SS6_2_2_22654`$Log.R), sd(perpt$`391_67K_SS6_2_2_22654`$Log.R)))
+?ks.test
+
+
+
+
+```
+
+
+

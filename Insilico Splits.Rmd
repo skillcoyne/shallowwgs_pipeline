@@ -20,14 +20,9 @@ source('lib/cv-pt-glm.R')
 source('lib/common_plots.R')
 
 data = '~/Data/Ellie'
-tile.w=c(5e06, 'arms')
-
-includeDemo = F
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
 analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
-
-load(grep('All_patients.Rdata', analysis.files, value=T), verbose=T)
 
 ## Hospital.Research.ID info file
 patient.file = grep('All_patient_info.xlsx', data.files, value=T)
@@ -37,48 +32,31 @@ demo.file = grep('Demographics_full.xlsx', data.files, value=T)
 
 all.patient.info = read.patient.info(patient.file, demo.file, set='all')$info
 
+sum.pt = summarise.patient.info(all.patient.info)
 
-#sum.pt = summarise.patient.info(all.patient.info)
-
-sum.pt = all.patient.info %>% group_by(Set, Patient) %>% summarize(
-  med.reads=median(Total.Reads),
-  sd.reads=sd(Total.Reads),
-  n.endoscopy=length(unique(PID)),
-  n.years=unique(Final.Endoscopy-Initial.Endoscopy),
-  n.samples=length(Samplename)
-) 
-
-sp = sum.pt %>% group_by(Set) %>% summarize(
-  med.endo=median(n.endoscopy),
-  sd.endo=sd(n.endoscopy),
-  med.years=median(n.years),
-  med.samples=median(n.samples),
-  sd.samples=sd(n.samples)
-)
-
-```
-
-`r pander(as.data.frame(sp))`
-
-```{r echo=F, warning=F, message=F}
-
-#cache.dir = paste(data, 'Analysis', sub('\\+','',paste(tile.w, collapse='_')), sep='/')
-model.dir = paste(data, 'Analysis/5e6_arms_all_exAHM0320', sep='/')
-split.dir = '/Volumes/research1/gerstung/skillcoyne/Ellie/Analysis/5e6_arms_splits_exAHM0320'
+cache.dir = paste(data, 'Analysis/5e6_arms_all_logR', sep='/')
+split.dir = paste(data, 'Analysis/5e6_arms_splits_logR', sep='/')
 
 performance = data.frame(); rocs = list()
 select.alpha = '0.9'
 
-file = paste(model.dir, 'insilico_splits.Rdata', sep='/')
+file = paste(cache.dir, 'insilico_splits.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
   rocs = insilico.rocs
   performance = insilico.perf
 } else {
-  
   split.dirs = list.files(split.dir, full.names = T)
   for (split in 1:length(split.dirs)) {
     print(split)  
+    models = list.files(split.dirs[split],full.names = T, pattern='all.*Rdata')
+    loo = list.files(split.dirs[split],full.names = T, pattern='loo.*Rdata')
+    
+    if (length(models) < 1 || length(loo) < 1) {
+      warning(paste("Missing model or LOO Rdata file in split", split.dirs[split]))
+      next
+    }
+
     load(list.files(split.dirs[split],full.names = T, pattern='all.*Rdata'), verbose=T)
     performance = rbind(performance, performance.at.1se[[select.alpha]])
     rm(plots,coefs,performance.at.1se,models,cvs)
@@ -93,7 +71,7 @@ if (file.exists(file)) {
     #rocs = rbind(rocs,c(ci.auc(roc), coords(roc, 'best') ))
     roc$model = 'in-silico'
     roc$is = split
-    rocs[[split]] = roc
+    rocs[[as.character(basename(split.dirs[split]))]] = roc
   
     rm(dysplasia.df, labels)
   }
@@ -101,24 +79,23 @@ if (file.exists(file)) {
   
   insilico.rocs=rocs
   insilico.perf=performance
-  save(insilico.rocs, insilico.perf, file=paste(model.dir, 'insilico_splits.Rdata', sep='/'))
+  save(insilico.rocs, insilico.perf, file=paste(cache.dir, 'insilico_splits.Rdata', sep='/'))
 }
 
 n.splits = nrow(performance)
 
-load(list.files(model.dir, full.names = T, pattern = 'all.*Rdata'))
+load(list.files(cache.dir, full.names = T, pattern = 'all.*Rdata'))
 
 performance = rbind(performance, performance.at.1se[[select.alpha]])
 performance$split = c(paste('split',1:n.splits,sep='.'), 'discovery')
 rm(plots,coefs,performance.at.1se,models,cvs,dysplasia.df,labels)
 
-load(list.files(model.dir,full.names = T, pattern='loo.Rdata'))
+load(list.files(cache.dir,full.names = T, pattern='loo.Rdata'))
 rm(plots, performance.at.1se,coefs,nzcoefs,fits)
 
 predictions = do.call(rbind, pg.samp)
 
-preds = do.call(rbind.data.frame, lapply(pg.samp, function(df) df[c('Status','Prediction')]))
-roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds')
+roc = pROC::roc(Status ~ Prediction, data=predictions, auc=T, ci=T, of='thresholds')
 roc$model = 'discovery'
 roc$is = 'discovery'
 
@@ -139,7 +116,7 @@ performance$name = 'insilico'
 performance$name[which(performance$split == 'discovery')] = 'discovery'
 m = melt(performance, measure.vars = 'mean')
 ggplot(m, aes(variable,value)) + ylim(0,1) +
-  geom_boxplot(fill='mintcream', color='grey55') + geom_jitter(width=0.2, aes(color=name), size=1.5) + 
+  geom_boxplot(fill='mintcream', color='grey55', outlier.color = NA) + geom_jitter(width=0.2, aes(color=name), size=1.5) + 
   geom_text(data=subset(m, value %in% range(value)), aes(label=round(value,2)), vjust=0.02, hjust=0.2) +
   plot.theme + labs(x='CV Models',y='Mean model performance',title='Mean performance for CV model', subtitle='20 insilico 20:69 splits')
 ```
@@ -173,6 +150,6 @@ mrplot <- function(rocList) {
 mrplot(rocs)
 
 ```
-Median AUC `r median(rocs$auc)`, SD `r sd(rocs$auc)`
+Median AUC `r round(median(sapply(rocs, function(x) x$auc)), 2)`, SD `r round(sd(sapply(rocs, function(x) x$auc)), 2)`
 
 
