@@ -36,17 +36,19 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
   #raw.data = raw.data[rows,]
   fit.data = fit.data[rows,]
 
-  window.depths = raw.data[,countCols]/fit.data[,countCols]
+  window.depths = as.vector(as.matrix(raw.data[,countCols]))/as.vector(as.matrix(fit.data[,countCols]))
+  
+  #window.depths = raw.data[,countCols]/fit.data[,countCols]
   # QDNAseq does this in 'correctBins' but it's too late to use this now, so will adjust ours the same way (we weren't 14-May-2018)
   #corrected <- counts / fit
   #corrected[fit <= 0] <- 0
-  negs = apply(as.matrix(fit.data[,countCols]), 2, function(x) which(x<=0))
-  if (length(negs) > 0) {
-    window.depths[] = lapply(names(negs), function(n) {
-      window.depths[negs[[n]],n] = 0
-      window.depths[,n]
-    })
-  }
+  negs = which(as.vector(as.matrix(fit.data[,countCols])) <= 0)
+  
+  #negs = apply(as.matrix(fit.data[,countCols]), 2, function(x) which(x<=0))
+  if (length(negs) > 0) window.depths[negs] = 0
+  
+  window.depths = matrix(window.depths, ncol=length(countCols))  
+  
   
   message(paste(nrow(blacklist), "genomic regions in the exclusion list."))
   fit.data$in.blacklist = F
@@ -194,7 +196,7 @@ score.cx <- function(df, MARGIN) {
 }
 
 # Presumes that the segmented data has already been filtered for num of probes, sd etc
-tile.segmented.data<-function(data, size=5e6, chr.info=NULL) {
+tile.segmented.data<-function(data, size=5e6, chr.info=NULL, verbose=F) {
   
   if (!is.tibble(data))
     data = as_tibble(data)
@@ -233,7 +235,7 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL) {
       })
       
       rows = with(mergedDf, which( chr==as.character(seqnames(bin)) & start == start(bin) & end == end(bin)))
-      if (length(segments) > 1) 
+      if (length(segments) > 1 & verbose) 
         message(paste("chr", chr, "bin", bin, "has", length(segments), "matching segments"))
       
       meanSegs = c(meanSegs, length(segments))

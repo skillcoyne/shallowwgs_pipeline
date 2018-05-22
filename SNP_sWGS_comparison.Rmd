@@ -1,87 +1,354 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output: html_document
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 ```{r, include=FALSE}
 library(copynumber)
 library(tibble)
 library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(glmnet)
+
+suppressPackageStartupMessages( source('lib/data_func.R') )
+```
+
+
+Single sample from shallow WGS dataset.
+```{r, warning=F, message=F}
+relCNV = read.table('~/Data/Ellie/Cleaned/AH0254_segmentedCoverage_fitted_gamma250/raw_probefiltered_segvals.txt', sep='\t', header=T)
+
+segCNV = load.segment.matrix('~/Data/Ellie/Cleaned/AH0254_segmentedCoverage_fitted_gamma250/5e+06_cleaned_tiled_segvals.txt')
+unlogged = segCNV
+segCNV = t(apply(segCNV, 1, logTransform))
+
+
+
+grid.arrange(
+  ggplot(relCNV, aes(x=1:nrow(relCNV), y=D702_D506_10725_10729)) + geom_point(color='darkblue') + labs(title='Raw', x=''),
+  ggplot(melt(segCNV['D702_D506_10725_10729',]), aes(x=1:ncol(segCNV), y=value)) + geom_point(color='darkblue') + labs(title='Tiled & Logged', y='D702_D506_10725_10729 (IMC)', x='') )
+
+
+grid.arrange(
+  ggplot(relCNV, aes(x=1:nrow(relCNV), y=D706_D507_9242)) + geom_point(color='darkblue') + labs(title='Raw', x=''),
+  ggplot(melt(segCNV['D706_D507_9242',]), aes(x=1:ncol(segCNV), y=value)) + geom_point(color='darkblue') + labs(title='Tiled & Logged', y='D706_D507_9242 (NDBE)', x='') )
+
+grid.arrange(  
+  ggplot(relCNV, aes(D702_D506_10725_10729)) + geom_histogram(color='lightblue', bins=25) + labs(title='Raw'),
+  ggplot(melt(unlogged['D702_D506_10725_10729',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Segmented'),
+  ggplot(melt(segCNV['D702_D506_10725_10729',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Logged & Segmented'), top='IMC'
+)
+
+grid.arrange(  
+  ggplot(relCNV, aes(D706_D507_9242)) + geom_histogram(color='lightblue', bins=25) + labs(title='Raw'),
+  ggplot(melt(unlogged['D706_D507_9242',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Segmented'),
+  ggplot(melt(segCNV['D706_D507_9242',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Logged & Segmented'), top='NDBE'
+)
+
+
+
+# All samples
+load('~/Data/Ellie/Analysis/5e6_arms_all_logR/model_data.Rdata', verbose=T)
+load('~/Data/Ellie/Analysis/5e6_arms_all_logR/loo.Rdata', verbose=T)
+subset(pg.samp$AH0254, Samplename %in% c('D706_D507_9242','D702_D506_10725_10729'))
+
 
 ```
 
 
+GSE99429 LogR data
+```{r, warning=F, message=F}
+filelist = list.files('~/Data/Ellie/arrays/SNP', pattern='txt', full.names=T)
+samplelist = lapply(filelist, function(f) colnames(as_tibble(data.table::fread(f, nrows=2))))
 
+whole_epi = lapply(samplelist, function(s) grep('*whole.*Log', s, value=T)  )
+names(whole_epi) = basename(filelist)
+
+normals = lapply(samplelist, function(s) grep('*normal.*Log', s, value=T)  )
+names(normals) = basename(filelist)
+
+
+fix.chr<- function(df) {
+  df = subset(df, Chr %in% c(1:22))
+  df$Chr = as.numeric(df$Chr)
+  dplyr::arrange(df, Chr, Position)
+}
+
+dt = as_tibble(data.table::fread(filelist[6]))
+epi = dt[,c(grep('SNP|Chr|Pos', colnames(dt), value=T),whole_epi[[6]])]
+nm = dt[,c(grep('SNP|Chr|Pos', colnames(dt), value=T),normals[[6]])]
+
+epi = fix.chr(epi)
+nm = fix.chr(nm)
+rm(dt)
+
+
+
+```
+
+
+```{r, warning=F, message=F}
+
+process.patients<-function(df, outfile=NULL) {
+  predictions = data.frame(matrix(nrow=0,ncol=2,dimnames=list(c(), c('Prob','RR'))))
+  allptsdata = list()
+
+  infocols = grep('Chr|Pos', colnames(df), value=T)
+  pts = grep('SNP|Chr|Pos', colnames(df), invert=T, value=T)
+
+  for (pt in pts)  {
+    print(pt)    
+    data = df[,c(infocols,pt)]
+    segdata = copynumber::pcf(as.data.frame(data), gamma=28, fast=T, verbose=F)  
+    head(segdata)
+  
+    #ggplot(segdata, aes(x=1:nrow(segdata), y=mean)) + geom_point() + labs(title='LogR whole epi', x='', y='')
+    
+    # this is the LogR, doesn't need to be logged again
+    tiled = segment.matrix(tile.segmented.data(segdata[,-1], chr.info=get.chr.lengths()))
+    tiled.noUV = tiled
+      
+    for (i in 1:ncol(tiled)) 
+      tiled[,i] = unit.var(tiled[,i], z.mean[i], z.sd[i]) 
+    tiled[is.na(tiled)] = mean(tiled, na.rm=T) #0
+  
+    cx = score.cx(tiled, 1)
+
+    tiled.arms = segment.matrix(tile.segmented.data(segdata[,-1], size='arms', chr.info=get.chr.lengths()))
+    tiled.armsNoUV = tiled.arms
+      
+    for (i in 1:ncol(tiled.arms)) 
+      tiled.arms[,i] = unit.var(tiled.arms[,i], z.arms.mean[i], z.arms.sd[i]) 
+    tiled.arms[is.na(tiled.arms)] = mean(tiled, na.rm=T) #0
+    
+    arrayDf = subtract.arms(tiled, tiled.arms)
+    arrayDf = cbind(arrayDf, 'cx'=unit.var(cx, mn.cx ,sd.cx))
+      
+    # Whole epi
+    predictions[pt,] = c(predict(fitV, newx=arrayDf, s=l, type='response')[,1], 'RR'=predict(fitV, newx=arrayDf, s=l, type='link')[,1] )
+  
+    allptsdata[[pt]] = list('seg'=segdata, 'tile'=tiled, 'tileNoUV'=tiled.noUV, 'tile.arms'=tiled.arms, 'tile.arms.noUV'=tiled.armsNoUV, 'arrayDf'=arrayDf, 'cx'=cx)
+  }  
+  if(!is.null(outfile))   save(wholeepi, predictions, file=outfile)
+
+return(predictions)
+}
+
+
+
+load('~/Data/Ellie/Analysis/5e6_arms_all_logR/all.pt.alpha.Rdata', verbose = T)
+fitV = models$`0.9`
+l = performance.at.1se$`0.9`$lambda
+rm(plots,performance.at.1se,dysplasia.df,models,cvs,labels)
+
+
+tmp = paste('/tmp/', sub('\\.txt','',basename(filelist[6])), '_epi.Rdata', sep='')
+if (file.exists(tmp)) {
+  load(tmp, verbose=T)
+} else {
+  predictions = data.frame(matrix(nrow=0,ncol=2,dimnames=list(c(), c('Prob','RR'))))
+  wholeepi = list()
+  
+  infocols = grep('Chr|Pos', colnames(epi), value=T)
+  pts = grep('SNP|Chr|Pos', colnames(epi), invert=T, value=T)
+  pt = pts[1]
+
+  for (pt in pts)  {
+    print(pt)    
+    data = epi[,c(infocols,pt)]
+    segdata = copynumber::pcf(as.data.frame(data), gamma=28, fast=T, verbose=F)  
+    head(segdata)
+  
+    #ggplot(segdata, aes(x=1:nrow(segdata), y=mean)) + geom_point() + labs(title='LogR whole epi', x='', y='')
+    
+    # this is the LogR, doesn't need to be logged again
+    tiled = segment.matrix(tile.segmented.data(segdata[,-1], chr.info=get.chr.lengths()))
+    tiled.noUV = tiled
+      
+    for (i in 1:ncol(tiled)) 
+      tiled[,i] = unit.var(tiled[,i], z.mean[i], z.sd[i]) 
+    tiled[is.na(tiled)] = mean(tiled, na.rm=T) #0
+  
+    cx = score.cx(tiled, 1)
+  
+      
+    tiled.arms = segment.matrix(tile.segmented.data(segdata[,-1], size='arms', chr.info=get.chr.lengths()))
+    tiled.armsNoUV = tiled.arms
+      
+    for (i in 1:ncol(tiled.arms)) 
+      tiled.arms[,i] = unit.var(tiled.arms[,i], z.arms.mean[i], z.arms.sd[i]) 
+    tiled.arms[is.na(tiled.arms)] = mean(tiled, na.rm=T) #0
+    
+    arrayDf = subtract.arms(tiled, tiled.arms)
+    arrayDf = cbind(arrayDf, 'cx'=unit.var(cx, mn.cx ,sd.cx))
+      
+    # Whole epi
+    predictions[pt,] = c(predict(fitV, newx=arrayDf, s=l, type='response')[,1], 'RR'=predict(fitV, newx=arrayDf, s=l, type='link')[,1] )
+  
+    wholeepi[[pt]] = list('seg'=segdata, 'tile'=tiled, 'tileNoUV'=tiled.noUV, 'tile.arms'=tiled.arms, 'tile.arms.noUV'=tiled.armsNoUV, 'arrayDf'=arrayDf, 'cx'=cx)
+    }  
+
+  save(wholeepi, predictions, file=tmp)
+}
+
+
+```
+
+Normal sample?
+```{r, warning=F, message=F}
+
+
+npg = '911_5U__normal_10397N_200ng'
+pg = '848_85O_SS1_normal_18780N_200ng'
+
+
+tmp = '/tmp/normal.Rdata'
+if (file.exists(tmp)) {
+  load(tmp, verbose = T)
+} else {
+
+  # this is the LogR, doesn't need to be logged again
+  normals = list()
+  for (pt in c(npg,pg)) {
+    data = normpt[[pg]][,c('chr','position','Log.R')]
+    colnames(data)[3] = pt
+    data$chr = as.numeric(data$chr)
+    segdata = copynumber::pcf(as.data.frame(subset(data, chr %in% c(1:22))), gamma=28, fast=T, verbose=F)  
+
+    tiledN = tile.segmented.data(segdata[,-1], chr.info=get.chr.lengths())
+    tiledN = segment.matrix(tiledN)
+    
+    tiledN.noUV = tiledN
+    
+    for (i in 1:ncol(tiledN)) 
+      tiledN[,i] = unit.var(tiledN[,i], z.mean[i], z.sd[i]) 
+    tiledN[is.na(tiledN)] = mean(tiledN, na.rm=T) #0
+
+    cx = score.cx(tiledN, 1)
+
+    tiled.armsN = tile.segmented.data(segdata[,-1], size='arms', chr.info=get.chr.lengths())
+    tiled.armsN = segment.matrix(tiled.armsN)
+    
+    tiled.armsN.noUV = tiled.armsN
+    
+    for (i in 1:ncol(tiled.armsN)) 
+      tiled.armsN[,i] = unit.var(tiled.armsN[,i], z.arms.mean[i], z.arms.sd[i]) 
+    tiled.armsN[is.na(tiled.armsN)] = mean(tiled.armsN, na.rm=T) #0
+  
+    arrayDfN = subtract.arms(tiledN, tiled.armsN)
+    arrayDfN = cbind(arrayDfN, 'cx'=unit.var(cx, mn.cx ,sd.cx))
+  
+    normals[[pt]] = list('seg'=segdata, 'tile'=tiledN, 'tileNoUV'=tiledN.noUV, 'tile.arms'=tiled.armsN, 'tile.arms.noUV'=tiled.armsNoUV, 'arrayDf'=arrayDfN, 'cx'=cx)
+  }
+  save(normals, file=tmp)
+}
+
+#normseg = segdata
+
+
+
+```
+
+
+Norm vs whole ep
+The extreme tail on the normal sample is due to the 'cx' coefficient and needs to be adjusted.  For now I will set it to the mean of the cx value in the sWGS dataset.
 ```{r}
 
+head(wholeepseg)
 
-relCNV = read.table('~/Data/Ellie/Cleaned/AD0027_segmentedCoverage_fitted_gamma250/raw_probefiltered_segvals.txt', sep='\t', header=T)
-head(relCNV)
-#counts = read.table('~/Data/Ellie/QDNAseq/SLX-12452/SLX-12452.binSize15.readCounts.txt')
-#corrected = read.table('~/Data/Ellie/QDNAseq/SLX-12452/SLX-12452.binSize15.correctedReadCounts.txt')
+grid.arrange(
+  ggplot(wholeepseg, aes(x=1:nrow(wholeepseg), y=mean)) + geom_point() + labs(title='Whole epi, segmented LogR'),
+  ggplot(normseg, aes(x=1:nrow(normseg), y=mean)) + geom_point() + labs(title='Normal, segmented LogR'))
 
-summary(relCNV)
-
-segCNV = read.table('~/Data/Ellie/Cleaned/AD0027_segmentedCoverage_fitted_gamma250/5e+06_cleaned_tiled_segvals.txt', sep='\t', header=T)
-head(segCNV)
-
-
-```
+grid.arrange(
+  ggplot(wholeepseg, aes(mean)) + geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, Segmented', subtitle='Whole epi'),
+  ggplot(normseg, aes(mean)) + geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, Segmented', subtitle='Normal sample')
+)
 
 
-
-```{r, warnings=F}
-sa = data.table::fread('~/Downloads/GSE99429_normalized_data.txt')
-#colnames(sa)
-# baseline, hgd  final, EA
-infocol = grep('SNP|Chr|Pos', colnames(sa), value=T)
-
-ptcol = grep('391', colnames(sa), value=T)
-
-pt = sa[, c(infocol, ptcol), with=F]
-
-samplenames = unique( sub('\\.[Log|B\\.Allele].*', '', ptcol))
-perpt = lapply (samplenames , function(sname) {
-  x = pt[, c(infocol,grep(paste(sname, '.*Log', sep=''), ptcol, value=T),grep(paste(sname, '.*Allele', sep=''), ptcol, value=T)), with=F  ]
-  colnames(x) = c('rs.id', 'chr','position', 'Log.R','B.Allele.Freq')
-
-  x = subset(x, !chr %in% c('0','XY','MT') & !is.na(Log.R))
-  
-  x[which(x$chr == 'X'), 'chr'] = 23
-  if (length(which(x$chr == 'YY')) > 0)
-    x[which(x$chr == 'Y'), 'chr'] = 24
-  
-  x$chr = as.numeric(x$chr)
-  x = dplyr::arrange(x, chr, position)
-
-  as_tibble(cbind('sample'=sname, x))
-})
-names(perpt) = samplenames
-
-data = perpt$`391_67K_SS6_2_2_22654`[,c('chr','position','Log.R')]
-colnames(data)[3] = '391_67K_SS6_2_2_22654'
-data$chr = as.numeric(data$chr)
-segdata = copynumber::pcf(as.data.frame(subset(data, chr %in% c(1:22))), gamma=28, fast=T, verbose=T)
-hist(segdata$mean)
+summary(wholeepseg$mean)
+summary(normseg$mean)
 
 
-head(perpt$`391_67K_SS6_2_2_22654`)
-head(perpt$`391_73P__normal_5350N_5ng`)
+grid.arrange(
+  ggplot(melt(arrayDf), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, tiled', subtitle='Whole epi, 5e6'),
+  ggplot(melt(arrayDfN), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, tiled', subtitle='Normal sample, 5e6')
+)
 
-hist(perpt$`391_67K_SS6_2_2_22654`$Log.R)
-ks.test(perpt$`391_67K_SS6_2_2_22654`$Log.R, 'pnorm')
-
-ks.test(rnorm(500, mean(perpt$`391_67K_SS6_2_2_22654`$Log.R), sd(perpt$`391_67K_SS6_2_2_22654`$Log.R)), 'pnorm')
-
-ks.test(perpt$`391_67K_SS6_2_2_22654`$Log.R, rnorm(500, mean(perpt$`391_67K_SS6_2_2_22654`$Log.R), sd(perpt$`391_67K_SS6_2_2_22654`$Log.R)))
-?ks.test
-
-
+arrayDf[,'cx'] = mean(allDf[,'cx'])
+arrayDfN[,'cx'] = mean(allDf[,'cx'])
 
 
 ```
 
 
+Compare to all samples.
+```{r warning=F, message=F}
+
+
+
+ggplot(melt(allDf), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, Segmented', subtitle='all sWGS')
+
+
+ggplot(melt(allDf[sample(1:nrow(allDf),1),]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, Segmented', subtitle='Random sWGS sample')
+
+
+grid.arrange(
+  ggplot(melt(arrayDf), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, Segmented', subtitle='Whole epi'),
+  ggplot(melt(arrayDfN), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, Segmented', subtitle='Normal sample'))
+
+
+s = which(apply(allDf, 1, function(i) ks.test(i, arrayDf)$p.value) >= 0.05)
+
+
+
+# Normal
+predict(fitV, newx=arrayDfN, s=l, type='response')
+predict(fitV, newx=arrayDfN, s=l, type='link')
+
+```
+
+Quantile normalize?
+```{r, warning=F, message=F}
+by = 3
+mx = mean(arrayDf, na.rm=T)+sd(arrayDf, na.rm=T)*by
+mn = mean(arrayDf, na.rm=T)-sd(arrayDf, na.rm=T)*by
+
+ggplot(melt(arrayDf), aes(value)) + 
+  geom_histogram(color='lightblue', bins=25) + labs(title='Array LogR, Segmented', subtitle='Whole epi?') +
+  geom_vline(xintercept = c(mx,mn), color='red')
+
+## Get the distribution as below across ALL methylation samples then sub the mean and sd for ALL instead of for one
+  
+newsd = sd(arrayDf[arrayDf <= mx & arrayDf >= mn], na.rm=T)
+newmean = mean(arrayDf[arrayDf <= mx & arrayDf >= mn], na.rm=T)   
+  
+#xx = qnorm(pnorm(segMethy, mean(segMethy), sd(segMethy)), mean(allDf[,1:ncol(segMethy)]), sd(allDf[,1:ncol(segMethy)]))
+#hist(xx)
+
+xx = qnorm(pnorm(arrayDf, newmean, newsd, lower.tail=F), mean(allDf[,1:ncol(arrayDf)]), sd(allDf[,1:ncol(arrayDf)]), lower.tail=F)
+
+# less extreme, but still incorrect
+xx = qnorm(pnorm(arrayDf, newmean, newsd, lower.tail=F), median(apply(allDf, 1, mean, na.rm=T)), sd(apply(allDf, 1, sd, na.rm=T)), lower.tail=F)
+
+hist(xx)
+
+
+predict(fitV, newx=xx, s=l, type='response')
+predict(fitV, newx=xx, s=l, type='link')
+```
+
+## Try processing the IDAT files directly.  Perhaps if they aren't normalized together the LogR becomes more comparable.
+```{r}
+
+library(illuminaio)
+
+file = '~/Data/Ellie/arrays/SNP/GSM2643883_8832987072_R03C01_Grn.idat'
+idat <- readIDAT(file)
+names(idat)
+
+```
 

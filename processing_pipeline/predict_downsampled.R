@@ -1,11 +1,16 @@
 # predict downsampled
+args = commandArgs(trailingOnly=TRUE)
+
+if (length(args) < 1)
+  stop("Missing required params: <data dir> <model dir> <out dir> ")
+
 
 library(ggplot2)
 library(Matrix)
 library(glmnet)
 
-source('lib/data_func.R')
-source('lib/load_patient_metadata.R')
+source('../lib/data_func.R')
+source('../lib/load_patient_metadata.R')
 
 chrlen = get.chr.lengths()
 
@@ -19,16 +24,24 @@ adjustRisk <- function(RR, offset, type='risk') {
 }
 
 
-dir = '~/Data/Ellie/Cleaned/Downsampled'
-#dir = '~/Data/Ellie/Cleaned/AH0329_segmentedCoverage_fitted_gamma250/'
+dir = args[1]
+modeldir = args[2]
+#outdir = args[2]
+
+logT = F
+if (length(args) > 2) logT = as.logical(args[3])
+
+#dir = '~/Data/Ellie/Analysis/VAL_Cohort'
+#modeldir = '~/Data/Ellie/Analysis/5e6_arms_all_logR'
+
 #dir = '~/Data/Ellie/Analysis/VAL_Cohort/'
 files = list.files(dir, full.names=T)
 
-file = '~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/model_data.Rdata'
+file = paste(modeldir, 'model_data.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
-file = '~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/all.pt.alpha.Rdata'
+file = paste(modeldir, 'all.pt.alpha.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
@@ -39,7 +52,7 @@ fitV = models[[select.alpha]]
 lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
 
 
-file = '~/Data/Ellie/Analysis/5e6_arms_all_exAHM0320/loo.Rdata'
+file = paste(modeldir, 'loo.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
@@ -65,25 +78,25 @@ for (n in 1:length(files)) {
   if (ncol(rs) < 4)
     stop("File needs to contain 4 columns: chr, start, end, sample_value")
   
-  segs <- tile.segmented.data(rs, size=5e6, chr.info=chrlen)
-  segM = as.matrix(segs[,-c(1:3)])
-  rownames(segM) = paste(segs$chr, ':', segs$start, '-', segs$end, sep='')
-  segM = t(segM)
-  for (i in 1:ncol(segM)) 
-    segM[,i] = unit.var(segM[,i], z.mean[i], z.sd[i])
+  tiled.segs <- tile.segmented.data(rs, size=5e6, chr.info=chrlen)
+  tiled.segs = segment.matrix(tiled.segs)
+  if (logT) tiled.segs = t(apply(tiled.segs, 1, logTransform))
   
-  arms <- tile.segmented.data(rs, size='arms', chr.info=chrlen)
-  armsM = as.matrix(arms[,-c(1:3)])
-  rownames(armsM) = paste(arms$chr, ':', arms$start, '-', arms$end, sep='')
-  armsM = t(armsM)
-  for (i in 1:ncol(armsM)) 
-    armsM[,i] = unit.var(armsM[,i], z.arms.mean[i], z.arms.sd[i])
+  for (i in 1:ncol(tiled.segs)) 
+    tiled.segs[,i] = unit.var(tiled.segs[,i], z.mean[i], z.sd[i])
   
-  nrow(armsM) == nrow(segM)
+  tiled.arms <- tile.segmented.data(rs, size='arms', chr.info=chrlen)
+  tiled.arms = segment.matrix(tiled.arms)
+  if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
+  
+  for (i in 1:ncol(tiled.arms)) 
+    tiled.arms[,i] = unit.var(tiled.arms[,i], z.arms.mean[i], z.arms.sd[i])
+  
+  nrow(tiled.segs) == nrow(tiled.arms)
     
-  cx.score = score.cx(segM,1)
+  cx.score = score.cx(tiled.segs,1)
   
-  mergedDf = subtract.arms(segM, armsM)
+  mergedDf = subtract.arms(tiled.segs, tiled.arms)
   mergedDf = cbind(mergedDf, 'cx' = unit.var(cx.score, mn.cx, sd.cx))
   dim(mergedDf)
   
@@ -102,7 +115,7 @@ for (n in 1:length(files)) {
 save(dspred, file='dowsampled_predictions.Rdata')
 save(dspred, file=paste(dir, 'predictions.Rdata', sep='/'))
 
-load(paste(dir, 'predictions.Rdata', sep='/'), verbose=T)
+#load(paste(dir, 'predictions.Rdata', sep='/'), verbose=T)
 
 riskPal = rev(RColorBrewer::brewer.pal(11, 'RdYlBu'))
 unadjRisk = ggplot(pg.samp, aes(OR)) + geom_histogram(aes(fill=..x..), bins=10, show.legend = T) +
@@ -115,15 +128,20 @@ unadjRisk + geom_point(data=m, aes(x=value,y=Adj.Prob*30, color=variable))
   
 ids = readxl::read_excel('~/Data/Ellie/Analysis/downsampled_ids.xlsx', sheet=1)
 
+x = base::merge(ids, dspred, by.x='Illumina ID', by.y='row.names')
 
-preds = base::merge(dspred, ids, by.x='row.names', by.y='Illumina ID', all=T) 
-# ignore the three LGD cases, they're not clear NP or P in any case (downsampled just out of interest)
-preds = subset(preds, Grade_biopsy != 'LGD')
+table(subset(x, `Expected Risk` == 'High')$Prob >= 0.7)
+table(subset(x, `Expected Risk` == 'Low')$Prob <= 0.4)
+
+table(subset(x, Tissue == 'Normal')$Prob <= 0.4)
+subset(x, Tissue == 'Normal' & Prob > 0.4)
+
+table(subset(x, Tissue == 'Barretts' & Study == 'OCCAMS')$Prob >= 0.7)
+
+table(subset(x, `Expected Risk` == 'High' & Study == 'Annalise')$Prob >= 0.7)
+table(subset(x, `Expected Risk` == 'Low' & Study == 'Annalise')$Prob <= 0.4)
 
 
-preds[ which(subset(preds, `Expected Risk` == 'Low')$Adj.Prob > 0.3) ,]
-
-preds[ which(subset(preds, `Expected Risk` == 'High')$Adj.Prob < 0.6) ,]
 
 
 

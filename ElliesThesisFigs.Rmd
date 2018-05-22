@@ -1044,7 +1044,6 @@ ggplot(melt(data.frame(simX[c('Status','clusters')])), aes(x=Status, y=value, fi
 # Validation Set
 
 ```{r echo=F, warning=F, message=F}
-
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
   message(paste("loading", file))
@@ -1053,49 +1052,47 @@ if (file.exists(file)) {
   stop(paste("No model file", file, "found"))
 }
 
+fitV = models[[0.9]]
+lambda.opt = performance.at.1se[[0.9]][, 'lambda']
+
 
 validation.patient.info =  subset(all.patient.info, Set == 'Test')
 validation.patient.info = arrange(validation.patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
 
 
-cleaned = list.files(path=paste(data, 'Cleaned', sep='/'), pattern='tiled', full.names=T, recursive=T)
+cleaned = list.files(path=paste(data, 'Cleaned', sep='/'), pattern='raw', full.names=T, recursive=T)
 cleaned = grep(paste(unique(validation.patient.info$Hospital.Research.ID), collapse='|'), cleaned, value=T)
-cleaned = grep('arms', cleaned, invert=T, value=T)
 
-#raw = list.files(path=paste(data, 'Cleaned', sep='/'), pattern='raw', full.names=T, recursive=T)
-#raw = grep(paste(unique(validation.patient.info$Hospital.Research.ID), collapse='|'), raw, value=T)
+chr.len = get.chr.lengths()
 
-fitV = models[[0.9]]
-lambda.opt = performance.at.1se[[0.9]][, 'lambda']
+tmp = 'thesis/thesis_validationdf.Rdata'
+if (file.exists(tmp)) {
+  load(tmp)
+} else {
+  validation.df = do.call(rbind, lapply(cleaned, function(f) {
+    df = read.table(f, sep='\t', header=T)
+    tiled = segment.matrix(tile.segmented.data(df, chr.info=chr.len))
+    for (i in 1:ncol(tiled)) 
+      tiled[,i] = unit.var(tiled[,i]) 
+    tiled[is.na(tiled)] = 0
+    tiled
+  }))
+  validation.df = validation.df[validation.patient.info$Samplename, ]
+  validation.df = apply(validation.df, 2, unit.var)
 
-
-validation.df = matrix(nrow=0, ncol=ncol(dysplasia.df), dimnames=list(c(), colnames(dysplasia.df)))
-for (fi in cleaned) {
-  x = read.table(fi, sep='\t', header=T)
-  segs = paste(x$chr, ':', x$start, '-', x$end, sep='')
-
-  x = t(x[,-c(1:3)])
-  colnames(x) = segs
-
-  validation.df = rbind(validation.df, x)  
+  save(validation.df, file=tmp)
 }
-
-validation.df = validation.df[validation.patient.info$Samplename, ]
-validation.df = apply(validation.df, 2, unit.var)
 
 pred = predict(fitV, newx=validation.df, s=lambda.opt, type='response')
 or = predict(fitV, newx=validation.df, s=lambda.opt, type='link')
 
 vpd = validation.patient.info
 
-if (rownames(pred) != vpd$Samplename)
-  stop('Fix this')
-
 vpd$Prediction = pred
 vpd$OR = or
 
-table(subset(vpd, Prediction > cutoff)$Status)
-table(subset(vpd, Prediction < cutoff)$Status)
+table(subset(vpd, Prediction > 0.5)$Status)
+table(subset(vpd, Prediction < 0.5)$Status)
 
 ```
 
@@ -1119,27 +1116,25 @@ samples = sub('10729', '10725_10729', samples)
 repeats = repeats[,c(1:6,8,9)]
 repeats$Samplename = samples
 
-
-cleaned = list.files(path=paste(data, 'Cleaned', sep='/'), pattern='tiled', full.names=T, recursive=T)
+cleaned = list.files(path=paste(data, 'Cleaned', sep='/'), pattern='raw', full.names=T, recursive=T)
 cleaned = grep(paste(unique(repeats$`Hospital Research ID`), collapse='|'), cleaned, value=T)
-cleaned = grep('arms', cleaned, invert=T, value=T)
 
-repeat.df = matrix(nrow=0, ncol=ncol(dysplasia.df), dimnames=list(c(), colnames(dysplasia.df)))
-for (fi in cleaned) {
-  x = read.table(fi, sep='\t', header=T)
-  segs = paste(x$chr, ':', x$start, '-', x$end, sep='')
+tmp = 'thesis/thesis_repeats.df.Rdata'
+if (file.exists(tmp)) {
+  load(tmp)
+} else {
+  repeat.df = do.call(rbind, lapply(cleaned, function(f) {
+    df = read.table(f, sep='\t', header=T)
+    df = df[, c(1:4, which(colnames(df) %in% repeats$Samplename))]
+    
+    tiled = segment.matrix(tile.segmented.data(df, chr.info=chr.len))
+    tiled[is.na(tiled)] = 0
+    tiled
+  }))
+  repeat.df = apply(repeat.df, 2, unit.var)
 
-  x = t(x[,-c(1:3)])
-  colnames(x) = segs
-
-  repeat.df = rbind(repeat.df, x)  
+  save(repeat.df, file=tmp)
 }
-
-rows = which(rownames(repeat.df) %in% samples)
-repeat.df = repeat.df[rows,]
-
-repeat.df = apply(repeat.df, 2, unit.var)
-
 
 pred = predict(fitV, newx=repeat.df, s=lambda.opt, type='response')
 or = predict(fitV, newx=repeat.df, s=lambda.opt, type='link')
@@ -1150,7 +1145,9 @@ repeats$OR = or[repeats$Samplename,]
 
 repeats$Probability = round(repeats$Probability, 2)
 
-write.table(repeats, sep='\t', quote=F, row.names=F, file='tech_repeats.txt')
+write.table(repeats, sep='\t', quote=F, row.names=F, file='thesis/tech_repeats.txt')
+
+write.table(subset(back, Patient %in% unique(repeats$`Patient ID`)), sep='\t', row.names=F, file='thesis/original_rep_predictions.txt')
 
 ```
 
