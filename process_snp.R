@@ -3,7 +3,7 @@ options(bitmapType = "cairo")
 args = commandArgs(trailingOnly=TRUE)
 
 datadir = args[1]
-datadir = '/Volumes/fh/fast/reid_b/collab/Killcoyne/Data/PerPatient/597'
+#datadir = '/Volumes/fh/fast/reid_b/collab/Killcoyne/Data/PerPatient/597'
 print(datadir)
 
 ### Lifted directly from ASCAT
@@ -51,38 +51,45 @@ suppressPackageStartupMessages( source('lib/data_func.R') )
 chr.info = get.chr.lengths()
 if (is.null(chr.info)) stop("Failed to get chr info")
 
-load(list.files(datadir, 'Rdata', full.names = T), verbose=T)
-segraw = ascat.output$segments_raw
-rm(ascat.pcf, ascat.gg, ascat.output)
-
-## Adjust the sign of the log ratio so that CN gains result in a positive LRR.  This is more similar to what we get from sWGS
-segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
-
-
-## Winsorize, per sample, the adjusted log ratio values
-segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
-
-#qqnorm(subset(segraw, sample == segraw$sample[1])$adjustedLRR)
-#qqnorm(subset(segraw, sample == segraw$sample[1])$winsLRR)
-
-allsamples = NULL
-allarms = NULL
-for (sample in unique(segraw$sample)) {
-  print(sample)
-  df = segraw[which(segraw$sample == sample),]
-  tiled = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], chr.info=chr.info, verbose=T)
-  if (is.null(allsamples)) allsamples = tiled[c(1:3)]
-  allsamples[,sample] = tiled[,4]
+tf = list.files(datadir, 'tiled.txt', full.names = T)
+if (length(which(sapply(tf, file.size ) < 4025)) <= 0) {
+  message("Tiled files already exist")
+} else {
+    
   
-  tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], size='arms', chr.info=chr.info, verbose=T)
-  if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
-  allarms[,sample] = tiled.arms[,4]
-  head(allsamples)
+  load(list.files(datadir, 'Rdata', full.names = T), verbose=T)
+  segraw = ascat.output$segments_raw
+  rm(ascat.pcf, ascat.gg, ascat.output)
+  
+  ## Adjust the sign of the log ratio so that CN gains result in a positive LRR.  This is more similar to what we get from sWGS
+  segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
+  
+  
+  ## Winsorize, per sample, the adjusted log ratio values
+  segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
+  
+  #qqnorm(subset(segraw, sample == segraw$sample[1])$adjustedLRR)
+  #qqnorm(subset(segraw, sample == segraw$sample[1])$winsLRR)
+  
+  allsamples = NULL
+  allarms = NULL
+  for (sample in unique(segraw$sample)) {
+    print(sample)
+    df = segraw[which(segraw$sample == sample),]
+    tiled = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], chr.info=chr.info, verbose=T)
+    if (is.null(allsamples)) allsamples = tiled[c(1:3)]
+    allsamples[,sample] = tiled[,4]
+    
+    tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], size='arms', chr.info=chr.info, verbose=T)
+    if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
+    allarms[,sample] = tiled.arms[,4]
+    head(allsamples)
+  }
+  
+  write.table(allsamples, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_tiled.txt', sep=''))
+  write.table(allarms, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_arms_tiled.txt', sep=''))
 }
-
-write.table(allsamples, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_tiled.txt', sep=''))
-write.table(allarms, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_arms_tiled.txt', sep=''))
-  
+print("Finished")
 
 
 # mtx = segment.matrix(allsamples)
