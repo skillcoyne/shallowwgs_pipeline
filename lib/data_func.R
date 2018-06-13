@@ -299,31 +299,34 @@ subtract.arms<-function(segments, arms) {
 get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='hg19') {
   require(plyr)
   
-  chr.lengths = read.table(paste('http://genome.ucsc.edu/goldenpath/help/', build, '.chrom.sizes',sep='') , sep='\t', header=F)
-  colnames(chr.lengths) = c('chrom','chr.length')
-  chr.lengths = subset(chr.lengths, chrom %in% chrs)
-  chr.lengths$chrom = factor(chr.lengths$chrom, levels=chrs)
-  chr.lengths = arrange(chr.lengths, chrom)
-  
-  cytoband.url = 'http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/cytoBand.txt.gz'
-  cytoband.file = paste('/tmp', basename(cytoband.url), sep='/')
-  
-  if (!file.exists(cytoband.file)) {
-    success = download.file(cytoband.url, cytoband.file)
-    if (!success)
-      stop(paste("Could not download", cytoband.url))
+  if (file.exists('hg19_info.txt')) {
+    chr.lengths = read.table('hg19_info.txt')
+  } else {
+    chr.lengths = read.table(paste('http://genome.ucsc.edu/goldenpath/help/', build, '.chrom.sizes',sep='') , sep='\t', header=F)
+    colnames(chr.lengths) = c('chrom','chr.length')
+    chr.lengths = subset(chr.lengths, chrom %in% chrs)
+    chr.lengths$chrom = factor(chr.lengths$chrom, levels=chrs)
+    chr.lengths = arrange(chr.lengths, chrom)
+    
+    cytoband.url = 'http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/cytoBand.txt.gz'
+    cytoband.file = paste('/tmp', basename(cytoband.url), sep='/')
+    
+    if (!file.exists(cytoband.file)) {
+      success = download.file(cytoband.url, cytoband.file)
+      if (!success)
+        stop(paste("Could not download", cytoband.url))
+    }
+    
+    cytobands = read.table(cytoband.file, sep='\t', header=F)
+    colnames(cytobands) = c('chrom','start','end','band','attr')
+    cytobands$chrom = factor(cytobands$chrom, levels=chrs)
+    
+    centromeres = subset(cytobands, attr == 'acen')
+    
+    chr.lengths$chr.cent = ddply(centromeres, .(chrom), summarise, cent=mean(range(start, end)) )$cent
+    chr.lengths$cent.gap = ddply(centromeres, .(chrom), summarise, gap = (max(end)-min(start))/2 )$gap
+    chr.lengths$genome.length = cumsum(as.numeric(chr.lengths$chr.length))
   }
-  
-  cytobands = read.table(cytoband.file, sep='\t', header=F)
-  colnames(cytobands) = c('chrom','start','end','band','attr')
-  cytobands$chrom = factor(cytobands$chrom, levels=chrs)
-  
-  centromeres = subset(cytobands, attr == 'acen')
-  
-  chr.lengths$chr.cent = ddply(centromeres, .(chrom), summarise, cent=mean(range(start, end)) )$cent
-  chr.lengths$cent.gap = ddply(centromeres, .(chrom), summarise, gap = (max(end)-min(start))/2 )$gap
-  chr.lengths$genome.length = cumsum(as.numeric(chr.lengths$chr.length))
-  
   return(chr.lengths)
 }
 
