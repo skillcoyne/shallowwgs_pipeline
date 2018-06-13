@@ -161,7 +161,6 @@ score.cx <- function(df, MARGIN) {
 }
 
 .tile.genome<-function(tile.w=5e6, chr.info=NULL, incGender=F) {
-  
   if (is.null(chr.info))
     chr.info = read.table('data/chr_hg19.txt', sep='\t', header=T, stringsAsFactors=F)
   
@@ -200,9 +199,7 @@ score.cx <- function(df, MARGIN) {
 
 # Presumes that the segmented data has already been filtered for num of probes, sd etc
 tile.segmented.data<-function(data, size=5e6, chr.info=NULL, verbose=F) {
-  
-  if (!is.tibble(data))
-    data = as_tibble(data)
+  if (!is.tibble(data)) data = as_tibble(data)
   
   descCols = sort(union(grep('chr|arm|start|end|probes', colnames(data), ignore.case=T), which(!sapply(data, is.numeric))))
   dataCols = c((descCols[length(descCols)]+1):ncol(data))
@@ -300,7 +297,7 @@ get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='
   require(plyr)
   
   if (file.exists('hg19_info.txt')) {
-    chr.lengths = read.table('hg19_info.txt')
+    chr.lengths = read.table('hg19_info.txt', header=T, sep='\t')
   } else {
     chr.lengths = read.table(paste('http://genome.ucsc.edu/goldenpath/help/', build, '.chrom.sizes',sep='') , sep='\t', header=F)
     colnames(chr.lengths) = c('chrom','chr.length')

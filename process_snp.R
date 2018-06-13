@@ -3,7 +3,7 @@ options(bitmapType = "cairo")
 args = commandArgs(trailingOnly=TRUE)
 
 datadir = args[1]
-#datadir = '/Volumes/fh/fast/reid_b/collab/Killcoyne/Data/PerPatient/512'
+datadir = '/Volumes/fh/fast/reid_b/collab/Killcoyne/Data/PerPatient/597'
 print(datadir)
 
 ### Lifted directly from ASCAT
@@ -52,19 +52,18 @@ chr.info = get.chr.lengths()
 if (is.null(chr.info)) stop("Failed to get chr info")
 
 load(list.files(datadir, 'Rdata', full.names = T), verbose=T)
-rm(ascat.pcf, ascat.gg)
+segraw = ascat.output$segments_raw
+rm(ascat.pcf, ascat.gg, ascat.output)
 
 ## Adjust the sign of the log ratio so that CN gains result in a positive LRR.  This is more similar to what we get from sWGS
-segraw = ascat.output$segments_raw
-
 segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
 
 
 ## Winsorize, per sample, the adjusted log ratio values
 segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
 
-qqnorm(subset(segraw, sample == segraw$sample[1])$adjustedLRR)
-qqnorm(subset(segraw, sample == segraw$sample[1])$winsLRR)
+#qqnorm(subset(segraw, sample == segraw$sample[1])$adjustedLRR)
+#qqnorm(subset(segraw, sample == segraw$sample[1])$winsLRR)
 
 allsamples = NULL
 allarms = NULL
