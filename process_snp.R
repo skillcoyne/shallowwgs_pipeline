@@ -3,7 +3,7 @@ options(bitmapType = "cairo")
 args = commandArgs(trailingOnly=TRUE)
 
 datadir = args[1]
-#datadir = '/Volumes/fh/fast/reid_b/collab/Killcoyne/Data/PerPatient/597'
+#datadir = '/Volumes/fh/fast/reid_b/collab/Killcoyne/Data/PerPatient/977'
 print(datadir)
 
 ### Lifted directly from ASCAT
@@ -52,11 +52,9 @@ chr.info = get.chr.lengths()
 if (is.null(chr.info)) stop("Failed to get chr info")
 
 tf = list.files(datadir, 'tiled.txt', full.names = T)
-if (length(which(sapply(tf, file.size ) < 4025)) <= 0) {
+if (length(tf) ==2 && length(which(sapply(tf, file.size ) < 4025)) <= 0) {
   message("Tiled files already exist")
 } else {
-    
-  
   load(list.files(datadir, 'Rdata', full.names = T), verbose=T)
   segraw = ascat.output$segments_raw
   rm(ascat.pcf, ascat.gg, ascat.output)
