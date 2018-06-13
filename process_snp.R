@@ -46,7 +46,10 @@ medianFilter <- function(x,k){
 }
 ### ---------------------- ###
 
-source('lib/data_func.R')
+suppressPackageStartupMessages( source('lib/data_func.R') )
+
+chr.info = get.chr.lengths()
+if (is.null(chr.info)) stop("Failed to get chr info")
 
 load(list.files(datadir, 'Rdata', full.names = T), verbose=T)
 rm(ascat.pcf, ascat.gg)
