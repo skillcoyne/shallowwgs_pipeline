@@ -12,8 +12,28 @@ library(dplyr)
 library(ggplot2)
 library(gridExtra)
 library(glmnet)
+library(reshape2)
+
+
+winsor2<-function (x, multiple=3) {
+   if(length(multiple) != 1 || multiple <= 0) {
+      stop("bad value for 'multiple'")
+   }
+   med <- median(x)
+   y <- x - med
+   sc <- mad(y, center=0) * multiple
+   y[ y > sc ] <- sc
+   y[ y < -sc ] <- -sc
+   y + med
+}
 
 suppressPackageStartupMessages( source('lib/data_func.R') )
+load('~/Data/Ellie/Analysis/5e6_arms_all_logR/model_data.Rdata', verbose = T)
+load('~/Data/Ellie/Analysis/5e6_arms_all_logR/all.pt.alpha.Rdata', verbose = T)
+fitV = models$`0.9`
+l = performance.at.1se$`0.9`$lambda
+rm(plots,performance.at.1se,dysplasia.df,models,cvs,labels)
+
 ```
 
 
@@ -26,33 +46,59 @@ unlogged = segCNV
 segCNV = t(apply(segCNV, 1, logTransform))
 
 
+chr.info = get.chr.lengths()[1:22,]
+chr.info$chrom = sub('chr', '', chr.info$chrom)
+chr.info$chrom = factor(chr.info$chrom, ordered = T, levels=c(1:22))
+relCNV$chrom = factor(relCNV$chrom, ordered = T, levels = c(1:22))
+(segCNV['D708_D504_9242',])
 
-grid.arrange(
-  ggplot(relCNV, aes(x=1:nrow(relCNV), y=D702_D506_10725_10729)) + geom_point(color='darkblue') + labs(title='Raw', x=''),
-  ggplot(melt(segCNV['D702_D506_10725_10729',]), aes(x=1:ncol(segCNV), y=value)) + geom_point(color='darkblue') + labs(title='Tiled & Logged', y='D702_D506_10725_10729 (IMC)', x='') )
+windows = apply(chr.info, 1, function(x) {
+  m = data.frame(matrix(seq(from=5e6,to=x[['chr.length']],by=5e6),ncol=1))
+  cbind(x[['chrom']], m)
+})
+names(windows) = c(1:22)
+windows = do.call(rbind,windows)
+colnames(windows) = c('chrom','window')
 
 
-grid.arrange(
-  ggplot(relCNV, aes(x=1:nrow(relCNV), y=D706_D507_9242)) + geom_point(color='darkblue') + labs(title='Raw', x=''),
-  ggplot(melt(segCNV['D706_D507_9242',]), aes(x=1:ncol(segCNV), y=value)) + geom_point(color='darkblue') + labs(title='Tiled & Logged', y='D706_D507_9242 (NDBE)', x='') )
 
+# tiles = tile.segmented.data(relCNV, chr.info=chr.info, verbose=T)
+# tiles.arms = tile.segmented.data(relCNV, size='arms',chr.info=chr.info, verbose=T)
+
+# ggplot(subset(chr.info, chrom == 2), aes(x=1:chr.length)) + #facet_grid(~chrom,space = 'free_x', scales = 'free_x') + 
+#   labs(x='Chromosome 2', y='Segmented values') +
+#   geom_segment(data=subset(relCNV[,c('chrom','start.pos','end.pos','D708_D504_9242')], chrom==2), aes(x=start.pos, xend=end.pos, y=D708_D504_9242, yend=D708_D504_9242), size=3) +
+#   geom_vline(data=subset(windows, chrom==2), aes(xintercept=window), linetype='dashed', color='grey39') +
+#   geom_segment(data=subset(tiles, chr == 2), aes(x=start, xend=end, y=D708_D504_9242, yend=D708_D504_9242), color='red', size=2) +
+#   geom_segment(data=subset(tiles.arms, chr == 2), aes(x=start, xend=end, y=D708_D504_9242, yend=D708_D504_9242), color='blue', size=2)
+
+
+
+# IMC
 grid.arrange(  
-  ggplot(relCNV, aes(D702_D506_10725_10729)) + geom_histogram(color='lightblue', bins=25) + labs(title='Raw'),
-  ggplot(melt(unlogged['D702_D506_10725_10729',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Segmented'),
-  ggplot(melt(segCNV['D702_D506_10725_10729',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Logged & Segmented'), top='IMC'
+  ggplot(relCNV, aes(D708_D504_9242)) + geom_histogram(color='lightblue', bins=25) + labs(title='Raw'),
+  ggplot(melt(unlogged['D708_D504_9242',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Segmented'),
+  ggplot(melt(segCNV['D708_D504_9242',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Logged & Segmented'), top='IMC'
 )
 
+qqnorm(segCNV['D708_D504_9242',])
+qqnorm(unlogged['D708_D504_9242',])
+qqnorm(relCNV[,'D708_D504_9242']) # raw
+
+# Early NDBE
 grid.arrange(  
   ggplot(relCNV, aes(D706_D507_9242)) + geom_histogram(color='lightblue', bins=25) + labs(title='Raw'),
   ggplot(melt(unlogged['D706_D507_9242',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Segmented'),
   ggplot(melt(segCNV['D706_D507_9242',]), aes(value)) + geom_histogram(color='lightblue', bins=25) + labs(title='Logged & Segmented'), top='NDBE'
 )
 
+qqnorm(segCNV['D706_D507_9242',])
+qqline(segCNV['D706_D507_9242',])
+
+qqnorm(unlogged['D706_D507_9242',])
+qqnorm(relCNV[,'D706_D507_9242'])
 
 
-# All samples
-load('~/Data/Ellie/Analysis/5e6_arms_all_logR/model_data.Rdata', verbose=T)
-load('~/Data/Ellie/Analysis/5e6_arms_all_logR/loo.Rdata', verbose=T)
 subset(pg.samp$AH0254, Samplename %in% c('D706_D507_9242','D702_D506_10725_10729'))
 
 
@@ -60,16 +106,14 @@ subset(pg.samp$AH0254, Samplename %in% c('D706_D507_9242','D702_D506_10725_10729
 
 
 GSE99429 LogR data
-```{r, warning=F, message=F}
+```{r, warning=F, message=F, eval=F}
 filelist = list.files('~/Data/Ellie/arrays/SNP', pattern='txt', full.names=T)
-samplelist = lapply(filelist, function(f) colnames(as_tibble(data.table::fread(f, nrows=2))))
 
-whole_epi = lapply(samplelist, function(s) grep('*whole.*Log', s, value=T)  )
-names(whole_epi) = basename(filelist)
+whole_epiP = as_tibble(data.table::fread(grep('391_62K.*whole_epi', filelist, value=T)[1], sep='\t', header=T))
+#normalP = as_tibble(data.table::fread(grep('391.*normal.*200ng', filelist, value=T), sep='\t', header=T))
 
-normals = lapply(samplelist, function(s) grep('*normal.*Log', s, value=T)  )
-names(normals) = basename(filelist)
-
+#whole_epiNP = as_tibble(data.table::fread(grep('451_115T.*whole_epi', filelist, value=T)[1], sep='\t', header=T))
+#normalNP = as_tibble(data.table::fread(grep('451.*normal.*200ng', filelist, value=T), sep='\t', header=T))
 
 fix.chr<- function(df) {
   df = subset(df, Chr %in% c(1:22))
@@ -77,20 +121,206 @@ fix.chr<- function(df) {
   dplyr::arrange(df, Chr, Position)
 }
 
-dt = as_tibble(data.table::fread(filelist[6]))
-epi = dt[,c(grep('SNP|Chr|Pos', colnames(dt), value=T),whole_epi[[6]])]
-nm = dt[,c(grep('SNP|Chr|Pos', colnames(dt), value=T),normals[[6]])]
+whole_epiP = fix.chr(whole_epiP)
+normalP = fix.chr(normalP)
+qqnorm(whole_epiP$`391_62K_SS4_whole_epi__22325.Log.R.Ratio`)
+#qqline(whole_epiP$`391_62K_SS4_whole_epi__22325.Log.R.Ratio`)
 
-epi = fix.chr(epi)
-nm = fix.chr(nm)
-rm(dt)
+head(whole_epiP)
 
+chrs = get.chr.lengths()[1:22,]
+chrs$chrom = factor(sub('chr','',chrs$chrom), ordered = T, levels=c(1:22))
+colnames(chrs)[1] = 'Chr'
+
+whole_epiP$Chr = factor(whole_epiP$Chr, levels=c(1:22), ordered = T)
+
+p = ggplot(chrs, aes(x=1:chr.length)) + facet_grid(~Chr, space='free_x', scales='free_x') +
+  geom_point(data=whole_epiP, aes(Position, `391_62K_SS4_whole_epi__22325.Log.R.Ratio`))
+
+#qqnorm(whole_epiP$`391_62K_SS4_whole_epi__22325.Log.R.Ratio`)
+#epiW = winsorize(as.data.frame(whole_epiP[,c(1:3)]))
+#head(epiW)
+
+whole_epiP$Chr = as.integer(as.character(whole_epiP$Chr))
+#nas = which(is.na(whole_epiP$`391_62K_SS4_whole_epi__22325.Log.R.Ratio`))
+
+seg = pcf(as.data.frame(whole_epiP[,c(1:3)]), gamma=37, verbose=T)
+head(seg)
+
+x = which(seg$chrom == 17)[1]
+
+baf = whole_epiP[,c(1,2,4)]
+summary(subset(baf, Position >= seg$start.pos[x] & Position <= seg$end.pos[x] & Chr == seg$chrom[x])[,3,drop=T], na.rm=T)
+
+summary(seg$end.pos-seg$start.pos)
+summary(seg$mean)
+colnames(seg)[2] = 'Chr'
+seg$Chr = factor(seg$Chr, levels=levels(chrs$Chr), ordered = T)
+head(seg)
+p + geom_segment(data=seg, aes(x=start.pos,xend=end.pos, y=mean, yend=mean), color='red', size=2)
+
+#hist(seg$mean)
+
+seg$meanW = NA
+seg$meanW[!is.na(seg$mean)] = winsor2(seg$mean[!is.na(seg$mean)]) # winsorize w/replacement
+
+tiled = tile.segmented.data(seg[,c(2:6,8)], chr.info = get.chr.lengths(), verbose = T)
+head(tiled)
+hist(tiled$meanW)
+# colnames(tiled)[1] = 'Chr'
+# tiled$Chr = factor(tiled$Chr, ordered = T)
+# p + geom_segment(data=tiled, aes(x=start,xend=end, y=mean, yend=mean), color='red', size=2)
+
+colnames(tiled)[4] = 'mean'
+p1 = ggplot(tiled) + geom_histogram(aes(mean), col='lightblue', bins=20) + 
+  geom_vline(xintercept=c(mean(tiled$mean,na.rm=T)+sd(tiled$mean,na.rm=T), mean(tiled$mean,na.rm=T)-sd(tiled$mean,na.rm=T)), col='red' )  
+tiled$scaled = scale(exp(tiled$mean))
+p2 = ggplot(tiled) + geom_histogram(aes(scaled), col='lightblue', bins=20) +
+    geom_vline(xintercept=c(mean(tiled$scaled,na.rm=T)+sd(tiled$scaled,na.rm=T), mean(tiled$scaled,na.rm=T)-sd(tiled$scaled,na.rm=T)), col='red' )  
+grid.arrange(p1, p2)
+
+qqnorm(tiled$scaled)
+hist(tiled$scaled)
+
+#x = tiled
+
+tiled = segment.matrix(tiled)
+# for (i in 1:ncol(tiled)) 
+#   tiled[,i] = unit.var(tiled[,i], z.mean[i], z.sd[i]) 
+tiled[is.na(tiled)] = mean(tiled, na.rm=T) #0
+  
+cx = score.cx(tiled, 1)
+
+tiled.arms = tile.segmented.data(seg[,c(2:6,8)], size='arms', chr.info=get.chr.lengths(), verbose=T)
+colnames(tiled.arms)[4] = 'mean'
+tiled.arms$scaled = scale(exp(tiled.arms$mean))
+#tiled.arms$mean = scale(exp(tiled$mean))
+tiled.arms = segment.matrix(tiled.arms)
+tiled.arms[is.na(tiled.arms)] = mean(tiled.arms, na.rm=T) #0
+
+
+arrayDf = subtract.arms(tiled, tiled.arms)
+arrayDf = cbind(arrayDf, 'cx'=unit.var(cx, mn.cx ,sd.cx))
+
+predict(fitV, newx=arrayDf, s=l, type='response')
+predict(fitV, newx=arrayDf, s=l, type='link')
+
+summary(arrayDf[1,])
+
+hist(allDf[210,], breaks=20)
+
+# logr = whole_epiP$`391_62K_SS4_whole_epi__22325.Log.R.Ratio`
+# hist(logr)
+# by = 3
+# mx = mean(logr,na.rm=T)+sd(logr,na.rm=T)*by
+# mn = mean(logr,na.rm=T)-sd(logr,na.rm=T)*by
+# abline(v=c(mx, mn), col='red')
+# 
+# newsd = sd(logr[logr <= mx & logr >= mn], na.rm=T)
+# newmean = mean(logr[logr <= mx & logr >= mn], na.rm=T)   
+  
+#xx = qnorm(pnorm(segMethy, mean(segMethy), sd(segMethy)), mean(allDf[,1:ncol(segMethy)]), sd(allDf[,1:ncol(segMethy)]))
+#hist(xx)
+
+# xx = qnorm(pnorm(logr, newmean, newsd, lower.tail=F))
+# xx[xx==Inf] = NA
+# xx[xx==-Inf] = NA
+# hist(xx)
+# qqnorm(xx)
+
+epiW = winsorize(as.data.frame(whole_epiP[,c(1:3)]))
+qqnorm(epiW$`391_62K_SS4_whole_epi__22325.Log.R.Ratio`)
+
+logrw = epiW$`391_62K_SS4_whole_epi__22325.Log.R.Ratio`
+hist(logrw)
+by = 3
+mx = mean(logrw,na.rm=T)+sd(logrw,na.rm=T)*by
+mn = mean(logrw,na.rm=T)-sd(logrw,na.rm=T)*by
+abline(v=c(mx, mn), col='red')
+
+newsd = sd(logrw[logrw <= mx & logrw >= mn], na.rm=T)
+newmean = mean(logr[logrw <= mx & logrw >= mn], na.rm=T)   
+  
+#xx = qnorm(pnorm(segMethy, mean(segMethy), sd(segMethy)), mean(allDf[,1:ncol(segMethy)]), sd(allDf[,1:ncol(segMethy)]))
+#hist(xx)
+
+xy = qnorm(pnorm(logrw, newmean, newsd, lower.tail=F))
+xy[xy==Inf] = NA
+xy[xy==-Inf] = NA
+hist(xy)
+qqnorm(xy)
+
+length(xy)
+
+rows = which(logrw <= mx & logrw >= mn)
+head(epiW[rows,])
+head(xy[rows])
+
+epiW = cbind(epiW, xy)
+
+seg = pcf(epiW[,c(1:3)], gamma=40, fast=T, verbose=F)
+qqnorm(seg$mean)
+hist(seg$mean)
+by = 3
+mx = mean(seg$mean,na.rm=T)+sd(seg$mean,na.rm=T)*by
+mn = mean(seg$mean,na.rm=T)-sd(seg$mean,na.rm=T)*by
+abline(v=c(mx, mn), col='red')
+
+newsd = sd(seg$mean[ seg$mean >= mn], na.rm=T)   
+newmean = mean(seg$mean[ seg$mean >= mn], na.rm=T)   
+
+xy = qnorm(pnorm(seg$mean, newmean, newsd, lower.tail=F))
+xy[xy==Inf] = NA
+xy[xy==-Inf] = NA
+hist(xy)
+qqnorm(xy)
+
+
+
+summary(seg$end.pos-seg$start.pos)
+
+chrs = get.chr.lengths()
+chrs$chrom = sub('chr','',chrs$chrom)
+
+sc = base::merge(seg, chrs, by='chrom')
+head(sc)
+
+unseg = base::merge(epiW, chrs, by='chrom')
+head(unseg)
+unseg = cbind(unseg, xy)
+
+unseg = unseg %>% rowwise() %>% dplyr::mutate(g.pos = ifelse(chrom == '1', pos, genome.length-pos))
+
+p = ggplot(unseg) + xlim(1, max(chrs$genome.length)) + 
+  geom_point(aes(x=g.pos, y=xy), color='red', alpha=0.5) +
+  geom_point(aes(x=g.pos, y=`391_62K_SS4_whole_epi__22325.Log.R.Ratio`)) 
+ggsave(p, width=10, height = 7, units = 'in', file='snps.png')  
+
+
+sc = sc %>% rowwise() %>% dplyr::mutate(g.start = ifelse(chrom == '1', start.pos, genome.length-start.pos), 
+                                        g.end = ifelse(chrom == '1', end.pos, genome.length-end.pos))
+
+p + geom_segment(data=sc, aes(x=g.start, xend=g.end, y=mean, yend=mean), color='red', size=2)
+
+ggplot() + lims(x=c(1,max(chrs))) + 
+  geom_point(data=epiW)
+
+
+ggplot(sc) + facet_grid(~chrom, space = 'free_x', scales = 'free_x') + geom_segment(aes(x=start.pos, xend=end.pos, y=mean, yend=mean))
+
+
+
+#x = imputeMissing(epiW, 'constant')
+#asseg = aspcf(x, epibaf, gamma=40, kmin=64)
+
+
+#segdata = copynumber::pcf(as.data.frame(data), gamma=28, fast=T, verbose=F)  
 
 
 ```
 
 
-```{r, warning=F, message=F}
+```{r, warning=F, message=F, eval=F}
 
 process.patients<-function(df, outfile=NULL) {
   predictions = data.frame(matrix(nrow=0,ncol=2,dimnames=list(c(), c('Prob','RR'))))
@@ -198,7 +428,7 @@ if (file.exists(tmp)) {
 ```
 
 Normal sample?
-```{r, warning=F, message=F}
+```{r, warning=F, message=F, eval=F}
 
 
 npg = '911_5U__normal_10397N_200ng'
@@ -255,7 +485,7 @@ if (file.exists(tmp)) {
 
 Norm vs whole ep
 The extreme tail on the normal sample is due to the 'cx' coefficient and needs to be adjusted.  For now I will set it to the mean of the cx value in the sWGS dataset.
-```{r}
+```{r, eval=F}
 
 head(wholeepseg)
 
@@ -286,7 +516,7 @@ arrayDfN[,'cx'] = mean(allDf[,'cx'])
 
 
 Compare to all samples.
-```{r warning=F, message=F}
+```{r warning=F, message=F, eval=F}
 
 
 
@@ -312,7 +542,7 @@ predict(fitV, newx=arrayDfN, s=l, type='link')
 ```
 
 Quantile normalize?
-```{r, warning=F, message=F}
+```{r, warning=F, message=F, eval=F}
 by = 3
 mx = mean(arrayDf, na.rm=T)+sd(arrayDf, na.rm=T)*by
 mn = mean(arrayDf, na.rm=T)-sd(arrayDf, na.rm=T)*by
@@ -341,14 +571,88 @@ predict(fitV, newx=xx, s=l, type='response')
 predict(fitV, newx=xx, s=l, type='link')
 ```
 
-## Try processing the IDAT files directly.  Perhaps if they aren't normalized together the LogR becomes more comparable.
-```{r}
+Try processing the IDAT files directly.  Perhaps if they aren't normalized together the LogR becomes more comparable?
 
-library(illuminaio)
 
-file = '~/Data/Ellie/arrays/SNP/GSM2643883_8832987072_R03C01_Grn.idat'
-idat <- readIDAT(file)
-names(idat)
+## Absolutely CN
+
+```{r, warning=F, message=F, echo=F}
+ploidy = read.table('~/Data/ICGC/BE_OAC_Cohort/tumour/data/ascat/LP2000104-DNA_A01_vs_LP2000101-DNA_A01/LP2000104-DNA_A01_vs_LP2000101-DNA_A01__pv.1.5__rg.grch37_g1k__al.bwa_mem__.samplestatistics.csv', row.names=1)['Ploidy',1]
+cn = data.table::fread('~/Data/ICGC/BE_OAC_Cohort/tumour/data/ascat/LP2000104-DNA_A01_vs_LP2000101-DNA_A01/LP2000104-DNA_A01_vs_LP2000101-DNA_A01__pv.1.5__rg.grch37_g1k__al.bwa_mem__.copynumber.caveman.csv')
+cn = subset(cn, Chromosome %in% c(1:22))
+
+cn = read.table('~/Data/ICGC/BE_OAC_Cohort/BA/data/ascat/totalCNV.txt', sep='\t', header=T)
+cn = subset(cn, Illumina.Barcode == 'LP2000110-DNA_A01_vs_LP2000101-DNA_A01')
+ploidy = cn$ploidy[1]
+nrow(cn)
+
+
+x = cnN$Total_CN-ploidy
+qqnorm(x)
+qqnorm(winsor2(x, 3))
+
+cn[which(cn$Chromosome == 17)[1],]
+x[which(cn$Chromosome == 17)[1]]
+winsor2(x, 3)[which(cn$Chromosome == 17)[1]]
+
+cn$TotalWinsAdj = winsor2(x)
+
+cols = grep('Chr|Start|End|TotalWinsAdj', colnames(cn), ignore.case=T)
+
+tiled = tile.segmented.data(as.data.frame(cn)[cols], chr.info=get.chr.lengths()[1:22,])
+tiled.arms = tile.segmented.data(as.data.frame(cn)[cols], size='arms', chr.info=get.chr.lengths()[1:22,])
+
+tt = segment.matrix(tiled)
+ta = segment.matrix(tiled.arms)
+
+tt[is.na(tt)] = mean(tt, na.rm=T) #0
+ta[is.na(ta)] = mean(ta, na.rm=T) #0
+
+cx = score.cx(tt, 1)
+
+dm = subtract.arms(tt, ta)
+
+dm = cbind(dm, 'cx'=unit.var(cx, mn.cx, sd.cx ))
+
+#unit.var(cx)
+predict(fitV, newx=dm, s=l, type='response')
+predict(fitV, newx=dm, s=l, type='link')
+
+
+## in silico normal sample
+cnN = cn
+cnN$Total_CN = sample(c(1,2,3), size=nrow(cnN), replace=T, prob=c(.025,.95,.025 ))
+hist(cnN$Total_CN)
+
+cnN$TotalWinsAdj = winsor2(cnN$Total_CN-round(ploidy))
+qqnorm(cnN$TotalWinsAdj)
+
+hist(cnN$TotalWinsAdj)
+
+cols = grep('Chr|Start|End|TotalWinsAdj', colnames(cn), ignore.case=T)
+
+tiled = tile.segmented.data(as.data.frame(cn)[cols], chr.info=get.chr.lengths()[1:22,])
+tiled.arms = tile.segmented.data(as.data.frame(cn)[cols], size='arms', chr.info=get.chr.lengths()[1:22,])
+
+tt = segment.matrix(tiled)
+ta = segment.matrix(tiled.arms)
+
+tt[is.na(tt)] = mean(tt, na.rm=T) #0
+ta[is.na(ta)] = mean(ta, na.rm=T) #0
+
+cx = score.cx(tt, 1)
+
+dm = subtract.arms(tt, ta)
+
+dm = cbind(dm, 'cx'=unit.var(cx, mn.cx, sd.cx ))
+
+#unit.var(cx)
+predict(fitV, newx=dm, s=l, type='response')
+predict(fitV, newx=dm, s=l, type='link')
+
+
+
+hist(allDf[1,])
 
 ```
 

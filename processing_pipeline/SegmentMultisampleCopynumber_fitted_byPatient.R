@@ -26,7 +26,7 @@ patient.name = args[2]
 outdir = args[3]
 
 #data = '~/Data/Ellie/QDNAseq'
-#patient.name = 'PR1/HIN/042' #AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
+#patient.name = 'PR1/HIN/042' #'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
 #outdir = '~/Data/Ellie/Analysis'
 data.dirs = list.dirs(data, full.names=T, recursive=F)
 data.files = list.files(data, full.names=T, recursive=T)
@@ -153,6 +153,36 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
   if (!dir.exists(gamma.plot))
     dir.create(gamma.plot, recursive=T, showWarnings=F)
   
+
+  chr.info = get.chr.lengths()[1:22,]
+  chr.info$chrom = sub('chr','', chr.info$chrom)
+  chr.info$chrom = factor(chr.info$chr.cent, levels=c(1:22), ordered=T)
+  
+  plots = list()
+  for(col in which(!is.na(sdevs))) {
+    sample = colnames(segvals)[col+5]
+    
+    df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
+    df2 = cbind.data.frame('chrom'=segvals$chrom, 'start'=segvals$start.pos, 'end'=segvals$end.pos, 'seg.val'=segvals[,col+5])
+    
+    df$chrom = factor(df$chrom, levels=c(1:22), ordered=T)
+    df2$chrom = factor(df2$chrom, levels=c(1:22), ordered=T)
+    
+    
+   p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(0,9) + facet_grid(~chrom, space='free_x', scales='free_x') +
+      geom_point(data=df, aes(x=position, y=seg.cov), color='darkred', alpha=.4) +
+      geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green4', lwd=4) +
+      labs(y='segmented coverage', title=sample) + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
+   
+   plots[[as.character(col)]] = p
+  }  
+  png(paste(gamma.plot, "/", "segmentedCoverage_chr_gamma",gamma2,".png",sep=""),width=1200,height=600*no.samples)
+  do.call(grid.arrange, c(plots, ncol=1))
+  dev.off()
+  
+  
+
+  
   for(chr in 1:22) {
     print(paste('chr',chr,sep=''))
     indices = intersect(which(fit.data$chrom==chr),good.bins)
@@ -179,6 +209,7 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
       gg = ggplot(data=df, aes(position, seg.cov)) + geom_point(color='darkred', alpha=.4) +
         geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green4', lwd=4) + 
         labs(y='segmented coverage', title=paste("chr",chr,":  ",colnames(window.depths.standardised)[col],sep=""))
+      
       plots[[as.character(col)]] = gg
         # plot(fit.data$end[indices],window.depths.standardised[indices,col],col="red",pch=20,cex=1,cex.axis=2,cex.lab=2,cex.main=2,xlab="pos",ylab="segmented coverage",main=paste("chr",chr,", ",colnames(window.depths.standardised)[col],sep=""))
         # for(ind in indices2){

@@ -112,9 +112,12 @@ prep.matrix<-function(dt, na.replace=0) {
 segment.matrix<-function(dt) {
   dt = as.data.frame(dt)
   
-  chrCol = grep('chr',colnames(dt))
-  startCol = grep('start',colnames(dt))
-  endCol = grep('end',colnames(dt))
+  chrCol = grep('chr',colnames(dt),ignore.case=T)
+  startCol = grep('start',colnames(dt),ignore.case=T)
+  endCol = grep('end',colnames(dt),ignore.case=T)
+  
+  if (length(chrCol)<=0 | length(startCol)<=0 | length(endCol)<=0)
+    stop("Missing columns chr|start|end")
   
   rows = paste(dt[,chrCol], ':', dt[,startCol], '-', dt[,endCol], sep='')
   cols = colnames(dt)[-c(chrCol, startCol, endCol)]
@@ -201,19 +204,19 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL, verbose=F) {
   if (!is.tibble(data))
     data = as_tibble(data)
   
-  descCols = sort(union(grep('chr|arm|start|end|probes', colnames(data)), which(!sapply(data, is.numeric))))
+  descCols = sort(union(grep('chr|arm|start|end|probes', colnames(data), ignore.case=T), which(!sapply(data, is.numeric))))
   dataCols = c((descCols[length(descCols)]+1):ncol(data))
   
-  chrCol = grep('chr',colnames(data),value=T)
-  armCol = grep('arm',colnames(data),value=T)
-  startPos = grep('start',colnames(data),value=T)
-  endPos = grep('end',colnames(data),value=T)
+  chrCol = grep('chr',colnames(data),ignore.case=T, value=T)
+  armCol = grep('arm',colnames(data),ignore.case=T,value=T)
+  startPos = grep('start',colnames(data),ignore.case=T,value=T)
+  endPos = grep('end',colnames(data),ignore.case=T,value=T)
   
   data = data[which(!data[[chrCol]] %in% c('X','Y')),]
   x1 = data[,c(chrCol, startPos, endPos, colnames(data)[dataCols])]
   
   tiles = .tile.genome(size, chr.info, incGender=length(which(grepl('X|Y', unique(data[[chrCol]])))) > 0)
-  gr = makeGRangesFromDataFrame(x1, keep.extra.columns=T, start.field = startPos, end.field = endPos  ) 
+  gr = makeGRangesFromDataFrame(x1, keep.extra.columns=T, start.field=startPos, end.field=endPos  ) 
   
   mergedDf = (do.call(rbind, lapply(tiles, function(tile) { 
     cbind('chr'=as.character(seqnames(tile)), as.data.frame(ranges(tile))[1:2]) 
@@ -230,7 +233,7 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL, verbose=F) {
       bin = currentChr[i]
       
       segments = gr[subjectHits(curov[queryHits(curov) == i])]
-      weights = lapply(as(segments,'GRangesList'),function(r) {
+      weights = sapply(as(segments,'GRangesList'),function(r) {
         width(pintersect(bin, r))/width(bin)
       })
       
@@ -241,7 +244,7 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL, verbose=F) {
       meanSegs = c(meanSegs, length(segments))
       
       # weight means by the coverage of the bin  
-      values = apply(as.data.frame(elementMetadata(segments)), 2, weighted.mean, w=weights)
+      values = apply(as.data.frame(elementMetadata(segments)), 2, weighted.mean, w=weights, na.rm=T)
       mergedDf[rows, names(values)] = values
     }
   }
