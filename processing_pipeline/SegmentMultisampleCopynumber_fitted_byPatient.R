@@ -34,7 +34,7 @@ data.files = list.files(data, full.names=T, recursive=T)
 patient.name = gsub('\\/', '_', patient.name )
 
 
-plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient2', sep='/')
+plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
 print(paste("Plot directory:", plot.dir))
 if (!dir.exists(plot.dir))  
   dir.create(plot.dir, recursive=T)
@@ -66,6 +66,14 @@ data.file = grep('MultisampleCopynumberBinnedAndFitted2.RData', data.files, valu
 if (length(data.file) <= 0)
   stop("Missing necessary Rdata file from Multisample script")
 load(file=data.file, verbose=T)
+
+patient.info$Samplename
+colnames(fit.data)[1:14]
+
+patient.plot.dir
+write.table(fit.data[,c('location','chrom','start','end',patient.info$Samplename)], sep='\t', quote=F, file=paste(patient.plot.dir, 'raw_fitted.txt', sep='/'))
+write.table(raw.data[,c('location','chrom','start','end',patient.info$Samplename)], sep='\t', quote=F, file=paste(patient.plot.dir, 'raw_counts.txt', sep='/'))
+
 
 #200216 filter dodgy regions
 exclude.file = grep('qDNAseq_blacklistedRegions.txt', data.files, value=T)

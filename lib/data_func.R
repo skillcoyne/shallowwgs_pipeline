@@ -21,17 +21,24 @@ logTransform<-function(x,inf=F) {
 }
   
 
-binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
+binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, plot.dir='.', metrics.file='binSWGS.out') {
   require(copynumber)
+  message(paste('Logging to',metrics.file))
+  
+  if (file.exists(metrics.file)) {
+    mfile = file(metrics.file, 'a')
+  } else {
+    mfile = file(metrics.file, 'w')
+  }
   
   if (is.null(blacklist)) 
     stop('QDNASeq blacklisted regions missing')
     
   countCols = grep('loc|feat|chr|start|end', colnames(fit.data), invert=T)
   
-  dim(fit.data)
-  dim(raw.data)
-  
+  write(paste('fit data ',paste(dim(fit.data), collapse=':')), mfile, append=T)
+  write(paste('raw data ',paste(dim(raw.data), collapse=':')), mfile, append=T)
+
   rows = which(fit.data[,1] %in% raw.data[,1])
   #raw.data = raw.data[rows,]
   fit.data = fit.data[rows,]
@@ -43,14 +50,14 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
   #corrected <- counts / fit
   #corrected[fit <= 0] <- 0
   negs = which(as.vector(as.matrix(fit.data[,countCols])) <= 0)
-  
-  #negs = apply(as.matrix(fit.data[,countCols]), 2, function(x) which(x<=0))
   if (length(negs) > 0) window.depths[negs] = 0
   
   window.depths = matrix(window.depths, ncol=length(countCols))  
   
   
   message(paste(nrow(blacklist), "genomic regions in the exclusion list."))
+  write(paste(nrow(blacklist), "genomic regions in the exclusion list."),mfile,append=T)
+
   fit.data$in.blacklist = F
   for(r in 1:nrow(blacklist)) {
     fit.data$in.blacklist[ fit.data$chrom == blacklist$chromosome[r] & 
@@ -58,6 +65,8 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
                            fit.data$end <= blacklist$end[r] ] = T
   }
   message(paste("# excluded probes = ",sum(fit.data$in.blacklist),sep=""))
+  write(paste("# excluded probes = ",sum(fit.data$in.blacklist),sep=""),mfile,append=T)
+  
   if (sum(fit.data$in.blacklist) <= 0)
     stop("There's an issue with the excluded list, no probes excluded.")
   
@@ -75,22 +84,54 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F) {
   sdevs[sdevs==0] = NA
   sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) 
   
+  write(paste('sdev=',signif(sdev,3),sep=''),mfile,append=T)
+  
   good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.na(sdevs)]))))
   gamma2=250 
 
   data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
   
   if (ncol(data) < 4) { # Single sample
+    write("Segmenting single sample",mfile,append=T)
     res = pcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
     colnames(res)[grep('mean', colnames(res))] = colnames(raw.data)[countCols]
     res$sampleID = NULL
   } else { # for most we have multiple samples
+    write(paste("Segmenting", (ncol(data)-4), "samples"),mfile,append=T)
     res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
   }
   
+  if (!is.null(min.probes) & !is.na(min.probes)) {
+    probes = which(res$n.probes < min.probes)
+    message(paste(round(length(probes)/nrow(res), 3), 'segments with fewer than', min.probes, '"probes"'))
+    write(paste(round(length(probes)/nrow(res), 3), 'segments with fewer than', min.probes, '"probes"'), mfile, append=T)
+  }
+  res = res[-probes,]
+  
+  chr.info = get.chr.lengths()
+  ylims = c(floor(range(res[,-c(1:5)])[1]), ceiling(range(res[,-c(1:5)])[2]))
+  for(col in which(!is.na(sdevs))) {
+    sample = colnames(res)[col+5]
+  
+    df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
+    df2 = cbind.data.frame('chrom'=res$chrom, 'start'=res$start.pos, 'end'=res$end.pos, 'seg.val'=res[,col+5])
+    
+    df$chrom = factor(df$chrom, levels=c(1:22), ordered=T)
+    df2$chrom = factor(df2$chrom, levels=c(1:22), ordered=T)
+
+    p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(ylims) + facet_grid(~chrom, space='free_x', scales='free_x') +
+      geom_point(data=df, aes(x=position, y=seg.cov), color='darkred', alpha=.4) +
+      geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green4', lwd=5) +
+      labs(y='segmented coverage', title=sample) + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
+
+    res$chrom = factor(res$chrom, levels=c(1:22), ordered=T)
+    ggsave(filename=paste(plotdir, paste(sample,'_segmented.png',sep=''), sep='/'), plot=p, height=8, width=10)
+  }
+  close(mfile)
   return(res)
 }
 
+## Should NAs be replace by per-sample mean value instead??
 prep.matrix<-function(dt, na.replace=0) {
   output = list()
   
@@ -137,11 +178,11 @@ load.segment.matrix<-function(segFile) {
  return(segment.matrix(dt))
 }
 
-unit.var <- function(x, mean=NULL, sd=NULL) {
+unit.var <- function(x, mean=NULL, sd=NULL, warn=F) {
   if ((is.null(mean) | is.null(sd)) || (is.na(mean) | is.na(sd))) {
     warning("No mean or sd provided.")
     if (length(x) == 1 | length(which(is.na(x))) == length(x) | sd(x, na.rm=T) == 0) {
-      warning("Unit normalization can't be performed with less than 2 samples or SD was 0")
+      if (warn) warning("Unit normalization can't be performed with less than 2 samples or SD was 0")
       return(x)
     } else {
       return( (x-mean(x,na.rm=T))/sd(x,na.rm=T) )
@@ -276,7 +317,7 @@ subtract.arms<-function(segments, arms) {
   segDF = makeGRangesFromDataFrame(seg.loc)
   
   tmp = segments
-  # subtract arms from 5e6 and merge both
+  # subtract arms from 5e6 and merge both (per sample)
   ov = findOverlaps(armsDF, segDF)
   for (hit in unique(queryHits(ov))) {
     cols = subjectHits(ov)[which(queryHits(ov) == hit)]
@@ -293,11 +334,12 @@ subtract.arms<-function(segments, arms) {
   return(mergedDf)  
 }
 
-get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='hg19') {
+get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='hg19', file=NULL) {
   require(plyr)
   
-  if (file.exists('hg19_info.txt')) {
-    chr.lengths = read.table('hg19_info.txt', header=T, sep='\t')
+  if (!is.null(file) && file.exists(file)) {
+    message("Reading from local file")
+    chr.lengths = read.table(file, header=T, sep='\t')
   } else {
     chr.lengths = read.table(paste('http://genome.ucsc.edu/goldenpath/help/', build, '.chrom.sizes',sep='') , sep='\t', header=F)
     colnames(chr.lengths) = c('chrom','chr.length')

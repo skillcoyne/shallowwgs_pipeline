@@ -72,10 +72,10 @@ if (length(raw) != nrow(sum.patient.data))
 #sum.patient.data = subset(sum.patient.data, Hospital.Research.ID != 'AHM0320')
 #patient.info = subset(patient.info, Hospital.Research.ID != 'AHM0320')
 
-arms = grep('arms', cleaned, value=T)
-segs = grep('arms', cleaned, invert=T, value=T)
+armFiles = grep('arms', cleaned, value=T)
+segFiles = grep('arms', cleaned, invert=T, value=T)
 
-length(segs) == length(arms)
+length(segFiles) == length(armFiles)
 
 # Get the SD, mean, and variance(?) per sample
 sampleVar = do.call(rbind, lapply(raw, function(f) {
@@ -91,7 +91,7 @@ sampleVar = do.call(rbind, lapply(raw, function(f) {
 }))
 
 # Load segment files
-tiled.segs = do.call(rbind, lapply(segs, function(f) {
+tiled.segs = do.call(rbind, lapply(segFiles, function(f) {
   fx = load.segment.matrix(f)
   fx
 }))
@@ -114,7 +114,7 @@ mn.cx = mean(cx.score)
 sd.cx = sd(cx.score)
 
 # Load arm files  
-tiled.arms = do.call(rbind, lapply(arms, function(f) {
+tiled.arms = do.call(rbind, lapply(armFiles, function(f) {
   fx = load.segment.matrix(f)
   fx
 }))
@@ -123,7 +123,6 @@ dim(tiled.arms)
 if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
 armsList = prep.matrix(tiled.arms)
 arms = armsList$matrix
-
 
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd

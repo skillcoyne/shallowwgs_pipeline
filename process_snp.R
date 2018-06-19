@@ -2,7 +2,13 @@ options(bitmapType = "cairo")
 
 args = commandArgs(trailingOnly=TRUE)
 
+if (length(args) < 1)
+  stop("Missing data directory")
+
 datadir = args[1]
+
+if (!dir.exists(datadir))
+  stop(paste(datadir, "doesn't exist or isn't readable"))
 
 print(datadir)
 
@@ -48,8 +54,10 @@ medianFilter <- function(x,k){
 
 suppressPackageStartupMessages( source('lib/data_func.R') )
 
-chr.info = get.chr.lengths()
+chr.info = get.chr.lengths(file='hg19_info.txt')[1:22,]
+
 if (is.null(chr.info)) stop("Failed to get chr info")
+chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
 
 #tf = list.files(datadir, 'tiled.txt', full.names = T)
 #if (length(tf) ==2 && length(which(sapply(tf, file.size ) < 4025)) <= 0) {
@@ -60,12 +68,36 @@ if (is.null(chr.info)) stop("Failed to get chr info")
   rm(ascat.pcf, ascat.gg, ascat.output)
   
   ## Adjust the sign of the log ratio so that CN gains result in a positive LRR.  This is more similar to what we get from sWGS
+  # Also, anything that's a deletion peg to -1
   segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
-  
-  
+  segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor <= 0, -1, medLRR))
+  segraw = subset(segraw, chr %in% c(1:22))
+  head(segraw)
   ## Winsorize, per sample, the adjusted log ratio values
   segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
   
+  #df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
+  
+  segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
+  
+  plist = list()
+  for (smp in unique(segraw$sample)) {
+    p = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + 
+      geom_segment(data=subset(segraw, sample == smp), aes(x=startpos, xend=endpos, y=adjustedLRR, yend=adjustedLRR), color='green4', lwd=3) +
+      labs(title=smp, x='') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
+    plist[[smp]] = p
+  }
+  ggsave(filename = '512-med.png', plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
+
+  plist = list()
+  for (smp in unique(segraw$sample)) {
+    p = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + 
+      geom_segment(data=subset(segraw, sample == smp), aes(x=startpos, xend=endpos, y=winsLRR, yend=winsLRR), color='green4', lwd=3) +
+      labs(title=smp, x='') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
+    plist[[smp]] = p
+  }
+  ggsave(filename = '512-wins.png', plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
+
   #qqnorm(subset(segraw, sample == segraw$sample[1])$adjustedLRR)
   #qqnorm(subset(segraw, sample == segraw$sample[1])$winsLRR)
   
@@ -83,7 +115,21 @@ if (is.null(chr.info)) stop("Failed to get chr info")
     allarms[,sample] = tiled.arms[,4]
     head(allsamples)
   }
+
+  plist = list()  
+  for (smp in unique(segraw$sample)) {
+    print(smp)
+    df = as.data.frame(allsamples[,c('chr','start','end',smp)])
+    colnames(df)[4] = 'logR'
+    head(df)
+    plist[[smp]] = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + ylim(-1,1) +
+      geom_segment(data=df, aes(x=start, xend=end, y=logR, yend=logR), color='green4', lwd=3) +
+      labs(title=smp, x='tiled') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
+  }
+  ggsave(filename = '512-tiled.png', plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
   
+  
+    
   write.table(allsamples, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_tiled.txt', sep=''))
   write.table(allarms, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_arms_tiled.txt', sep=''))
 #}

@@ -160,30 +160,33 @@ coef.stability<-function(opt, nz.list) {
 }
 
 create.patient.sets<-function(pts, n, splits, minR=0.2) {
+  
   # This function just makes sure the sets don't become too unbalanced with regards to the labels.
   pts$label = 0
   pts[which(pts$Status == 'P'), 'label'] = 1
+
+  uniquePtID = colnames(pts)[1]
 
   check.sets<-function(df, grpCol, min) {
     sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=df$label))
     while ( (length(which(sets/rowSums(sets) < minR) ) >= 2 | length(which(sets/rowSums(sets) == 0)) > 0) ) {
       print(sets/rowSums(sets))
-      s = sample(rep(seq(5), length = length(unique(df$Hospital.Research.ID))))
-      df2 = merge(df, cbind('Hospital.Research.ID'=unique(df$Hospital.Research.ID), 'tmpgrp'=s), by="Hospital.Research.ID")
+      s = sample(rep(seq(5), length = length(unique(df[[uniquePtID]]))))
+      df2 = merge(df, cbind(unique(df[[uniquePtID]]), 'tmpgrp'=s), by=1)
       df[[grpCol]] = df2$tmpgrp
       sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=df$label))
     }
     return(df[[grpCol]])
   }
   
-  s = sample(rep(seq(splits), length = length(unique(pts$Hospital.Research.ID))))
-  patients = merge(pts, cbind('Hospital.Research.ID'=unique(pts$Hospital.Research.ID), 'group'=s), by="Hospital.Research.ID")  
+  s = sample(rep(seq(splits), length = length(unique(pts[[uniquePtID]]))))
+  patients = merge(pts, cbind(unique(pts[[uniquePtID]]), 'group'=s), by=1)  
   colnames(patients)[5] = c('fold.1')
   patients$fold.1 = check.sets(patients, 'fold.1', minR)
   
   for (i in 2:n) {
-    s = sample(rep(seq(5), length = length(unique(pts$Hospital.Research.ID))))
-    patients = merge(patients, cbind('Hospital.Research.ID'=unique(patients$Hospital.Research.ID), 'group'=s), by="Hospital.Research.ID")  
+    s = sample(rep(seq(5), length = length(unique(pts[[uniquePtID]]))))
+    patients = merge(patients, cbind(unique(patients[[uniquePtID]]), 'group'=s), by=1)  
     foldcol = grep('group',colnames(patients))
     colnames(patients)[foldcol] = paste('fold',i,sep='.')
     patients[[paste('fold',i,sep='.')]] = check.sets(patients, paste('fold',i,sep='.'))

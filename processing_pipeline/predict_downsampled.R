@@ -2,7 +2,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 1)
-  stop("Missing required params: <data dir> <model dir> <out dir> ")
+  stop("Missing required params: <data dir> <model dir> ")
 
 
 library(ggplot2)
@@ -12,7 +12,6 @@ library(glmnet)
 source('../lib/data_func.R')
 source('../lib/load_patient_metadata.R')
 
-chrlen = get.chr.lengths()
 
 adjustRisk <- function(RR, offset, type='risk') {
   if (type == 'prob') {
@@ -35,7 +34,7 @@ if (length(args) > 2) logT = as.logical(args[3])
 #modeldir = '~/Data/Ellie/Analysis/5e6_arms_all_logR'
 
 #dir = '~/Data/Ellie/Analysis/VAL_Cohort/'
-files = list.files(dir, full.names=T)
+files = list.files(dir, '.txt', full.names=T)
 
 file = paste(modeldir, 'model_data.Rdata', sep='/')
 if (!file.exists(file))
@@ -60,7 +59,6 @@ rm(plots, coefs, nzcoefs, fits)
 
 pg.samp = do.call(rbind, pg.samp)
 pg.samp$Hospital.Research.ID = NULL
-
 status = unique(pg.samp[,c('Patient','Status')])$Status
 
 cases = table(status)['P']
@@ -70,6 +68,8 @@ offsetMean = log(cases/m)
 sampleNames = sub('_raw.txt', '', basename(files))
 dspred = data.frame(matrix(ncol=4, nrow=length(sampleNames), dimnames=list(sampleNames,c('Prob','RR', 'Adj.Prob','Adj.RR'))))
 
+chrlen = get.chr.lengths(file='hg19_info.txt')
+
 for (n in 1:length(files)) {
   print(n)
   print(sampleNames[n])
@@ -78,15 +78,23 @@ for (n in 1:length(files)) {
   if (ncol(rs) < 4)
     stop("File needs to contain 4 columns: chr, start, end, sample_value")
   
+  head(rs)
+  ggplot(rs) + facet_grid(~chrom) + geom_segment(aes(x=start.pos, xend=end.pos, y=rs[,6], yend=rs[,6]), size=3)
+  
   tiled.segs <- tile.segmented.data(rs, size=5e6, chr.info=chrlen)
   tiled.segs = segment.matrix(tiled.segs)
+  tiled.segs[is.na(tiled.segs)] = mean(tiled.segs,na.rm=T)
   if (logT) tiled.segs = t(apply(tiled.segs, 1, logTransform))
+
+  ggplot(melt(tiled.segs), aes(Var2, value)) + geom_point()
+    
   
   for (i in 1:ncol(tiled.segs)) 
     tiled.segs[,i] = unit.var(tiled.segs[,i], z.mean[i], z.sd[i])
   
   tiled.arms <- tile.segmented.data(rs, size='arms', chr.info=chrlen)
   tiled.arms = segment.matrix(tiled.arms)
+  tiled.arms[is.na(tiled.arms)] = mean(tiled.arms,na.rm=T)
   if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
   
   for (i in 1:ncol(tiled.arms)) 
@@ -112,7 +120,7 @@ for (n in 1:length(files)) {
   print(dspred[1:n,])
 }
 
-save(dspred, file='dowsampled_predictions.Rdata')
+#save(dspred, file='dowsampled_predictions.Rdata')
 save(dspred, file=paste(dir, 'predictions.Rdata', sep='/'))
 
 #load(paste(dir, 'predictions.Rdata', sep='/'), verbose=T)
@@ -126,21 +134,6 @@ unadjRisk
 m = melt(dspred, measure.vars=c('RR','Adj.RR'))
 unadjRisk + geom_point(data=m, aes(x=value,y=Adj.Prob*30, color=variable))
   
-ids = readxl::read_excel('~/Data/Ellie/Analysis/downsampled_ids.xlsx', sheet=1)
-
-x = base::merge(ids, dspred, by.x='Illumina ID', by.y='row.names')
-
-table(subset(x, `Expected Risk` == 'High')$Prob >= 0.7)
-table(subset(x, `Expected Risk` == 'Low')$Prob <= 0.4)
-
-table(subset(x, Tissue == 'Normal')$Prob <= 0.4)
-subset(x, Tissue == 'Normal' & Prob > 0.4)
-
-table(subset(x, Tissue == 'Barretts' & Study == 'OCCAMS')$Prob >= 0.7)
-
-table(subset(x, `Expected Risk` == 'High' & Study == 'Annalise')$Prob >= 0.7)
-table(subset(x, `Expected Risk` == 'Low' & Study == 'Annalise')$Prob <= 0.4)
-
 
 
 
