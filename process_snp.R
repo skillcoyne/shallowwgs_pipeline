@@ -72,8 +72,9 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   
   ## Adjust the sign of the log ratio so that CN gains result in a positive LRR.  This is more similar to what we get from sWGS
   # Also, anything that's a deletion peg to -1
-  segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
-  segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor <= 0, -1, medLRR))
+  #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
+  segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR)*(nMajor+nMinor), medLRR))
+  #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor <= 0, -1, medLRR))
   segraw = subset(segraw, chr %in% c(1:22))
   #head(segraw)
   ## Winsorize, per sample, the adjusted log ratio values
