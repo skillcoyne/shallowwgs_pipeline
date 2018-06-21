@@ -1,5 +1,8 @@
 options(bitmapType = "cairo")
 
+library(ggplot2)
+library(gridExtra)
+
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 1)
@@ -72,13 +75,16 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
   segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor <= 0, -1, medLRR))
   segraw = subset(segraw, chr %in% c(1:22))
-  head(segraw)
+  #head(segraw)
   ## Winsorize, per sample, the adjusted log ratio values
   segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
   
   #df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
   
   segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
+  
+  plotdir = paste(datadir,'/plots', sep='')
+  dir.create(plotdir, showWarnings = F, recursive = T)
   
   plist = list()
   for (smp in unique(segraw$sample)) {
@@ -87,7 +93,7 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
       labs(title=smp, x='') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
     plist[[smp]] = p
   }
-  ggsave(filename = '512-med.png', plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
+  ggsave(filename = paste(plotdir,'medLRR.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
 
   plist = list()
   for (smp in unique(segraw$sample)) {
@@ -96,7 +102,7 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
       labs(title=smp, x='') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
     plist[[smp]] = p
   }
-  ggsave(filename = '512-wins.png', plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
+  ggsave(filename = paste(plotdir,'winsLRR.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
 
   #qqnorm(subset(segraw, sample == segraw$sample[1])$adjustedLRR)
   #qqnorm(subset(segraw, sample == segraw$sample[1])$winsLRR)
@@ -126,7 +132,7 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
       geom_segment(data=df, aes(x=start, xend=end, y=logR, yend=logR), color='green4', lwd=3) +
       labs(title=smp, x='tiled') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
   }
-  ggsave(filename = '512-tiled.png', plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
+  ggsave(filename = paste(plotdir,'tiled.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
   
   
     
