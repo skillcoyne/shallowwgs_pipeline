@@ -113,7 +113,7 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   plist = list()
   for (smp in unique(segraw$sample)) {
     p = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + 
-      geom_segment(data=subset(segraw, sample == smp), aes(x=startpos, xend=endpos, y=totalRaw, yend=totalRaw), color='green4', lwd=3) +
+      geom_segment(data=subset(segraw, sample == smp), aes(x=startpos, xend=endpos, y=medLRR, yend=medLRR), color='green4', lwd=3) +
       labs(title=smp, x='') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
     plist[[smp]] = p
   }
