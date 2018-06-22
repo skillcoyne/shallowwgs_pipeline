@@ -73,12 +73,13 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   ## Adjust the sign of the log ratio so that CN gains result in a positive LRR.  This is more similar to what we get from sWGS
   # Also, anything that's a deletion peg to -1
   #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
-  segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR)*(nMajor+nMinor), medLRR))
+  #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR)*(nMajor+nMinor), medLRR))
   #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor <= 0, -1, medLRR))
   segraw = subset(segraw, chr %in% c(1:22))
+  segraw = segraw %>% dplyr::mutate( totalRaw = (nAraw+nBraw)/2 )
   #head(segraw)
   ## Winsorize, per sample, the adjusted log ratio values
-  segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
+  #segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
   
   #df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
   
@@ -90,34 +91,23 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   plist = list()
   for (smp in unique(segraw$sample)) {
     p = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + 
-      geom_segment(data=subset(segraw, sample == smp), aes(x=startpos, xend=endpos, y=adjustedLRR, yend=adjustedLRR), color='green4', lwd=3) +
+      geom_segment(data=subset(segraw, sample == smp), aes(x=startpos, xend=endpos, y=totalRaw, yend=totalRaw), color='green4', lwd=3) +
       labs(title=smp, x='') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
     plist[[smp]] = p
   }
   ggsave(filename = paste(plotdir,'medLRR.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
 
-  plist = list()
-  for (smp in unique(segraw$sample)) {
-    p = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + 
-      geom_segment(data=subset(segraw, sample == smp), aes(x=startpos, xend=endpos, y=winsLRR, yend=winsLRR), color='green4', lwd=3) +
-      labs(title=smp, x='') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
-    plist[[smp]] = p
-  }
-  ggsave(filename = paste(plotdir,'winsLRR.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
 
-  #qqnorm(subset(segraw, sample == segraw$sample[1])$adjustedLRR)
-  #qqnorm(subset(segraw, sample == segraw$sample[1])$winsLRR)
-  
   allsamples = NULL
   allarms = NULL
   for (sample in unique(segraw$sample)) {
     print(sample)
     df = segraw[which(segraw$sample == sample),]
-    tiled = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], chr.info=chr.info, verbose=T)
+    tiled = tile.segmented.data(df[c('chr','startpos','endpos','totalRaw')], chr.info=chr.info, verbose=T)
     if (is.null(allsamples)) allsamples = tiled[c(1:3)]
     allsamples[,sample] = tiled[,4]
     
-    tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], size='arms', chr.info=chr.info, verbose=T)
+    tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','totalRaw')], size='arms', chr.info=chr.info, verbose=T)
     if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
     allarms[,sample] = tiled.arms[,4]
     head(allsamples)
@@ -127,10 +117,10 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   for (smp in unique(segraw$sample)) {
     print(smp)
     df = as.data.frame(allsamples[,c('chr','start','end',smp)])
-    colnames(df)[4] = 'logR'
+    colnames(df)[4] = 'rawCN'
     head(df)
     plist[[smp]] = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + ylim(-1,1) +
-      geom_segment(data=df, aes(x=start, xend=end, y=logR, yend=logR), color='green4', lwd=3) +
+      geom_segment(data=df, aes(x=start, xend=end, y=rawCN, yend=rawCN), color='green4', lwd=3) +
       labs(title=smp, x='tiled') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
   }
   ggsave(filename = paste(plotdir,'tiled.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)

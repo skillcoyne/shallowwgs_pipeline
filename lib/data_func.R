@@ -150,7 +150,7 @@ prep.matrix<-function(dt, na.replace=0) {
   return(output)
 }
 
-segment.matrix<-function(dt) {
+segment.matrix<-function(dt, na.replace='mean') {
   dt = as.data.frame(dt)
   
   chrCol = grep('chr',colnames(dt),ignore.case=T)
@@ -166,7 +166,16 @@ segment.matrix<-function(dt) {
   dt = as.matrix(dt[,-c(chrCol, startCol, endCol)])
   rownames(dt) = rows
   colnames(dt) = cols
-  return( t(dt) )
+  dt = t(dt)
+  
+  if (na.replace == 'mean') {
+    dt[is.na(dt)] = mean(dt,na.rm=T)
+  } else if (na.replace == 'median') {
+    dt[is.na(dt)] = median(dt,na.rm=T)
+  } else {
+    dt[is.na(dt)] = 0
+  }
+  return( dt )
 }
 
 load.segment.matrix<-function(segFile) {
@@ -196,7 +205,7 @@ unit.var <- function(x, mean=NULL, sd=NULL, warn=F) {
 
 score.cx <- function(df, MARGIN) {  
   cx = apply(df, MARGIN, function(x) {
-    length(which(x >= sd(x,na.rm=T)*2 | x <= -sd(x,na.rm=T)*2))
+    length(which(x >= mean(x,na.rm=T)+sd(x,na.rm=T)*2 | x <= mean(x,na.rm=T)-sd(x,na.rm=T)*2))
   })
   return(cx)
 }
