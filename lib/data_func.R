@@ -175,6 +175,10 @@ segment.matrix<-function(dt, na.replace='mean') {
   } else {
     dt[is.na(dt)] = 0
   }
+  
+  
+  
+  
   return( dt )
 }
 
@@ -295,6 +299,8 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL, verbose=F) {
       mergedDf[rows, names(values)] = values
     }
   }
+  
+
   message(paste("Mean number of CN segments per genome bin:", round(mean(meanSegs, na.rm=T), 2), "median:", round(median(meanSegs, na.rm=T), 2)))
   
   # Not sure if this should be NA or 0

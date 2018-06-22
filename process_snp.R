@@ -57,6 +57,23 @@ medianFilter <- function(x,k){
 
 suppressPackageStartupMessages( source('lib/data_func.R') )
 
+lrr.rules<-function(medLRR, totalCN) {
+  LRR = jitter(medlrrs[as.character(totalCN)])
+  if (totalCN <= 1) jitter(medlrrs['1'], factor=50)
+  if (totalCN == 2) LRR = abs(medLRR)*2
+  if (totalCN > 2 & totalCN < 10) LRR = (abs(medLRR)+medlrrs[as.character(totalCN)])*totalCN^2
+  if (totalCN >= 10) LRR = jitter(medlrrs['10']*10, factor=20)
+  LRR
+}
+load('/Volumes/fh/fast/reid_b/collab/Killcoyne/SNP_R/allpts_ascat.Rdata', verbose=T)
+
+all = do.call(rbind, segments.list)
+all = all %>% rowwise() %>% dplyr::mutate( total=nMajor+nMinor )
+y = all %>% group_by(total) %>% dplyr::summarise( median(medLRR), sd(medLRR), var(medLRR) )
+medlrrs = y$`median(medLRR)`
+names(medlrrs) = as.character(y$total)
+
+
 chr.info = get.chr.lengths(file='hg19_info.txt')[1:22,]
 
 if (is.null(chr.info)) stop("Failed to get chr info")
@@ -76,10 +93,16 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR)*(nMajor+nMinor), medLRR))
   #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor <= 0, -1, medLRR))
   segraw = subset(segraw, chr %in% c(1:22))
-  segraw = segraw %>% dplyr::mutate( totalRaw = (nAraw+nBraw)/2 )
+  #segraw = segraw %>% dplyr::mutate( totalRaw = (nAraw+nBraw)/2 )
+  
+  segraw = segraw %>% rowwise() %>% dplyr::mutate(
+    adjustedLRR = lrr.rules(medLRR, nMajor+nMinor),
+    LRR3 = (nAraw + nBraw)/2
+  )
+
   #head(segraw)
   ## Winsorize, per sample, the adjusted log ratio values
-  #segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
+  segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
   
   #df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
   
