@@ -126,11 +126,11 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   for (sample in unique(segraw$sample)) {
     print(sample)
     df = segraw[which(segraw$sample == sample),]
-    tiled = tile.segmented.data(df[c('chr','startpos','endpos','totalRaw')], chr.info=chr.info, verbose=T)
+    tiled = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], chr.info=chr.info, verbose=T)
     if (is.null(allsamples)) allsamples = tiled[c(1:3)]
     allsamples[,sample] = tiled[,4]
     
-    tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','totalRaw')], size='arms', chr.info=chr.info, verbose=T)
+    tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], size='arms', chr.info=chr.info, verbose=T)
     if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
     allarms[,sample] = tiled.arms[,4]
     head(allsamples)
