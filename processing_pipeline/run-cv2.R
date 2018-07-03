@@ -97,6 +97,9 @@ tiled.segs = do.call(rbind, lapply(segFiles, function(f) {
 }))
 dim(tiled.segs)
 
+ggplot(melt(tiled.segs), aes(Var2, value)) + geom_point()
+
+
 ## Log?
 if (logT) tiled.segs = t(apply(tiled.segs, 1, logTransform))
 

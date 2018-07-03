@@ -150,7 +150,7 @@ prep.matrix<-function(dt, na.replace=0) {
   return(output)
 }
 
-segment.matrix<-function(dt, na.replace='mean') {
+segment.matrix<-function(dt, na.replace='mean',samplenames=NULL) {
   dt = as.data.frame(dt)
   
   chrCol = grep('chr',colnames(dt),ignore.case=T)
@@ -165,7 +165,11 @@ segment.matrix<-function(dt, na.replace='mean') {
   
   dt = as.matrix(dt[,-c(chrCol, startCol, endCol)])
   rownames(dt) = rows
+  
   colnames(dt) = cols
+  if (!is.null(samplenames) & length(samplenames) == ncol(dt))
+    colnames(dt) = samplenames
+  
   dt = t(dt)
   
   if (na.replace == 'mean') {
@@ -284,9 +288,7 @@ tile.segmented.data<-function(data, size=5e6, chr.info=NULL, verbose=F) {
       bin = currentChr[i]
       
       segments = gr[subjectHits(curov[queryHits(curov) == i])]
-      weights = sapply(as(segments,'GRangesList'),function(r) {
-        width(pintersect(bin, r))/width(bin)
-      })
+      weights = sapply(as(segments,'GRangesList'),function(r) width(pintersect(bin, r))/width(bin) )
       
       rows = with(mergedDf, which( chr==as.character(seqnames(bin)) & start == start(bin) & end == end(bin)))
       if (length(segments) > 1 & verbose) 

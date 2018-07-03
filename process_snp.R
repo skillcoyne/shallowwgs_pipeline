@@ -5,15 +5,29 @@ library(gridExtra)
 
 args = commandArgs(trailingOnly=TRUE)
 
-if (length(args) < 1)
-  stop("Missing data directory")
+if (length(args) < 2)
+  stop("Missing data directory or summary file")
 
 datadir = args[1]
+summary.file = args[2]
+
 
 if (!dir.exists(datadir))
   stop(paste(datadir, "doesn't exist or isn't readable"))
 
 print(datadir)
+print(summary.file)
+
+smy = read.table(summary.file, sep = '\t', header = T)
+smy = subset(smy, Copy.number <= 12)
+
+a = as.data.frame(smy[,c('Copy.number','var.LRR')])
+colnames(a) = c('x','y')
+b = as.data.frame(smy[,c('Copy.number','median.LRR')])
+colnames(b) = c('x','y')
+
+fitSD = lm(y~x, data=a)
+fitM = lm(y~x, data=b)
 
 ### Lifted directly from ASCAT
 #Perform MAD winsorization:
@@ -87,12 +101,16 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   segraw = ascat.output$segments_raw
   rm(ascat.pcf, ascat.gg, ascat.output)
   
+  segraw = subset(segraw, chr %in% c(1:22))
+  segraw = segraw %>% rowwise() %>% dplyr::mutate( total = nMajor+nMinor )
+  
+  
   ## Adjust the sign of the log ratio so that CN gains result in a positive LRR.  This is more similar to what we get from sWGS
   # Also, anything that's a deletion peg to -1
   #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR), medLRR))
-  segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR)*(nAraw+nBraw), medLRR))
-  segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor <= 1, jitter(-2, amount=1), medLRR))
-  segraw = subset(segraw, chr %in% c(1:22))
+  #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor > 2, abs(medLRR)*(nAraw+nBraw), medLRR))
+  #segraw = segraw %>% rowwise() %>% dplyr::mutate( adjustedLRR = ifelse(nMajor+nMinor <= 1, jitter(-2, amount=1), medLRR))
+  #segraw = subset(segraw, chr %in% c(1:22))
   #segraw = segraw %>% dplyr::mutate( totalRaw = (nAraw+nBraw)/2 )
   
   # segraw = segraw %>% rowwise() %>% dplyr::mutate(
@@ -101,8 +119,19 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
 
   #head(segraw)
   ## Winsorize, per sample, the adjusted log ratio values
-  segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
+  #segraw = segraw %>% group_by(sample) %>% dplyr::mutate( winsLRR = madWins(adjustedLRR,2.5,25)$ywin )
   
+  segraw$adjLRR = NA
+  for (cn in unique(segraw$total)) {
+    rows = which(segraw$total == cn)
+    values = segraw[rows, 'medLRR', drop=T]
+    
+    newM = predict(fitM, newdata=cbind.data.frame('x'=cn))
+    newSD = predict(fitSD, newdata=cbind.data.frame('x'=cn))
+    
+    segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+  }  
+
   #df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
   
   segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
@@ -110,21 +139,19 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
   plotdir = paste(datadir,'/plots', sep='')
   dir.create(plotdir, showWarnings = F, recursive = T)
   
-  plist = list()
-  for (smp in unique(segraw$sample)) {
-    p = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + 
-      geom_segment(data=subset(segraw, sample == smp), aes(x=startpos, xend=endpos, y=medLRR, yend=medLRR), color='green4', lwd=3) +
-      labs(title=smp, x='') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
-    plist[[smp]] = p
-  }
-  ggsave(filename = paste(plotdir,'medLRR.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
-
+  m = (melt(segraw, measure.vars=c('medLRR','adjLRR')))
+  ggsave(filename= paste(plotdir,'medLRR.png',sep='/'),
+         plot=ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot(), 
+         width=9, height=7)
 
   allsamples = NULL
   allarms = NULL
   for (sample in unique(segraw$sample)) {
     print(sample)
     df = segraw[which(segraw$sample == sample),]
+    
+    df$winsLRR = madWins(df$adjLRR,2.5,25)$ywin
+
     tiled = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], chr.info=chr.info, verbose=T)
     if (is.null(allsamples)) allsamples = tiled[c(1:3)]
     allsamples[,sample] = tiled[,4]
@@ -132,23 +159,20 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
     tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], size='arms', chr.info=chr.info, verbose=T)
     if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
     allarms[,sample] = tiled.arms[,4]
-    head(allsamples)
   }
 
   plist = list()  
   for (smp in unique(segraw$sample)) {
     print(smp)
     df = as.data.frame(allsamples[,c('chr','start','end',smp)])
-    colnames(df)[4] = 'rawCN'
+    colnames(df)[4] = 'CN'
     head(df)
     plist[[smp]] = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(~chr, space='free_x', scales='free_x') + ylim(-1,1) +
-      geom_segment(data=df, aes(x=start, xend=end, y=rawCN, yend=rawCN), color='green4', lwd=3) +
+      geom_segment(data=df, aes(x=start, xend=end, y=CN, yend=CN), color='green4', lwd=3) +
       labs(title=smp, x='tiled') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
   }
   ggsave(filename = paste(plotdir,'tiled.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=25)
   
-  
-    
   write.table(allsamples, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_tiled.txt', sep=''))
   write.table(allarms, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_arms_tiled.txt', sep=''))
 #}
