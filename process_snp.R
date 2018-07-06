@@ -3,6 +3,9 @@ options(bitmapType = "cairo")
 library(ggplot2)
 library(gridExtra)
 
+suppressPackageStartupMessages( source('lib/data_func.R') )
+#suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
+
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 2)
@@ -72,9 +75,8 @@ medianFilter <- function(x,k){
 }
 ### ---------------------- ###
 
-suppressPackageStartupMessages( source('lib/data_func.R') )
 
-chr.info = get.chr.lengths(file='hg19_info.txt')[1:22,]
+chr.info = get.chr.lengths(file='~/tmp/hg19_info.txt')[1:22,]
 
 if (is.null(chr.info)) stop("Failed to get chr info")
 chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
