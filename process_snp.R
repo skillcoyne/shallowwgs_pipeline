@@ -133,7 +133,7 @@ if (byEndo) {
   names(rowsPerSample) = apply(unique(info[,c(1,3)]), 1, paste, collapse='_')
   
   if (length(normal) > 0) {
-    nm = info[grep(paste(info$PatientID[1],'.*(BLD|Gastric)', sep=''), samples),]
+    nm = info[grep(paste(info$PatientID[1],'.*(BLD|Gastric)', sep=''), samples, ignore.case=T),]
 		rowsPerSample[[ paste(nm$PatientID, toupper(nm$Level), sep='_') ]] = normal
   }
   rowsPerSample = rowsPerSample[ which(sapply(rowsPerSample, length) > 0) ]
