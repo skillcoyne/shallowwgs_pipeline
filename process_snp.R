@@ -132,8 +132,10 @@ if (byEndo) {
   rowsPerSample = lapply(endoMatch, grep, segraw$sample)
   names(rowsPerSample) = apply(unique(info[,c(1,3)]), 1, paste, collapse='_')
   
-  if (length(normal) > 0)
-		rowsPerSample[[ paste(info$PatientID[1], toupper(info$Level[1]), sep='_') ]] = normal
+  if (length(normal) > 0) {
+    nm = info[grep(paste(info$PatientID[1],'.*(BLD|Gastric)', sep=''), samples),]
+		rowsPerSample[[ paste(nm$PatientID, toupper(nm$Level), sep='_') ]] = normal
+  }
   rowsPerSample = rowsPerSample[ which(sapply(rowsPerSample, length) > 0) ]
 }
 
