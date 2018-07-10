@@ -356,7 +356,7 @@ get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='
   
   if (!is.null(file) && file.exists(file)) {
     message("Reading from local file")
-    chr.lengths = read.table(file, header=T, sep='\t')
+    chr.lengths = read.table(file, header=T, sep='\t', stringsAsFactors=F)
   } else {
     chr.lengths = read.table(paste('http://genome.ucsc.edu/goldenpath/help/', build, '.chrom.sizes',sep='') , sep='\t', header=F)
     colnames(chr.lengths) = c('chrom','chr.length')

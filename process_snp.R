@@ -3,8 +3,8 @@ options(bitmapType = "cairo")
 library(ggplot2)
 library(gridExtra)
 
-suppressPackageStartupMessages( source('lib/data_func.R') )
-#suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
+#suppressPackageStartupMessages( source('lib/data_func.R') )
+suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
 
 args = commandArgs(trailingOnly=TRUE)
 
@@ -77,7 +77,7 @@ medianFilter <- function(x,k){
 
 
 chr.info = get.chr.lengths(file='~/tmp/hg19_info.txt')[1:22,]
-
+print(chr.info)
 if (is.null(chr.info)) stop("Failed to get chr info")
 chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
 
@@ -124,14 +124,17 @@ rownames(info) = samples
 
 rowsPerSample = lapply(samples, grep, segraw$sample)
 names(rowsPerSample) = samples
-
+print(samples)
 if (byEndo) {
   normal = grep( paste(info$PatientID[1],'.*(BLD|Gastric)', sep=''), segraw$sample, ignore.case=T)
   endoMatch = c( paste(apply(unique(info[,c(1,3)]), 1, paste, collapse='_.*_'), '_\\d+', sep=''  ) )
-
+  print(endoMatch)
   rowsPerSample = lapply(endoMatch, grep, segraw$sample)
   names(rowsPerSample) = apply(unique(info[,c(1,3)]), 1, paste, collapse='_')
-  rowsPerSample[[ paste(info$PatientID[1], toupper(info$Level[1]), sep='_') ]] = normal
+  
+  if (length(normal) > 0)
+		rowsPerSample[[ paste(info$PatientID[1], toupper(info$Level[1]), sep='_') ]] = normal
+  rowsPerSample = rowsPerSample[ which(sapply(rowsPerSample, length) > 0) ]
 }
 
 
@@ -145,17 +148,17 @@ for (i in 1:length(rowsPerSample)) {
   
   df$winsLRR = madWins(df$adjLRR,2.5,25)$ywin
   
-  tiled = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], chr.info=chr.info, verbose=T)
+  tiled = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], chr.info=chr.info, verbose=F)
   if (is.null(allsamples)) allsamples = tiled[c(1:3)]
   allsamples[,names(rowsPerSample)[i]] = tiled[,4]
   
-  tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], size='arms', chr.info=chr.info, verbose=T)
+  tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], size='arms', chr.info=chr.info, verbose=F)
   if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
   allarms[,names(rowsPerSample)[i]] = tiled.arms[,4]
   
   lims = c(-1,1)
-  if (max(tiled$winsLRR) > 1) lims[2] = max(tiled$winsLRR)
-  if (min(tiled$winsLRR) < -1) lims[1] = min(tiled$winsLRR)
+  if (max(tiled$winsLRR,na.rm=T) > 1) lims[2] = max(tiled$winsLRR,na.rm=T)
+  if (min(tiled$winsLRR,na.rm=T) < -1) lims[1] = min(tiled$winsLRR,na.rT)
   tiled$chr = factor(tiled$chr, levels=chr.info$chr)
 
   p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(lims) + facet_grid(~chr,space='free_x',scales='free_x') + geom_segment(data=tiled, aes(x=start,xend=end,y=winsLRR,yend=winsLRR), size=3, color='darkgreen') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) + labs(x='', title=names(rowsPerSample)[i])
