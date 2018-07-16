@@ -32,8 +32,9 @@ colnames(a) = c('x','y')
 b = as.data.frame(smy[,c('Copy.number','median.LRR')])
 colnames(b) = c('x','y')
 
-fitSD = lm(y~x, data=a)
-fitM = lm(y~x, data=b)
+#fitSD = lm(y~x, data=a)
+#fitM = lm(y~x, data=b)
+fitCN = lm(y~x, data=b)
 
 ### Lifted directly from ASCAT
 #Perform MAD winsorization:
@@ -93,28 +94,38 @@ segraw = segraw %>% rowwise() %>% dplyr::mutate( total = nMajor+nMinor )
 
 # Adjust based on the summary values per CN that we get in WGS (mostly) NP Barrett's cases
 segraw$adjLRR = NA
-for (cn in unique(segraw$total)) {
-  rows = which(segraw$total == cn)
-  values = segraw[rows, 'medLRR', drop=T]
+# for (cn in unique(segraw$total)) {
+#   rows = which(segraw$total == cn)
+#   values = segraw[rows, 'medLRR', drop=T]
+#   
+#   newM = mean(values)
+#   newSD = sd(values)
+#   
+#   if (cn < 2) {
+#     newM = predict(fitM, newdata=cbind.data.frame('x'=cn))
+#     newSD = predict(fitSD, newdata=cbind.data.frame('x'=cn))
+#    # segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+#   #}
+#   # if (cn < 2) {
+#   #   direction = ifelse(meanV < 0, -1, 1)
+#   #   newM = meanV + newM
+#    } else if (cn > 2) {
+#      #newM = meanV + newM
+#      #newSD = sdV + newSD
+#    }
+#   segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+#   #segraw[rows,][['adjLRR']] = values
+# }  
+
+adjust.segraw<-function(segraw) {
+  segraw$total = with(segraw, nAraw+nBraw)
+  segraw = subset(segraw, chr %in% c(1:22))
   
-  newM = mean(values)
-  newSD = sd(values)
-  
-  if (cn < 2) {
-    newM = predict(fitM, newdata=cbind.data.frame('x'=cn))
-    newSD = predict(fitSD, newdata=cbind.data.frame('x'=cn))
-   # segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-  #}
-  # if (cn < 2) {
-  #   direction = ifelse(meanV < 0, -1, 1)
-  #   newM = meanV + newM
-   } else if (cn > 2) {
-     #newM = meanV + newM
-     #newSD = sdV + newSD
-   }
-  segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-  #segraw[rows,][['adjLRR']] = values
-}  
+  segraw$adjLRR = NA
+  new = predict(fitCN, newdata=cbind.data.frame('x'=segraw$total))
+  segraw[,'adjLRR'] = scale(new,center=T)
+  return(segraw)
+}
 
 segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
 
@@ -122,6 +133,7 @@ plotdir = paste(datadir,'/plots', sep='')
 dir.create(plotdir, showWarnings = F, recursive = T)
 
 m = (melt(segraw, measure.vars=c('medLRR','adjLRR')))
+m$total = round(round(m$total,1))
 ggsave(filename= paste(plotdir,'medLRR.png',sep='/'),
        plot=ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot() + labs(title=basename(datadir)), 
        width=9, height=7)
