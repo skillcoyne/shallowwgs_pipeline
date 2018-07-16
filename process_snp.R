@@ -97,10 +97,23 @@ for (cn in unique(segraw$total)) {
   rows = which(segraw$total == cn)
   values = segraw[rows, 'medLRR', drop=T]
   
-  newM = predict(fitM, newdata=cbind.data.frame('x'=cn))
-  newSD = predict(fitSD, newdata=cbind.data.frame('x'=cn))
+  newM = mean(values)
+  newSD = sd(values)
   
+  if (cn < 2) {
+    newM = predict(fitM, newdata=cbind.data.frame('x'=cn))
+    newSD = predict(fitSD, newdata=cbind.data.frame('x'=cn))
+   # segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+  #}
+  # if (cn < 2) {
+  #   direction = ifelse(meanV < 0, -1, 1)
+  #   newM = meanV + newM
+   } else if (cn > 2) {
+     #newM = meanV + newM
+     #newSD = sdV + newSD
+   }
   segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+  #segraw[rows,][['adjLRR']] = values
 }  
 
 segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
@@ -110,8 +123,10 @@ dir.create(plotdir, showWarnings = F, recursive = T)
 
 m = (melt(segraw, measure.vars=c('medLRR','adjLRR')))
 ggsave(filename= paste(plotdir,'medLRR.png',sep='/'),
-       plot=ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot(), 
+       plot=ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot() + labs(title=basename(datadir)), 
        width=9, height=7)
+save(segraw, file=paste(datadir, 'segments_raw.Rdata',sep='/'))
+
 
 allsamples = NULL
 allarms = NULL
