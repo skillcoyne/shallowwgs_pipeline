@@ -36,7 +36,7 @@ fitSD = lm(y~CN, data=a)
 fitM = lm(y~CN, data=b)
 #fitCN = lm(mean~CN, data=b)
 
-autoplot(fitM)
+#autoplot(fitM)
 
 ### Lifted directly from ASCAT
 #Perform MAD winsorization:
@@ -84,7 +84,9 @@ print(chr.info)
 if (is.null(chr.info)) stop("Failed to get chr info")
 chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
 
-load(list.files(datadir, 'Rdata', full.names = T), verbose=T)
+file = list.files(datadir,'^ascat.Rdata',full.names=T)
+print(file)
+load(file, verbose=T)
 segraw = ascat.output$segments_raw
 rm(ascat.pcf, ascat.gg, ascat.output)
 
