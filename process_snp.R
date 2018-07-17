@@ -139,7 +139,9 @@ p = ggplot(m, aes(sample, value, fill=grepl('BLD|gastric',sample))) + geom_jitte
 # m = (melt(segraw, measure.vars=c('medLRR','adjLRR')))
 # m$totalRaw = round(round(m$totalRaw,1))
 # p = ggplot(m, aes(variable, value, group=variable, fill=variable, color=variable)) + facet_grid(~total) + geom_jitter(alpha=0.5) + geom_boxplot(outlier.colour = NA) + labs(title=basename(datadir))
-# plotdir = paste(datadir,'/plots', sep='')
+ plotdir = paste(datadir,'/plots', sep='')
+if (dir.exists(plotdir)) unlist(plotdir, recursive=T)
+
 dir.create(plotdir, showWarnings = F, recursive = T)
 ggsave(filename= paste(plotdir,'rawCN.png',sep='/'), plot=p, width=9, height=7)
 save(segraw, file=paste(datadir, 'segments_raw.Rdata',sep='/'))
