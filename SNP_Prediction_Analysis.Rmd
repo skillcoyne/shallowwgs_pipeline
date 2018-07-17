@@ -12,6 +12,7 @@ library(glmnet)
 library(pander)
 library(readxl)
 library(pROC)
+library(ggfortify)
 
 suppressPackageStartupMessages(source('lib/data_func.R'))
 suppressPackageStartupMessages(source('lib/common_plots.R'))
@@ -172,7 +173,7 @@ highPloidyCN = subset(qcdata, Status == 'NP' & SampleType == 'BE' & (SCA.Ratio >
 `r round(nrow(highPloidyCN)/nrow(subset(qcdata, Status == 'NP' & SampleType == 'BE')), 3)*100`% of NON-PROGRESSOR samples have >2SD SCA (~25%) or high ploidy.
 
 
-```{r, echo=F, warning=F, fig.height=10, fig.width=8}
+```{r, echo=F, warning=F, fig.height=10, fig.width=8,eval=F}
 
 qcdata$SCA.Ratio = round(qcdata$SCA.Ratio, 4)
 
@@ -194,16 +195,17 @@ autoplot(fitSD)
 fitM = lm(x~y, data=b)
 autoplot(fitM)
 
+fitCN = lm(y~x, data=b)
 
 # Adjust based on the summary values per CN that we get in WGS (mostly) NP Barrett's cases
 adjust.segraw<-function(segraw) {
-  segraw = segraw %>% rowwise() %>% dplyr::mutate( total = nMajor+nMinor )
+  segraw = segraw %>% rowwise() %>% dplyr::mutate( total = nAraw+nBraw )
   segraw = subset(segraw, chr %in% c(1:22))
 
   segraw$adjLRR = NA
-  for (cn in unique(segraw$total)) {
-    rows = which(segraw$total == cn)
-    values = seg[rows, 'medLRR', drop=T]
+  #for (cn in unique(segraw$total)) {
+  #  rows = which(segraw$total == cn)
+  #  values = seg[rows, 'medLRR', drop=T]
     
     #newM = mean(values)
     #newSD = sd(values)
@@ -216,9 +218,17 @@ adjust.segraw<-function(segraw) {
       
     #}
     #segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+   # smy
+    #median(predict(fitM, newdata=cbind.data.frame('y'=values)))-cn
     
-    segraw[rows,'adjLRR'] = values * predict(fitM, newdata=cbind.data.frame('y'=values)) - cn)
-  }  
+    
+    new = predict(fitCN, newdata=cbind.data.frame('x'=segraw$total))
+    #plot(scale(new, center = T))
+    
+    segraw[,'adjLRR'] = scale(new,center=T)
+    
+   # segraw[rows,'adjLRR'] = (values * (predict(fitM, newdata=cbind.data.frame('y'=values)) - cn))
+  #}  
 segraw  
 }
 
@@ -231,6 +241,7 @@ seg = ascat.output$segments_raw
 seg = adjust.segraw(seg)
 
 m = (melt(seg, measure.vars=c('medLRR','adjLRR')))
+m$total = round(round(m$total, 1))
 ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot() + labs(title=pt)
 
 
@@ -254,6 +265,7 @@ seg = ascat.output$segments_raw
 seg = adjust.segraw(seg)
 
 m = (melt(seg, measure.vars=c('medLRR','adjLRR')))
+m$total = round(round(m$total, 1))
 ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot() + labs(title=pt)
 
 
@@ -373,7 +385,7 @@ grid.arrange(
 
 Using a random normal sample and a known BE progresser sample
 
-```{r rnormals, echo=F, warning=F, message=F, fig.width=10, fig.height=8}
+```{r rnormals, echo=F, warning=F, message=F, fig.width=10, fig.height=8, eval=F}
 randNormal = sample(rownames(normalSegs), 1)
 pt = unlist(strsplit(randNormal, '_'))[1]
 segs = subset(segments.list[[pt]], chr %in% c(1:22) & grepl(sub('_', '.*', randNormal),sample))
@@ -497,8 +509,11 @@ rr = predict(fitV, newx=arrayDf, s=l, type='link')
 preds = cbind.data.frame(rownames(prob),prob, rr, stringsAsFactors=F)
 colnames(preds) = c('Samplename','Prob', 'RR')
 
-qqnorm(allDf, main='Normal Q-Q plot, sWGS')
-qqnorm(arrayDf, main='Normal Q-Q plot, SNP arrays')
+grid.arrange(
+  ggplot( melt(allDf), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, sWGS'),
+  ggplot( melt(arrayDf), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, SNP arrays'),
+  ncol=1
+)
 
 ```
 
@@ -589,6 +604,9 @@ ggplot(preds.normal, aes(Prob)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1
   scale_fill_gradientn(colors = myPal,  name='') +
   labs(title='Predictions on BLD/Gastric', y='n Samples', x='Unadjusted Probability')
 
+length(which(preds.normal$Prob > 0.5))/nrow(preds.normal)
+
+
 qcdata.be = subset(qcdata, SampleType == 'BE')
 
 get.qcinfo<-function(vec) {
@@ -602,8 +620,8 @@ get.qcinfo<-function(vec) {
 qc = do.call(rbind.data.frame, c( lapply(preds$Samplename, function(x) get.qcinfo( unlist(strsplit(x, '_'))) ), stringsAsFactors=F))
 
 pred.qc = cbind.data.frame(preds, qc)
-dim(pred.qc)
-table(pred.qc$Status)
+#dim(pred.qc)
+#table(pred.qc$Status)
 
 ggplot(pred.qc, aes(`mean(SCA.Ratio)`, Prob, color=Status)) + geom_point()
 ggplot(pred.qc, aes(`mean(Ploidy)`, Prob, color=Status)) + geom_point()
@@ -640,13 +658,13 @@ pred.qc = pred.qc %>% group_by(Status, PatientID) %>% dplyr::mutate(
 pred.qc$Status = factor(pred.qc$Status)
 
 
-# pred.qc.ex = subset(pred.qc, !exclude)
-# cuts = seq(0,1,0.1)
-# 
-# pred.qc.ex$quants = with(pred.qc.ex, cut(Prob, breaks=cuts))
-# qt = as.data.frame.matrix(table(pred.qc.ex$quants, pred.qc.ex$Status))
-# qt$quant = rownames(qt)
+pred.qc.ex = subset(pred.qc, !exclude)
+cuts = seq(0,1,0.1)
 
+pred.qc.ex$quants = with(pred.qc.ex, cut(Prob, breaks=cuts))
+qt = as.data.frame.matrix(table(pred.qc.ex$quants, pred.qc.ex$Status))
+qt$quant = rownames(qt)
+pander(qt)
 
 get.risk<-function(prob) {
   if (prob < 0.3) return('Low')
@@ -709,8 +727,6 @@ roc.plot(roct2) + labs(title='T2, Prob')
 
 roct2 = pROC::roc(Status ~ Risk, data=subset(pred.qc, Timepoint != 'T1' & !exclude), auc=T, ci=T, of='thresholds')
 roc.plot(roct2) + labs(title='T2, Risk')
-
-
 
 
 ggplot(subset(pred.qc, !exclude), aes(`mean(SCA.Ratio)`,Prob, color=Risk, shape=Status)) + 
