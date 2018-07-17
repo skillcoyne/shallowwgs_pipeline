@@ -101,62 +101,48 @@ head(segraw)
 
 adjust.segraw<-function(segraw) {
   segraw$adjLRR = NA
-  #segraw$total = round(with(segraw, nAraw+nBraw), 2)
-  segraw$total = with(segraw, nMajor+nMinor)
-  for (cn in unique(segraw$total)) {
-    rows = which(segraw$total == cn)
-    values = segraw[rows, 'medLRR', drop=T]
-
-    
-    newSD = predict(fitSD, newdata=cbind.data.frame('CN'=cn))
-    
-    # if (cn == 2) {
-    #   newM = 0
-    # } else if (cn > 2) {
-    #   newM = abs(newM)
-    # }
-    if (cn == 0) {
-      newM = predict(fitM, newdata=cbind.data.frame('CN'=cn))
-      segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-    } else if (cn == 2) {
-      newSD = sd(values)
-      newM = 0
-      segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-    } else {
-      newM = mean(values)
-      segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-    }
-  }
+  segraw$totalRaw = round(with(segraw, nAraw+nBraw), 3)
+  #segraw$total = with(segraw, nMajor+nMinor)
+  # for (cn in unique(segraw$total)) {
+  #   rows = which(segraw$total == cn)
+  #   values = segraw[rows, 'medLRR', drop=T]
+  #   newSD = predict(fitSD, newdata=cbind.data.frame('CN'=cn))
+  #   
+  #   # if (cn == 2) {
+  #   #   newM = 0
+  #   # } else if (cn > 2) {
+  #   #   newM = abs(newM)
+  #   # }
+  #   if (cn == 0) {
+  #     newM = predict(fitM, newdata=cbind.data.frame('CN'=cn))
+  #     segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+  #   } else if (cn == 2) {
+  #     newSD = sd(values)
+  #     newM = 0
+  #     segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+  #   } else {
+  #     newM = mean(values)
+  #     segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
+  #   }
+  # }
   return(segraw)
 }
   
-# adjust.segraw<-function(segraw) {
-#   segraw$total = with(segraw, nAraw+nBraw)
-#   segraw = subset(segraw, chr %in% c(1:22))
-#   
-#   segraw$adjLRR = NA
-#   new = predict(fitCN, newdata=cbind.data.frame('x'=segraw$total))
-#   segraw[,'adjLRR'] = scale(new,center=T)
-#   return(segraw)
-# }
-
 segraw = adjust.segraw(segraw)
+
 
 segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
 
-m = (melt(segraw, measure.vars=c('medLRR','adjLRR')))
-m$total = round(round(m$total,1))
-#p = ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot() + labs(title=basename(datadir))
-p = ggplot(m, aes(variable, value, group=variable, fill=variable, color=variable)) + facet_grid(~total) + geom_jitter(alpha=0.5) + geom_boxplot(outlier.colour = NA) + labs(title=basename(datadir))
-p
+m = (melt(segraw, measure.vars=c('totalRaw')))
+p = ggplot(m, aes(sample, value, fill=grepl('BLD|gastric',sample))) + geom_jitter() + geom_boxplot(alpha=0.8) + labs(y='Raw CN', x='', title=basename(datadir)) + theme(legend.position = 'none')
 
-plotdir = paste(datadir,'/plots', sep='')
+# m = (melt(segraw, measure.vars=c('medLRR','adjLRR')))
+# m$totalRaw = round(round(m$totalRaw,1))
+# p = ggplot(m, aes(variable, value, group=variable, fill=variable, color=variable)) + facet_grid(~total) + geom_jitter(alpha=0.5) + geom_boxplot(outlier.colour = NA) + labs(title=basename(datadir))
+# plotdir = paste(datadir,'/plots', sep='')
 dir.create(plotdir, showWarnings = F, recursive = T)
-ggsave(filename= paste(plotdir,'medLRR.png',sep='/'),
-       plot=p, 
-       width=9, height=7)
+ggsave(filename= paste(plotdir,'rawCN.png',sep='/'), plot=p, width=9, height=7)
 save(segraw, file=paste(datadir, 'segments_raw.Rdata',sep='/'))
-
 
 allsamples = NULL
 allarms = NULL
@@ -193,22 +179,24 @@ for (i in 1:length(rowsPerSample)) {
   print( names(rowsPerSample)[i] )
   df = segraw[rowsPerSample[[i]],]
   
-  df$winsLRR = madWins(df$adjLRR,2.5,25)$ywin
+  #df$winsLRR = madWins(df$adjLRR,2.5,25)$ywin
+  valueCol = 'totalRaw'
   
-  tiled = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], chr.info=chr.info, verbose=F)
+  tiled = tile.segmented.data(df[c('chr','startpos','endpos',valueCol)], chr.info=chr.info, verbose=F)
   if (is.null(allsamples)) allsamples = tiled[c(1:3)]
   allsamples[,names(rowsPerSample)[i]] = tiled[,4]
   
-  tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos','winsLRR')], size='arms', chr.info=chr.info, verbose=F)
+  tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos',valueCol)], size='arms', chr.info=chr.info, verbose=F)
   if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
   allarms[,names(rowsPerSample)[i]] = tiled.arms[,4]
   
-  lims = c(-1,1)
-  if (max(tiled$winsLRR,na.rm=T) > 1) lims[2] = max(tiled$winsLRR,na.rm=T)
-  if (min(tiled$winsLRR,na.rm=T) < -1) lims[1] = min(tiled$winsLRR,na.rT)
+  #lims = c(-1,1)
+  #if (max(tiled[[valueCol]],na.rm=T) > 1) lims[2] = max(tiled$winsLRR,na.rm=T)
+  #if (min(tiled$winsLRR,na.rm=T) < -1) lims[1] = min(tiled$winsLRR,na.rT)
+  lims = range(tiled[[valueCol]], na.rm = T)
   tiled$chr = factor(tiled$chr, levels=chr.info$chr)
 
-  p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(lims) + facet_grid(~chr,space='free_x',scales='free_x') + geom_segment(data=tiled, aes(x=start,xend=end,y=winsLRR,yend=winsLRR), size=3, color='darkgreen') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) + labs(x='', title=names(rowsPerSample)[i])
+  p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(lims) + facet_grid(~chr,space='free_x',scales='free_x') + geom_segment(data=tiled, aes(x=start,xend=end,y=tiled[,4],yend=tiled[,4]), size=3, color='darkgreen') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) + labs(x='', y=valueCol, title=names(rowsPerSample)[i])
   
   plist[[ names(rowsPerSample)[i] ]] = p
 }
