@@ -134,16 +134,16 @@ segraw = adjust.segraw(segraw)
 segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
 
 m = (melt(segraw, measure.vars=c('totalRaw')))
-p = ggplot(m, aes(sample, value, fill=grepl('BLD|gastric',sample))) + geom_jitter() + geom_boxplot(alpha=0.8) + labs(y='Raw CN', x='', title=basename(datadir)) + theme(legend.position = 'none')
+p = ggplot(m, aes(sample, value, fill=grepl('BLD|gastric',sample))) + geom_jitter() + geom_boxplot(alpha=0.8) + labs(y='Raw CN', x='', title=basename(datadir)) + theme(legend.position = 'none', axis.text.x = element_text(angle=45, hjust=1))
 
 # m = (melt(segraw, measure.vars=c('medLRR','adjLRR')))
 # m$totalRaw = round(round(m$totalRaw,1))
 # p = ggplot(m, aes(variable, value, group=variable, fill=variable, color=variable)) + facet_grid(~total) + geom_jitter(alpha=0.5) + geom_boxplot(outlier.colour = NA) + labs(title=basename(datadir))
- plotdir = paste(datadir,'/plots', sep='')
+plotdir = paste(datadir,'/plots', sep='')
 if (dir.exists(plotdir)) unlist(plotdir, recursive=T)
 
 dir.create(plotdir, showWarnings = F, recursive = T)
-ggsave(filename= paste(plotdir,'rawCN.png',sep='/'), plot=p, width=9, height=7)
+ggsave(filename= paste(plotdir,'rawCN.png',sep='/'), plot=p, width=length(unique(segraw$sample))*2, height=6,scale=1.5)
 save(segraw, file=paste(datadir, 'segments_raw.Rdata',sep='/'))
 
 allsamples = NULL
