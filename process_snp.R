@@ -143,7 +143,7 @@ plotdir = paste(datadir,'/plots', sep='')
 if (dir.exists(plotdir)) unlist(plotdir, recursive=T)
 
 dir.create(plotdir, showWarnings = F, recursive = T)
-ggsave(filename= paste(plotdir,'rawCN.png',sep='/'), plot=p, width=length(unique(segraw$sample))*2, height=6,scale=1.5)
+ggsave(filename= paste(plotdir,'rawCN.png',sep='/'), plot=p, width=length(unique(segraw$sample))*2, height=6,scale=1.5, limitsize = F)
 save(segraw, file=paste(datadir, 'segments_raw.Rdata',sep='/'))
 
 allsamples = NULL
@@ -196,6 +196,8 @@ for (i in 1:length(rowsPerSample)) {
   #if (max(tiled[[valueCol]],na.rm=T) > 1) lims[2] = max(tiled$winsLRR,na.rm=T)
   #if (min(tiled$winsLRR,na.rm=T) < -1) lims[1] = min(tiled$winsLRR,na.rT)
   lims = range(tiled[[valueCol]], na.rm = T)
+  if (valueCol == 'totalRaw') lims=c(0,4)
+  
   tiled$chr = factor(tiled$chr, levels=chr.info$chr)
 
   p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(lims) + facet_grid(~chr,space='free_x',scales='free_x') + geom_segment(data=tiled, aes(x=start,xend=end,y=tiled[,4],yend=tiled[,4]), size=3, color='darkgreen') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) + labs(x='', y=valueCol, title=names(rowsPerSample)[i])
@@ -203,7 +205,7 @@ for (i in 1:length(rowsPerSample)) {
   plist[[ names(rowsPerSample)[i] ]] = p
 }
 
-ggsave(filename = paste(plotdir,'tiled.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=5*length(plist))
+ggsave(filename = paste(plotdir,'tiled.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=5*length(plist), limitsize = F)
 
 write.table(allsamples, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_tiled.txt', sep=''))
 write.table(allarms, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_arms_tiled.txt', sep=''))
