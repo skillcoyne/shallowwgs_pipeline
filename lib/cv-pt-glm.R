@@ -160,7 +160,6 @@ coef.stability<-function(opt, nz.list) {
 }
 
 create.patient.sets<-function(pts, n, splits, minR=0.2) {
-  
   # This function just makes sure the sets don't become too unbalanced with regards to the labels.
   pts$label = 0
   pts[which(pts$Status == 'P'), 'label'] = 1
@@ -208,7 +207,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
   message(paste("Running", splits, "splits",nfolds,"times on", paste(dim(x), collapse=':'), 'alpha=',a ))
   fit.e = list()
   
-  if (ncol(pts) == (nfolds+2)) {
+  if (length(grep('fold',colnames(pts))) == nfolds) {
     tpts = pts
   } else {
     tpts = create.patient.sets(pts, nfolds, splits, minR)
@@ -224,7 +223,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
     deviance = matrix(nrow=splits, ncol=length(lambda))
     for (i in 1:splits) { 
       message(paste(i, "split"))
-      test.rows = which(rownames(x) %in% tpts[which(tpts[,setCol] == i), 'Samplename'])
+      test.rows = which(rownames(x) %in% tpts[which(tpts[,setCol] == i), 2])
       test = x[test.rows,]
       training = x[-test.rows,]
       # pre-spec lambda seq

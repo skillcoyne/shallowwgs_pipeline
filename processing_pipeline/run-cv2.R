@@ -30,11 +30,6 @@ logT = F
 if (length(args) == 4)
   logT = as.logical(args[4])
 
-# Discovery or all
-#allPts = ifelse (length(args) == 2, as.logical(args[2]), F)
-
-#cache.dir = paste(outdir, '5e6_arms_disc_exAHM0320', sep='/')
-#if (allPts)
 cache.dir = paste(outdir, '5e6_arms_all', sep='/')
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
 dir.create(cache.dir, recursive=T, showWarnings=F)
@@ -46,11 +41,7 @@ demo.file = list.files(infodir, pattern='Demographics_full.xlsx', recursive=T, f
 if ( length(patient.file) != 1 | length(demo.file) != 1)
   stop("Missing files in info dir: All_patient_info.xlsx and Demographics_full.xlsx")
 
-#if (allPts) {
 patient.info = read.patient.info(patient.file, demo.file, set='All')$info
-#} else {
-#  patient.info = read.patient.info(patient.file, demo.file, set='Training')$info
-#}
 
 patient.info = plyr::arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
 sum.patient.data = summarise.patient.info(patient.info)
@@ -143,7 +134,11 @@ dim(allDf)
 dysplasia.df = as.matrix(allDf[sampleStatus$Samplename,])
 dim(dysplasia.df)
 
-save(allDf, dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
+raw.segs = tiled.segs[sampleStatus$Samplename,]; raw.arms = tiled.arms[sampleStatus$Samplename,]
+
+save(raw.segs, raw.arms, dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
+rm(raw.segs, raw.arms)
+
 
 nl = 1000;folds = 10; splits = 5 
 

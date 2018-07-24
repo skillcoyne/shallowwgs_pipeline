@@ -33,7 +33,7 @@ source('lib/data_func.R')
 
 data = '~/Data/Ellie'
 
-cache.dir = paste(data, 'Analysis/5e6_arms_all_logR', sep='/')
+cache.dir = paste(data, 'Analysis/5e6_arms_all', sep='/')
 
 data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
 #analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
@@ -66,6 +66,7 @@ pander(
   'Median Years'=paste(median(end.year-start.year),'+/-',round(sd(end.year-start.year),1)),
   'Median Endoscopies'=paste(median(total.endos),'+/-',round(sd(total.endos),1)),
   'Median age'=paste(median(age.diagnosis),'+/-',round(sd(age.diagnosis),1)),
+  'Median length'=median(M,na.rm=T),
   'gender F:M'=paste(table(gender),collapse=':')
 )), caption='full cohort', justify='left')
 ```
@@ -842,7 +843,7 @@ multi.roc.plot(list(roc, rocEndoM, rocEndoA, rocPtM, rocPtA,rocFirstEndo,rocLast
 
 ```{r back, echo=F, message=F, warning=F}
 transform.by.time<-function(pt, info) {
-  pt = pt[,c('Status','Patient','Hospital.Research.ID','Path.ID','PID','Pathology','Samplename','Final.Endoscopy','Endoscopy.Year','Prediction', 'OR')] %>% group_by(PID, Samplename) %>% dplyr::mutate('months.before.final' = (Final.Endoscopy - Endoscopy.Year)*12)
+  pt = pt[,c('Status','Patient','Hospital.Research.ID','Path.ID','PID','Pathology','Maximal','Samplename','Final.Endoscopy','Endoscopy.Year','Prediction', 'OR')] %>% group_by(PID, Samplename) %>% dplyr::mutate('months.before.final' = (Final.Endoscopy - Endoscopy.Year)*12)
   pt = dplyr::arrange(merge(pt, subset(info, Hospital.Research.ID == pt$Hospital.Research.ID[1], select=c('Samplename','Block')), by='Samplename'), Pathology, PID, Endoscopy.Year)
   
   tb = with(pt, table(months.before.final, PID))
