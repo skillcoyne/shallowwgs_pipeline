@@ -3,19 +3,15 @@
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 2)
-  stop("Missing parameters: <patient ID> <model dir>")
+  stop("Missing parameters: <patient ID> <model dir> <patients dir>")
 
 library(ggplot2)
 library(gridExtra)
 library(glmnet)
-library(readxl)
-library(pROC)
-library(ggfortify)
-library(preprocessCore)
 
-suppressPackageStartupMessages(source('lib/data_func.R'))
-suppressPackageStartupMessages(source('lib/common_plots.R'))
-suppressPackageStartupMessages(source('lib/cv-pt-glm.R'))
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/common_plots.R'))
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
 
 
 
@@ -25,7 +21,11 @@ pt = args[1]
 cache.dir = args[2]
 #cache.dir = '~/Data/Ellie/Analysis/SNP'
 
+
 dir.create(cache.dir, recursive = T, showWarnings = F)
+pt.dir = paste(cache.dir, 'LOO', pt, sep='/')
+dir.create(pt.dir, recursive = T, showWarnings = F)
+
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (!file.exists(file))
   stop("Missing full model file, run snp-regression.R first")
@@ -39,7 +39,7 @@ slabels$RR = NA
 
 colnames(sets)[2] = 'Samplename'
 
-file = paste(cache.dir, 'loo.Rdata', sep='/')
+file = paste(pt.dir, 'loo.Rdata', sep='/')
 
 select.alpha = 0.9
 secf = coefs[[select.alpha]]
@@ -91,5 +91,6 @@ if ( length(cv$lambda.1se) > 0 ) {
 }
 
 save(plots, performance.at.1se, nzcoefs, fit, preds, file=file)
+write.table(preds, sep='\t', quote=F, row.names=T, col.names=NA, file=paste(pt.dir, 'preds.txt', sep='/'))
 message("Finished")
 
