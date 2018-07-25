@@ -1,9 +1,6 @@
 #!/usr/bin/env Rscript
 
-
 # Step 2
-
-
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 3) {
@@ -33,8 +30,7 @@ data.files = list.files(data, full.names=T, recursive=T)
 
 patient.name = gsub('\\/', '_', patient.name )
 
-
-plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
+plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient2', sep='/')
 print(paste("Plot directory:", plot.dir))
 if (!dir.exists(plot.dir))  
   dir.create(plot.dir, recursive=T)
@@ -144,8 +140,14 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
   } else { # for most we have multiple samples
     res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
   }
-
-  write.table(do.call(rbind, lapply(res[,-(1:5)], summary)), sep='\t', quote=F, col.names=NA, file=paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_gamma",gamma2,"_Summary.txt",sep=""))
+  
+  res.summary<-function(df) {
+    sm = summary(df)
+    sm['Var.'] = var(df)
+    sm
+  }
+  
+  write.table(do.call(rbind, lapply(res[,-(1:5),drop=F], res.summary)), sep='\t', quote=F, col.names=NA, file=paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_gamma",gamma2,"_Summary.txt",sep=""))
   
   #plotChrom(data=data,segments=res,chrom=1, layout=c(ncol(data)-2,1))
   message(paste("Writing pcf output to",filename))
@@ -162,9 +164,9 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
     dir.create(gamma.plot, recursive=T, showWarnings=F)
   
 
-  chr.info = get.chr.lengths()[1:22,]
+  chr.info = get.chr.lengths(file='hg19_info.txt')[1:22,]
   chr.info$chrom = sub('chr','', chr.info$chrom)
-  chr.info$chrom = factor(chr.info$chr.cent, levels=c(1:22), ordered=T)
+  chr.info$chrom = factor(chr.info$chrom, levels=c(1:22), ordered=T)
   
   plots = list()
   for(col in which(!is.na(sdevs))) {
@@ -172,63 +174,26 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
     
     df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
     df2 = cbind.data.frame('chrom'=segvals$chrom, 'start'=segvals$start.pos, 'end'=segvals$end.pos, 'seg.val'=segvals[,col+5])
-    
+
     df$chrom = factor(df$chrom, levels=c(1:22), ordered=T)
     df2$chrom = factor(df2$chrom, levels=c(1:22), ordered=T)
-    
-    
-   p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(0,9) + facet_grid(~chrom, space='free_x', scales='free_x') +
+
+   p = ggplot(chr.info, aes(x=1:chr.length)) + 
+     ylim(0,4) + facet_grid(~chrom, space='free_x', scales='free_x') +
       geom_point(data=df, aes(x=position, y=seg.cov), color='darkred', alpha=.4) +
-      geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green4', lwd=4) +
-      labs(y='segmented coverage', title=sample) + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
-   
+      geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green3', lwd=5) +
+      geom_hline(data=df2, aes(yintercept=median(seg.val)), color='white', linetype='dashed') + 
+     labs(x='', y='segmented coverage', title=sample) + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
+   ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_", sample, "_gamma",gamma2,".png",sep=""),plot=p, width=12, height=4, units='in', scale=2)
+
    plots[[as.character(col)]] = p
   }  
-  png(paste(gamma.plot, "/", "segmentedCoverage_chr_gamma",gamma2,".png",sep=""),width=1200,height=600*no.samples)
-  do.call(grid.arrange, c(plots, ncol=1))
-  dev.off()
-  
-  
+  ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_chr_gamma",gamma2,".png",sep=""),plot=do.call(grid.arrange, c(plots, ncol=1)), width=15, height=4*no.samples, units='in', scale=1.5, limitsize = F)
 
-  
-  for(chr in 1:22) {
-    print(paste('chr',chr,sep=''))
-    indices = intersect(which(fit.data$chrom==chr),good.bins)
-    indices2 = which(segvals$chrom==chr)
-    #take out whitespace
-    wid=1800
-    #if (no.samples<10) {
-    #  wid=wid*no.samples/10
-    #}
-    ht=600 * no.samples
-    # n.rows = ceiling(no.samples / 10)
-    # if(n.rows < 12){
-    #   ht = ht*n.rows/12
-    # }
-    
-    print(paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""))
-    
-    #par(mfrow=c(n.rows,min(no.samples,10)))
-    plots = list()
-    for(col in which(!is.na(sdevs))){
-      #print(colnames(window.depths.standardised)[col])
-      df = cbind.data.frame('position'=fit.data$end[indices], 'seg.cov'=window.depths.standardised[indices,col])
-      df2 = cbind.data.frame('start'=segvals$start.pos[indices2], 'end'=segvals$end.pos[indices2], 'seg.val'=segvals[indices2,col+5])
-      gg = ggplot(data=df, aes(position, seg.cov)) + geom_point(color='darkred', alpha=.4) +
-        geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green4', lwd=4) + 
-        labs(y='segmented coverage', title=paste("chr",chr,":  ",colnames(window.depths.standardised)[col],sep=""))
-      
-      plots[[as.character(col)]] = gg
-        # plot(fit.data$end[indices],window.depths.standardised[indices,col],col="red",pch=20,cex=1,cex.axis=2,cex.lab=2,cex.main=2,xlab="pos",ylab="segmented coverage",main=paste("chr",chr,", ",colnames(window.depths.standardised)[col],sep=""))
-        # for(ind in indices2){
-        #   lines(c(segvals$start.pos[ind],segvals$end.pos[ind]),rep(segvals[ind,col+5],2),col="green",lwd=4)
-        # }
-    }
-    
-    png(paste(gamma.plot, "/", "segmentedCoverage_chr",chr,"_gamma",gamma2,".png",sep=""),width=wid,height=ht)
-    do.call(grid.arrange, c(plots, ncol=1))
-    dev.off()
-  }
+  shapiro.wilk = sapply(1:nrow(segvals[,c(1:5,6)]),function(i) {
+    row.data=unlist(segvals[i,-(1:5)])
+    ifelse(all(row.data==row.data[1]) | length(row.data) > 5000 , NA, shapiro.test(row.data)$statistic)
+  })
   
   if ( length(grep('^D\\d+', colnames(segvals))) > 1  ) {
     sds = apply(segvals[,-(1:5)],1,sd)
@@ -249,44 +214,36 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
         
         print(paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"))
         write.table(out,paste(gamma.plot, paste(patient.name,"_allSamples_fitted_multipcf_variability_gamma.txt",sep=""),sep="/"),sep="\t",row.names=F,quote=F)
-        
-        png(paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""))
-        plot(out[,6],out[,7],cex=log(segvals$n.probes)+1,bg=rgb(1,0,0,0.5),pch=21,xlab="standard deviation",ylab="Shapiro-Wilk statistic",xlim=c(0,1), main=patient.name)
-        dev.off()
-        
-        png(paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""))
-        DENS=density(shapiro.wilk[!is.na(shapiro.wilk) & !is.infinite(shapiro.wilk)])
-        plot(DENS,xlab="Shapiro-Wilk statistic",main=patient.name)
-        dev.off()
+        head(out)
+
+        p = ggplot(out, aes(st_dev, ShapiroWilk, size=log(n.probes)+1),color='darkred') + geom_point(alpha=0.5, fill='indianred1',shape=21) + xlim(0,1) + scale_size(range=c(0,10)) + theme(legend.position = 'none') + labs(x='std.dev.', y='Shapiro-Wilk statistic', title=patient.name)
+      
+        ggsave(file=paste(gamma.plot, "/multipcf_variability_clean_gamma",gamma2,".png",sep=""), plot=p, width=5,height=5,units = 'in')
+
+        p = ggplot(out) + geom_density(aes(ShapiroWilk),fill='indianred3', alpha=0.5) + labs(x='Shapiro-Wilk statistic', title=patient.name)
+        ggsave(filename = paste(gamma.plot, "/multipcf_ShapiroWilk_density_gamma",gamma2,".png",sep=""), plot=p, height=5,width=5,units='in')
       }
     } else {
       warning(paste("Too few samples to run shapiro wilk", (ncol(segvals)-5)))
     }
     
-    #DENS=density(CofV[!is.na(CofV) & !is.infinite(CofV)])
-    #use SDs rather than CofV
-    png(paste(gamma.plot, "/multipcf_StDev_density_gamma",gamma2,".png",sep=""))
-    DENS=density(sds[!is.na(sds) & !is.infinite(sds)],from=0,to=1)
-    plot(DENS,xlab="standard deviation",main=patient.name)
-    dev.off()
-    
     sd.threshold = 0.08
     min.probes = 67 #50
     
     #plot density just for segments with at least 50 probes
-    if(length(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes >= min.probes]) >= 2) {
-      png(paste(gamma.plot, "/multipcf_StDev_density_gamma",gamma2,".png",sep=""))
-      DENS = density(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes >= min.probes],from=0,to=1)
-      plot(DENS,xlab="standard deviation",main=patient.name)
-      dev.off()
-    }
+    # if(length(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes >= min.probes]) >= 2) {
+    #   png(paste(gamma.plot, "/multipcf_StDev_density_gamma",gamma2,".png",sep=""))
+    #   DENS = density(sds[!is.na(sds) & !is.infinite(sds) & segvals$n.probes >= min.probes],from=0,to=1)
+    #   plot(DENS,xlab="standard deviation",main=patient.name)
+    #   dev.off()
+    # }
     
     ##thresholds selected from density plots
     #190216 This is done, but we may want to try different thresholds
     variable.region.indices = which(sds >= sd.threshold & segvals$n.probes >= min.probes)
     
     print("variable regions:")
-    print(segvals[variable.region.indices,1:5])
+    #print(segvals[variable.region.indices,1:5])
     
     write.table(segvals[variable.region.indices,1:5],
                 paste(gamma.plot, "/", patient.name, "_variableRegions_gamma",gamma2,"_sd", sd.threshold, "_n", min.probes, ".txt",sep="")
@@ -295,6 +252,7 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
     
     if (length(variable.region.indices) > 0) {
       hclust.data = segvals[variable.region.indices,-(1:5)]	
+      colnames(hclust.data) = paste(colnames(hclust.data), apply(subset(patient.info, Samplename %in% colnames(hclust.data), select=c('Endoscopy.Year','Pathology')),1,paste,collapse=':'), sep='-')
       #colnames(hclust.data) = samplenames
       png(paste(gamma.plot, "/hierarchical_clustering_plot_multipcf_gamma",gamma2,"_sd",sd.threshold,"_n",min.probes,".png",sep=""))
       HC = hclust(dist(t(hclust.data)))

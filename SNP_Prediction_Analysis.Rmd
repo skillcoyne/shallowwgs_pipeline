@@ -132,15 +132,17 @@ ggplot(qcdata, aes(round(Ploidy,2))) + geom_histogram() +
 ggplot(qcdata, aes(Purity, Goodnessoffit, color=Status)) + geom_point() + facet_wrap(~SampleType, ncol=1) + 
   labs(title='Purity~fit, normal vs BE')
 
-ggplot(qcdata, aes(SCA.Ratio)) + geom_histogram() + 
-  facet_wrap(~Status, scales='free_y', ncol=1) + labs(x='SCA Ratio', title='SCA Ratio, NP vs P')
+ggplot(subset(qcdata, SampleType == 'BE'), aes(round(Ploidy,2), Purity, color=Status)) + geom_point() + facet_grid(~Status) + 
+  labs(title='BE only, purity vs ploidy')
 
-ggplot(subset(qcdata, SampleType == 'BE'), aes(Purity, SCA.Ratio, color=Status)) + geom_point() + 
-  geom_vline(xintercept = 0.95, color='red') + geom_hline(yintercept = 0.05, color='red') + 
+ggplot(qcdata, aes(SCA.Ratio, color=Status, fill=Status)) + geom_density(alpha=0.5) + labs(x='SCA Ratio', title='SCA Ratio, NP vs P')
+
+ggplot(subset(qcdata, SampleType == 'BE'), aes(Purity, SCA.Ratio, color=Status)) + facet_grid(~Status) +
+  geom_point() + geom_vline(xintercept = 0.5, color='darkgreen') + geom_hline(yintercept = 0.05, color='red') + 
   labs(title='Barretts only')
 
-ggplot(subset(qcdata, SampleType == 'BE'), aes(Ploidy, SCA.Ratio, color=Status)) + geom_point() + 
-  geom_hline(yintercept = 0.05, color='red') + labs(title='Barretts only')
+ggplot(subset(qcdata, SampleType == 'BE'), aes(Ploidy, SCA.Ratio, color=Status)) + facet_grid(~Status) + geom_point() + 
+  geom_hline(yintercept = 0.03, color='red') + labs(title='Barretts only')
 
 ## PER ENDOSCOPY
 qcdata.samples = qcdata %>% group_by(Samplename) %>% dplyr::mutate(
@@ -676,13 +678,17 @@ pred.qc = pred.qc %>% group_by(Status, Samplename) %>% dplyr::mutate(
   lowsca = (Status == 'P' & (`mean(SCA.Ratio)` < 0.03 | `mean(Ploidy)` < 1.5))
 )
 
+subset(pred.qc, `mean(Ploidy)` < 1.99)
+
+subset(pred.qc, lowsca)
+
 ```
 
 
 
 
 ```{r echo=F}
-pred.qc.ex = subset(pred.qc, !exclude)
+pred.qc.ex = subset(pred.qc, !exclude & !wgd & !lowsca)
 cuts = seq(0,1,0.1)
 
 pred.qc.ex$quants = with(pred.qc.ex, cut(Prob, breaks=cuts))
@@ -705,7 +711,6 @@ pred.qc = pred.qc %>% dplyr::rowwise() %>% dplyr::mutate(
 )
 pred.qc$Risk = factor(pred.qc$Risk, levels=c('Low','Moderate','High'), ordered = T)
 
-
 roc = pROC::roc(Status ~ Prob, data=pred.qc, auc=T, ci=T, of='thresholds')
 roc.plot(roc) + labs(title='All, Prob')
 pander(pROC::coords(roc, 'best'), caption='All samples, ROC best')
@@ -719,6 +724,9 @@ per_pt =
 rocpp = pROC::roc(Status ~ max.Prob, data=per_pt, auc=T, ci=T, of='thresholds')
 roc.plot(rocpp) + labs(title='Max per patient - excluded HGD NP')
 
+roc = pROC::roc(Status ~ Prob, data=subset(pred.qc, !exclude & !wgd), auc=T, ci=T, of='thresholds')
+roc.plot(roc) + labs(title='Excluded HGD & WGD NP patients')
+
 # Exclude the low SCA patients
 rocpp = pROC::roc(Status ~ Prob, data=subset(pred.qc, !lowsca), auc=T, ci=T, of='thresholds')
 roc.plot(rocpp) + labs(title='Both endos - excluded low SCA P')
@@ -729,6 +737,8 @@ pROC::coords(rocpp, 'best')
 rocpp = pROC::roc(Status ~ Prob, data=subset(pred.qc, !wgd), auc=T, ci=T, of='thresholds')
 roc.plot(rocpp) + labs(title='Both endos - excluded WGD NP')
 pROC::coords(rocpp, 'best')
+
+
 
 # Exclude all of the above
 rocpp = pROC::roc(Status ~ Prob, data=subset(pred.qc, !exclude & !lowsca & !wgd), auc=T, ci=T, of='thresholds')
@@ -768,24 +778,20 @@ ex.pred = subset(pred.qc, !exclude & !wgd & !lowsca)
 
 # Regression using SNP Data
 
-```{r regression, echo=F, message=F, eval=T}
+```{r regression, echo=F, message=F, eval=F}
 ## ----- All ----- ##
 cache.dir = '~/Data/Ellie/Analysis/SNP'
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
  message(paste("loading", file))
  load(file, verbose=T)
+ model.performance(performance.at.1se, coefs)$plot + labs(title='SNP CV models')
 } else {
-  stop("Run 'snp-regression.R' first")
+  warning("Run 'snp-regression.R' first")
 }
 #save(arrayDf,labels,patient.info, file=paste(cache.dir,'snp-models.Rdata',sep='/'))
 
-do.call(grid.arrange, c(plots))
-
-model.performance(performance.at.1se, coefs)$plot + labs(title='SNP CV models')
-
-
-
+#do.call(grid.arrange, c(plots))
 ```
 
 ```{r compare.coefs, echo=F, eval=F}
@@ -833,63 +839,10 @@ file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
 } else {
-  select.alpha = 1
-  secf = coefs[[select.alpha]]
-  a = select.alpha
-  
-  performance.at.1se = c(); plots = list(); fits = list(); nzcoefs = list()
-  # Remove each patient (LOO)
-  for (pt in unique(slabels$PatientID)) {
-    print(pt)
-    samples = subset(slabels, PatientID != pt)$Samplename
-    
-    train.rows = which(rownames(df) %in% samples)
-    training = df[train.rows,]
-    test = as.matrix(df[-train.rows,])
-    if ( nrow(test) == ncol(df) ) test = t(test)
-    
-    # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
-    sparsed_test_data <- Matrix(data=0, nrow=nrow(test),  ncol=ncol(training),
-                                dimnames=list(rownames(test),colnames(training)), sparse=T)
-    for(i in colnames(arrayDf)) sparsed_test_data[,i] = test[,i]
-    
-    # Fit generated on all samples, including HGD
-    fitLOO <- glmnet(training, status[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
-    l = fitLOO$lambda
-    
-    cv = crossvalidate.by.patient(x=training, y=status[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
-                                  pts=subset(sets, Samplename %in% samples), fit=fitLOO, standardize=F)
-    
-    plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
-    fits[[pt]] = cv  
-    
-    if ( length(cv$lambda.1se) > 0 ) {
-      performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
-      
-      coef.1se = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
-      
-      nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
-      
-      #coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
-      #coef.stability(coef.1se, cv$non.zero.cf)
-      
-      logit <- function(p){log(p/(1-p))}
-      inverse.logit <- function(or){1/(1 + exp(-or))}
-      
-      pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
-      or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
-
-      slabels[which(slabels$Samplename %in% rownames(pm)),'Prediction'] = pm[,1]
-      slabels[which(slabels$Samplename %in% rownames(pm)),'RR'] = or[,1]
-      
-    } else {
-      warning(paste(pt, "did not have a 1se"))
-    }
-  }
-  save(plots, performance.at.1se, nzcoefs, fits, slabels, file=file)
+  stop("Run snp-regression.R first")
 }
 
-
+slabels
 snp.roc = pROC::roc(Status~Prediction,slabels, auc=T, ci=T, of='thresholds')
 roc.plot(snp.roc, title="SNP LOO Model ROC")
 
