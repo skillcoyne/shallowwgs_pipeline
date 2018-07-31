@@ -27,7 +27,7 @@ summarise.patient.info<-function(df) {
   return(arrange(sum.pt, Status, total.samples, highest.path))
 }
 
-read.patient.info<-function(file, file2=NULL, set='Training') {
+read.patient.info<-function(file, file2=NULL, set='All') {
   if (!file.exists(file))
     stop(paste(file, "doesn't exist or is not readable."))
   

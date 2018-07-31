@@ -13,9 +13,9 @@ suppressPackageStartupMessages( library(ggdendro) )
 suppressPackageStartupMessages( library(copynumber) )
 suppressPackageStartupMessages( library(dplyr) )
 
-source("../lib/fastPCF.R")
-source('../lib/load_patient_metadata.R')
-source('../lib/data_func.R')
+source("~/workspace/shallowWGSpipeline/lib/fastPCF.R")
+source('~/workspace/shallowWGSpipeline/lib/load_patient_metadata.R')
+source('~/workspace/shallowWGSpipeline/lib/data_func.R')
 
 
 data = args[1]
@@ -30,7 +30,7 @@ data.files = list.files(data, full.names=T, recursive=T)
 
 patient.name = gsub('\\/', '_', patient.name )
 
-plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient2', sep='/')
+plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient3', sep='/')
 print(paste("Plot directory:", plot.dir))
 if (!dir.exists(plot.dir))  
   dir.create(plot.dir, recursive=T)
@@ -63,8 +63,8 @@ if (length(data.file) <= 0)
   stop("Missing necessary Rdata file from Multisample script")
 load(file=data.file, verbose=T)
 
-patient.info$Samplename
-colnames(fit.data)[1:14]
+##patient.info$Samplename
+#colnames(fit.data)[1:14]
 
 patient.plot.dir
 write.table(fit.data[,c('location','chrom','start','end',patient.info$Samplename)], sep='\t', quote=F, file=paste(patient.plot.dir, 'raw_fitted.txt', sep='/'))
@@ -103,7 +103,24 @@ if (length(missingIndicies > 0))
 window.depths.standardised = as.data.frame(window.depths.standardised[,na.omit( match(patient.info$Samplename, colnames(window.depths.standardised)) )])
 colnames(window.depths.standardised) = patient.info$Samplename
 
+
+raw.summary = as.data.frame(do.call(rbind, lapply(window.depths.standardised, function(x) {
+  sm = summary(x)
+  sm['High.Ratio'] = length(which(x > 1.5 | x < 0.5))/length(x) 
+  sm
+})))
+raw.summary$Excluded = raw.summary$High.Ratio >= 0.05
+write.table(raw.summary, file=paste(patient.plot.dir, '/', patient.name, 'raw_sample_summary.txt', sep=''), sep='\t', quote=F)
+
+
 write.table(do.call(rbind, lapply(window.depths.standardised, summary)), sep='\t', quote=F, col.names=NA, file=paste(patient.plot.dir, '/', patient.name,"_std_window_depths_Summary.txt",sep=""))
+
+exclude = which(raw.summary$High.Ratio >= 0.05)
+samplesExcluded = colnames(window.depths.standardised)[exclude]
+
+window.depths.standardised[,exclude] = NA
+head(window.depths.standardised)
+ncol(window.depths.standardised)
 
 # there are mutiple samples per patient too - usually
 no.samples = ncol(window.depths.standardised)
@@ -120,7 +137,6 @@ print(sdevs)
 print(sdev)
 
 good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.na(sdevs)]))))
-
 #for(gamma2 in c(250,5,10,25,50,100,500,1000)) { 
   {
   gamma2=250 
@@ -131,7 +147,7 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
   filename = paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep="")
   
   data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
-
+head(data)
   if (ncol(data) < 4) { # Single sample
     #colnames(data)[3] = patient.info$Samplename
     res = pcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
@@ -152,7 +168,9 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
   #plotChrom(data=data,segments=res,chrom=1, layout=c(ncol(data)-2,1))
   message(paste("Writing pcf output to",filename))
   write.table(res, file=filename, sep="\t", quote=F)
-
+  write.table(data, file=paste(patient.plot.dir, '/', patient.name, 'filtered_fitted.txt'), sep='\t', quote=F)
+  
+  
   #read.table(filename, sep="\t", header=T)->res 
   print(dim(res))
 
@@ -164,30 +182,31 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
     dir.create(gamma.plot, recursive=T, showWarnings=F)
   
 
-  chr.info = get.chr.lengths(file='hg19_info.txt')[1:22,]
+  chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')[1:22,]
   chr.info$chrom = sub('chr','', chr.info$chrom)
   chr.info$chrom = factor(chr.info$chrom, levels=c(1:22), ordered=T)
   
   plots = list()
-  for(col in which(!is.na(sdevs))) {
-    sample = colnames(segvals)[col+5]
+  #for(col in which(!is.na(sdevs))) {
+  samples = grep('^D',colnames(segvals))
+  for (col in samples) {
+    sample = colnames(segvals)[col] #[col+5]
     
-    df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
-    df2 = cbind.data.frame('chrom'=segvals$chrom, 'start'=segvals$start.pos, 'end'=segvals$end.pos, 'seg.val'=segvals[,col+5])
+    p = plot.segmented.genome(fit.data[good.bins,], segvals[,c(1:5,col)], window.depths.standardised[good.bins,sample,drop=F]) + labs(title=sample)
+    
+    #df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
+    #df2 = cbind.data.frame('chrom'=segvals$chrom, 'start'=segvals$start.pos, 'end'=segvals$end.pos, 'seg.val'=segvals[,col+5])
+    
+    rows = which(segvals$n.probes < 67)
+    df3 = cbind.data.frame('chrom'=segvals$chrom[rows], 'start'=segvals$start.pos[rows], 'end'=segvals$end.pos[rows], 'seg.val'=segvals[rows,col])
+    p = p + geom_segment(data=df3, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='blue', lwd=5) 
 
-    df$chrom = factor(df$chrom, levels=c(1:22), ordered=T)
-    df2$chrom = factor(df2$chrom, levels=c(1:22), ordered=T)
+   #ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_", sample, "_gamma",gamma2,".png",sep=""),plot=p, width=12, height=4, units='in', scale=2)
 
-   p = ggplot(chr.info, aes(x=1:chr.length)) + 
-     ylim(0,4) + facet_grid(~chrom, space='free_x', scales='free_x') +
-      geom_point(data=df, aes(x=position, y=seg.cov), color='darkred', alpha=.4) +
-      geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green3', lwd=5) +
-      geom_hline(data=df2, aes(yintercept=median(seg.val)), color='white', linetype='dashed') + 
-     labs(x='', y='segmented coverage', title=sample) + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
-   ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_", sample, "_gamma",gamma2,".png",sep=""),plot=p, width=12, height=4, units='in', scale=2)
-
-   plots[[as.character(col)]] = p
+   plots[[sample]] = p
   }  
+  ggsave(filename=paste(patient.name,".png",sep=""),plot=do.call(grid.arrange, c(plots, ncol=1)), width=15, height=4*no.samples, units='in', scale=1.5, limitsize = F)
+  
   ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_chr_gamma",gamma2,".png",sep=""),plot=do.call(grid.arrange, c(plots, ncol=1)), width=15, height=4*no.samples, units='in', scale=1.5, limitsize = F)
 
   shapiro.wilk = sapply(1:nrow(segvals[,c(1:5,6)]),function(i) {

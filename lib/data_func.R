@@ -4,6 +4,30 @@ require(data.table)
 require(tibble)
 
 
+plot.segmented.genome<-function(fitted, segmented, window.depths.std,probes.min=NULL) {
+  chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')[1:22,]
+  chr.info$chrom = sub('chr','', chr.info$chrom)
+  chr.info$chrom = factor(chr.info$chrom, levels=c(1:22),ordered = T)
+  
+  fitted$chrom = factor(fitted$chrom, levels=levels(chr.info$chrom))
+  segmented$chrom = factor(segmented$chrom, levels=levels(chr.info$chrom))
+  
+  df = cbind.data.frame('chrom'=fitted$chrom, 'position'=fitted$end, 'seg.cov'=window.depths.std[,1])
+  df2 = cbind.data.frame('chrom'=segmented$chrom, 'start'=segmented$start.pos, 'end'=segmented$end.pos, 'seg.val'=segmented[,ncol(segmented)])
+  
+  df$chrom = factor(df$chrom, levels=c(1:22), ordered=T)
+  df2$chrom = factor(df2$chrom, levels=c(1:22), ordered=T)
+  
+  p = ggplot(chr.info, aes(x=1:chr.length)) + 
+    ylim(0,4) + facet_grid(~chrom, space='free_x', scales='free_x') +
+    geom_point(data=df, aes(x=position, y=seg.cov), color='darkred', alpha=.4) +
+    geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green3', lwd=5) +
+    geom_hline(data=df2, aes(yintercept=median(seg.val)), color='white', linetype='dashed') + 
+    labs(x='chromosome', y='segmented coverage') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
+
+}
+
+
 #source("fastPCF.R")
 logTV<-function(x) {
   x = log2(x)
@@ -21,8 +45,10 @@ logTransform<-function(x,inf=F) {
 }
   
 
-binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, plot.dir='.', metrics.file='binSWGS.out') {
+binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, gamma2=250, plot.dir='.', metrics.file='binSWGS.out') {
   require(copynumber)
+  require(apcluster)
+  
   message(paste('Logging to',metrics.file))
   
   if (file.exists(metrics.file)) {
@@ -54,7 +80,6 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
   
   window.depths = matrix(window.depths, ncol=length(countCols))  
   
-  
   message(paste(nrow(blacklist), "genomic regions in the exclusion list."))
   write(paste(nrow(blacklist), "genomic regions in the exclusion list."),mfile,append=T)
 
@@ -64,11 +89,11 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
                            fit.data$start >= blacklist$start[r] & 
                            fit.data$end <= blacklist$end[r] ] = T
   }
-  message(paste("# excluded probes = ",sum(fit.data$in.blacklist),sep=""))
-  write(paste("# excluded probes = ",sum(fit.data$in.blacklist),sep=""),mfile,append=T)
+  message(paste("# blacklisted probes = ",sum(fit.data$in.blacklist),sep=""))
+  write(paste("# blacklisted probes = ",sum(fit.data$in.blacklist),sep=""),mfile,append=T)
   
   if (sum(fit.data$in.blacklist) <= 0)
-    stop("There's an issue with the excluded list, no probes excluded.")
+    stop("There's an issue with the blacklist, no probes excluded.")
   
   if (length(countCols) == 1)
     window.depths = as.data.frame(window.depths)
@@ -87,7 +112,6 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
   write(paste('sdev=',signif(sdev,3),sep=''),mfile,append=T)
   
   good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.na(sdevs)]))))
-  gamma2=250 
 
   data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
   
@@ -100,35 +124,49 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
     write(paste("Segmenting", (ncol(data)-4), "samples"),mfile,append=T)
     res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
   }
-  
+
   if (!is.null(min.probes) & !is.na(min.probes)) {
     probes = which(res$n.probes < min.probes)
     message(paste(round(length(probes)/nrow(res), 3), 'segments with fewer than', min.probes, '"probes"'))
     write(paste(round(length(probes)/nrow(res), 3), 'segments with fewer than', min.probes, '"probes"'), mfile, append=T)
+    
+    loginfo = cbind.data.frame(ncol(res)-5,nrow(res),min(res$n.probes), max(res$n.probes), median(res$n.probes),quantile(res$n.probes)[2],quantile(res$n.probes)[4], length(probes)/nrow(res) )
+    colnames(loginfo) = c('n.samples','n.segs', 'n.Min','n.Max','n.Median','1Q','3Q','ratio.low')
+    rownames(loginfo) = NULL
   }
   res = res[-probes,]
   
-  chr.info = get.chr.lengths()
-  ylims = c(floor(range(res[,-c(1:5)])[1]), ceiling(range(res[,-c(1:5)])[2]))
-  for(col in which(!is.na(sdevs))) {
-    sample = colnames(res)[col+5]
+  chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')
+  coverage = round(sum(with(res, end.pos-start.pos))/chr.info[22,'genome.length'],3)
+  loginfo$filtered.bp.coverage = coverage
   
-    df = cbind.data.frame('chrom'=fit.data$chrom[good.bins], 'position'=fit.data$end[good.bins], 'seg.cov'=window.depths.standardised[good.bins,col])
-    df2 = cbind.data.frame('chrom'=res$chrom, 'start'=res$start.pos, 'end'=res$end.pos, 'seg.val'=res[,col+5])
-    
-    df$chrom = factor(df$chrom, levels=c(1:22), ordered=T)
-    df2$chrom = factor(df2$chrom, levels=c(1:22), ordered=T)
+  
+  ac = apcluster(negDistMat(r=2), res[,5,drop=F], details=T, convits=25, q=NA)
+  
+  moments = res[,-c(1:5),drop=F] %>% summarise_all(funs(mean, median, sd))
+  moments$n.ap.clusters = length(ac@clusters)
+  
+  moments = cbind(moments, res[,-c(1:5),drop=F] %>% summarise_all(funs(`1Q`=quantile), probs=0.25))
+  moments = cbind(moments, res[,-c(1:5),drop=F] %>% summarise_all(funs(`3Q`=quantile), probs=0.75))
+  moments$bp.coverage = coverage
+  moments$ratio.low.probes = loginfo$ratio.low
 
-    p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(ylims) + facet_grid(~chrom, space='free_x', scales='free_x') +
-      geom_point(data=df, aes(x=position, y=seg.cov), color='darkred', alpha=.4) +
-      geom_segment(data=df2, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='green4', lwd=5) +
-      labs(y='segmented coverage', title=sample) + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0,'lines'))
+  
+  high.low<-function(x,nsd=1) { length(which(x > median(x)+sd(x)*nsd | x < median(x)-sd(x)*nsd)) }
+  moments = cbind(moments, res[,-c(1:5),drop=F] %>% summarise_all(funs('n.2sd.segs'=high.low), nsd=2))
 
-    res$chrom = factor(res$chrom, levels=c(1:22), ordered=T)
-    ggsave(filename=paste(plotdir, paste(sample,'_segmented.png',sep=''), sep='/'), plot=p, height=8, width=10)
+  for(col in which(!is.na(sdevs))) {
+    p = plot.segmented.genome(fit.data[good.bins,c(1:4,4+col)], res[,c(1:5,5+col)],window.depths.standardised[good.bins,col,drop=F]) + labs(title=colnames(res)[5+col])
+
+    med = median(res[-probes,5+col])
+    std = sd(res[-probes,5+col])*2
+    p = p + geom_hline(yintercept = c(med-std,med+std), color='grey')
+        
+    ggsave(filename=paste(plot.dir, '/', colnames(res)[5+col], '.png', sep=''), plot=p, height=4, width=12)
   }
+
   close(mfile)
-  return(res)
+  return(list('segvals'=res, 'info'=moments))
 }
 
 ## Should NAs be replace by per-sample mean value instead??
