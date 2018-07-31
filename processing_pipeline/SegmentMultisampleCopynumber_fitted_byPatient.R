@@ -13,9 +13,9 @@ suppressPackageStartupMessages( library(ggdendro) )
 suppressPackageStartupMessages( library(copynumber) )
 suppressPackageStartupMessages( library(dplyr) )
 
-source("~/workspace/shallowWGSpipeline/lib/fastPCF.R")
-source('~/workspace/shallowWGSpipeline/lib/load_patient_metadata.R')
-source('~/workspace/shallowWGSpipeline/lib/data_func.R')
+source("~/workspace/shallowwgs_pipeline/lib/fastPCF.R")
+source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
+source('~/workspace/shallowwgs_pipeline/lib/data_func.R')
 
 
 data = args[1]
@@ -110,7 +110,7 @@ raw.summary = as.data.frame(do.call(rbind, lapply(window.depths.standardised, fu
   sm
 })))
 raw.summary$Excluded = raw.summary$High.Ratio >= 0.05
-write.table(raw.summary, file=paste(patient.plot.dir, '/', patient.name, 'raw_sample_summary.txt', sep=''), sep='\t', quote=F)
+write.table(raw.summary, file=paste(patient.plot.dir, '/', 'raw_sample_summary.txt', sep=''), sep='\t', quote=F)
 
 
 write.table(do.call(rbind, lapply(window.depths.standardised, summary)), sep='\t', quote=F, col.names=NA, file=paste(patient.plot.dir, '/', patient.name,"_std_window_depths_Summary.txt",sep=""))
@@ -168,7 +168,7 @@ head(data)
   #plotChrom(data=data,segments=res,chrom=1, layout=c(ncol(data)-2,1))
   message(paste("Writing pcf output to",filename))
   write.table(res, file=filename, sep="\t", quote=F)
-  write.table(data, file=paste(patient.plot.dir, '/', patient.name, 'filtered_fitted.txt'), sep='\t', quote=F)
+  write.table(data, file=paste(patient.plot.dir, 'filtered_fitted.txt', sep='/'), sep='\t', quote=F)
   
   
   #read.table(filename, sep="\t", header=T)->res 
