@@ -205,7 +205,7 @@ head(data)
 
    plots[[sample]] = p
   }  
-  ggsave(filename=paste(patient.name,".png",sep=""),plot=do.call(grid.arrange, c(plots, ncol=1)), width=15, height=4*no.samples, units='in', scale=1.5, limitsize = F)
+  #ggsave(filename=paste(patient.name,".png",sep=""),plot=do.call(grid.arrange, c(plots, ncol=1)), width=15, height=4*no.samples, units='in', scale=1.5, limitsize = F)
   
   ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_chr_gamma",gamma2,".png",sep=""),plot=do.call(grid.arrange, c(plots, ncol=1)), width=15, height=4*no.samples, units='in', scale=1.5, limitsize = F)
 
