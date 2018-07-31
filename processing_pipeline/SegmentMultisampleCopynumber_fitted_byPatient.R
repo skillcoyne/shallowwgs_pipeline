@@ -201,7 +201,7 @@ head(data)
     df3 = cbind.data.frame('chrom'=segvals$chrom[rows], 'start'=segvals$start.pos[rows], 'end'=segvals$end.pos[rows], 'seg.val'=segvals[rows,col])
     p = p + geom_segment(data=df3, aes(x=start, xend=end, y=seg.val, yend=seg.val), color='blue', lwd=5) 
 
-   #ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_", sample, "_gamma",gamma2,".png",sep=""),plot=p, width=12, height=4, units='in', scale=2)
+   ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_", sample, "_gamma",gamma2,".png",sep=""),plot=p, width=12, height=4, units='in', scale=2)
 
    plots[[sample]] = p
   }  
@@ -209,11 +209,6 @@ head(data)
   
   ggsave(filename=paste(gamma.plot, '/',"segmentedCoverage_chr_gamma",gamma2,".png",sep=""),plot=do.call(grid.arrange, c(plots, ncol=1)), width=15, height=4*no.samples, units='in', scale=1.5, limitsize = F)
 
-  shapiro.wilk = sapply(1:nrow(segvals[,c(1:5,6)]),function(i) {
-    row.data=unlist(segvals[i,-(1:5)])
-    ifelse(all(row.data==row.data[1]) | length(row.data) > 5000 , NA, shapiro.test(row.data)$statistic)
-  })
-  
   if ( length(grep('^D\\d+', colnames(segvals))) > 1  ) {
     sds = apply(segvals[,-(1:5)],1,sd)
     means = apply(segvals[,-(1:5)],1,mean)
