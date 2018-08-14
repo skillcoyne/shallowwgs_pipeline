@@ -30,7 +30,7 @@ data.files = list.files(data, full.names=T, recursive=T)
 
 patient.name = gsub('\\/', '_', patient.name )
 
-plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient3', sep='/')
+plot.dir = paste(outdir, 'multipcf_plots_fitted_perPatient', sep='/')
 print(paste("Plot directory:", plot.dir))
 if (!dir.exists(plot.dir))  
   dir.create(plot.dir, recursive=T)
