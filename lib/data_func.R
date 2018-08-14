@@ -44,34 +44,17 @@ logTransform<-function(x,inf=F) {
   return(x)
 }
   
-
-binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, gamma2=250, plot.dir='.', metrics.file='binSWGS.out') {
-  require(copynumber)
-  require(apcluster)
-  
-  message(paste('Logging to',metrics.file))
-  
-  if (file.exists(metrics.file)) {
-    mfile = file(metrics.file, 'a')
-  } else {
-    mfile = file(metrics.file, 'w')
-  }
-  
+prep.pcf.data<-function(raw.data,fit.data,blacklist, logTransform=F) {
   if (is.null(blacklist)) 
     stop('QDNASeq blacklisted regions missing')
-    
+  
   countCols = grep('loc|feat|chr|start|end', colnames(fit.data), invert=T)
   
-  write(paste('fit data ',paste(dim(fit.data), collapse=':')), mfile, append=T)
-  write(paste('raw data ',paste(dim(raw.data), collapse=':')), mfile, append=T)
-
   rows = which(fit.data[,1] %in% raw.data[,1])
-  #raw.data = raw.data[rows,]
   fit.data = fit.data[rows,]
-
+  
   window.depths = as.vector(as.matrix(raw.data[,countCols]))/as.vector(as.matrix(fit.data[,countCols]))
   
-  #window.depths = raw.data[,countCols]/fit.data[,countCols]
   # QDNAseq does this in 'correctBins' but it's too late to use this now, so will adjust ours the same way (we weren't 14-May-2018)
   #corrected <- counts / fit
   #corrected[fit <= 0] <- 0
@@ -81,16 +64,16 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
   window.depths = matrix(window.depths, ncol=length(countCols))  
   
   message(paste(nrow(blacklist), "genomic regions in the exclusion list."))
-  write(paste(nrow(blacklist), "genomic regions in the exclusion list."),mfile,append=T)
-
+  #write(paste(nrow(blacklist), "genomic regions in the exclusion list."),mfile,append=T)
+  
   fit.data$in.blacklist = F
   for(r in 1:nrow(blacklist)) {
     fit.data$in.blacklist[ fit.data$chrom == blacklist$chromosome[r] & 
-                           fit.data$start >= blacklist$start[r] & 
-                           fit.data$end <= blacklist$end[r] ] = T
+                             fit.data$start >= blacklist$start[r] & 
+                             fit.data$end <= blacklist$end[r] ] = T
   }
-  message(paste("# blacklisted probes = ",sum(fit.data$in.blacklist),sep=""))
-  write(paste("# blacklisted probes = ",sum(fit.data$in.blacklist),sep=""),mfile,append=T)
+  message(paste("# blacklisted probes = ",sum(fit.data$in.blacklist), ' (',round(sum(fit.data$in.blacklist)/nrow(fit.data),2)*100,'%)',sep=""))
+ # write(paste("# blacklisted probes = ",sum(fit.data$in.blacklist),sep=""),mfile,append=T)
   
   if (sum(fit.data$in.blacklist) <= 0)
     stop("There's an issue with the blacklist, no probes excluded.")
@@ -101,72 +84,109 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
   window.depths.standardised = as.data.frame(window.depths[which(!fit.data$in.blacklist),])
   if (logTransform)
     window.depths.standardised = log2( window.depths.standardised+abs(min(window.depths.standardised, na.rm=T))+1 )
-
+  
   fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
   sdevs = sapply(c(1:length(countCols)), function(s) {
     getMad( window.depths.standardised[!is.na(window.depths.standardised[,s]),s], k=25 )
   })
   sdevs[sdevs==0] = NA
-  sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) 
-  
-  write(paste('sdev=',signif(sdev,3),sep=''),mfile,append=T)
-  
+
   good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.na(sdevs)]))))
-
-  data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
   
-  if (ncol(data) < 4) { # Single sample
-    write("Segmenting single sample",mfile,append=T)
-    res = pcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
-    colnames(res)[grep('mean', colnames(res))] = colnames(raw.data)[countCols]
-    res$sampleID = NULL
-  } else { # for most we have multiple samples
-    write(paste("Segmenting", (ncol(data)-4), "samples"),mfile,append=T)
-    res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
-  }
+  data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
+  colnames(data)[-c(1:2)] = colnames(raw.data)[countCols]
+  
+  return(list('data'=data,'sdevs'=sdevs, 'good.bins'=good.bins, 'window.depths.standardised'=window.depths.standardised, 'fit.data'=fit.data))
+}
 
+# Residual variance?
+# DISTANCE between segment and points, then variance across the distances...
+calculateSegmentResiduals<-function(calcSegments, observedCN) {
+  message("Calculating variance of residuals per segment")
+  cols = ncol(observedCN)-2
+  resids = list()
+  for (i in 1:cols) {
+  #for(col in which(!is.na(sdevs))+5 ) {
+    sample.name = colnames(observedCN)[-c(1:2)][i]
+    pred.seg = calcSegments[,c(1:5,(5+i))]
+    
+    resvar = lapply(1:nrow(pred.seg), function(j) {
+      seg = pred.seg[j,]
+      rows = which(observedCN$start >= seg[['start.pos']] & observedCN$start <= seg[['end.pos']] )
+      (seg[[sample.name]]-observedCN[rows,sample.name])
+    })
+    resids[[sample.name]] = resvar
+  }
+  return(resids)
+}
+
+
+binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, gamma2=250, plot.dir=NULL, metrics.file='binSWGS.out', seg.matrix = NULL) {
+  require(copynumber)
+  #require(apcluster)
+  
+  message(paste('Logging to',metrics.file))
+  
+  if (file.exists(metrics.file)) {
+    mfile = file(metrics.file, 'a')
+  } else {
+    mfile = file(metrics.file, 'w')
+  }
+  countCols = grep('loc|feat|chr|start|end', colnames(fit.data), invert=T)
+  
+  prepped = prep.pcf.data(raw.data,fit.data,blacklist)
+  data = prepped$data
+  fit.data = prepped$fit.data
+  good.bins = prepped$good.bins
+  window.depths.standardised = prepped$window.depths.standardised
+  sdevs = prepped$sdevs
+  sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) 
+  #write(paste('sdev=',signif(sdev,3),sep=''),mfile,append=T)  
+  
+  if (!is.null(seg.matrix) && (ncol(seg.matrix)-5) == length(countCols) && colnames(seg.matrix)[-c(1:5)] %in% colnames(data)[-c(1:2)] ) {
+   res = seg.matrix 
+  } else {
+    if (ncol(data) < 4) { # Single sample
+      write("Segmenting single sample",mfile,append=T)
+      message("Segmenting single sample")
+      res = pcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
+      colnames(res)[grep('mean', colnames(res))] = colnames(raw.data)[countCols]
+      res$sampleID = NULL
+    } else { # for most we have multiple samples
+      write(paste("Segmenting", (ncol(data)-4), "samples"),mfile,append=T)
+      message(paste("Segmenting", (ncol(data)-2), "samples"))
+      res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
+    }
+  }
+    
   if (!is.null(min.probes) & !is.na(min.probes)) {
     probes = which(res$n.probes < min.probes)
     message(paste(round(length(probes)/nrow(res), 3), 'segments with fewer than', min.probes, '"probes"'))
-    write(paste(round(length(probes)/nrow(res), 3), 'segments with fewer than', min.probes, '"probes"'), mfile, append=T)
-    
-    loginfo = cbind.data.frame(ncol(res)-5,nrow(res),min(res$n.probes), max(res$n.probes), median(res$n.probes),quantile(res$n.probes)[2],quantile(res$n.probes)[4], length(probes)/nrow(res) )
-    colnames(loginfo) = c('n.samples','n.segs', 'n.Min','n.Max','n.Median','1Q','3Q','ratio.low')
-    rownames(loginfo) = NULL
+    #write(paste(round(length(probes)/nrow(res), 3), 'segments with fewer than', min.probes, '"probes"'), mfile, append=T)
   }
-  res = res[-probes,]
+  if (length(probes) > 0) res = res[-probes,]
+
+  resids = calculateSegmentResiduals(res, data)
+  resids = resids[which(!is.na(sdevs))]
   
   chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')
   coverage = round(sum(with(res, end.pos-start.pos))/chr.info[22,'genome.length'],3)
-  loginfo$filtered.bp.coverage = coverage
   
-  
-  ac = apcluster(negDistMat(r=2), res[,5,drop=F], details=T, convits=25, q=NA)
-  
-  moments = res[,-c(1:5),drop=F] %>% summarise_all(funs(mean, median, sd))
-  moments$n.ap.clusters = length(ac@clusters)
-  
-  moments = cbind(moments, res[,-c(1:5),drop=F] %>% summarise_all(funs(`1Q`=quantile), probs=0.25))
-  moments = cbind(moments, res[,-c(1:5),drop=F] %>% summarise_all(funs(`3Q`=quantile), probs=0.75))
-  moments$bp.coverage = coverage
-  moments$ratio.low.probes = loginfo$ratio.low
-
-  
-  high.low<-function(x,nsd=1) { length(which(x > median(x)+sd(x)*nsd | x < median(x)-sd(x)*nsd)) }
-  moments = cbind(moments, res[,-c(1:5),drop=F] %>% summarise_all(funs('n.2sd.segs'=high.low), nsd=2))
-
+  plist = list()
   for(col in which(!is.na(sdevs))) {
-    p = plot.segmented.genome(fit.data[good.bins,c(1:4,4+col)], res[,c(1:5,5+col)],window.depths.standardised[good.bins,col,drop=F]) + labs(title=colnames(res)[5+col])
+    p = plot.segmented.genome(fitted = fit.data[good.bins,c(1:4,4+col)], segmented = res[,c(1:5,5+col)], window.depths.std = window.depths.standardised[good.bins,col,drop=F]) + labs(title=colnames(res)[5+col])
 
-    med = median(res[-probes,5+col])
-    std = sd(res[-probes,5+col])*2
+    med = median(res[,5+col])
+    std = sd(res[,5+col])*2
     p = p + geom_hline(yintercept = c(med-std,med+std), color='grey')
-        
-    ggsave(filename=paste(plot.dir, '/', colnames(res)[5+col], '.png', sep=''), plot=p, height=4, width=12)
+     
+    plist[[col]] = p   
+    if (!is.null(plot.dir)) 
+      ggsave(filename=paste(plot.dir, '/segmentedCoverage_', colnames(res)[5+col], '_gamma',gamma2, '.png', sep=''), plot=p, height=4, width=12)
   }
 
   close(mfile)
-  return(list('segvals'=res, 'info'=moments))
+  return(list('segvals'=res, 'resvar'=resids, 'raw.data'=data, 'plots'=plist))
 }
 
 ## Should NAs be replace by per-sample mean value instead??
@@ -421,6 +441,8 @@ get.chr.lengths<-function(chrs = paste('chr', c(1:22, 'X','Y'), sep=''), build='
     chr.lengths$cent.gap = ddply(centromeres, .(chrom), summarise, gap = (max(end)-min(start))/2 )$gap
     chr.lengths$genome.length = cumsum(as.numeric(chr.lengths$chr.length))
   }
+  write.table(chr.lengths, sep='\t', row.names=F, file=paste('/tmp/', build, '_info.txt', sep=''))
+
   return(chr.lengths)
 }
 

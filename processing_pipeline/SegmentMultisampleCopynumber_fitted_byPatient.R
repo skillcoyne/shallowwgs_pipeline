@@ -13,18 +13,18 @@ suppressPackageStartupMessages( library(ggdendro) )
 suppressPackageStartupMessages( library(copynumber) )
 suppressPackageStartupMessages( library(dplyr) )
 
-source("~/workspace/shallowwgs_pipeline/lib/fastPCF.R")
-source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
-source('~/workspace/shallowwgs_pipeline/lib/data_func.R')
+suppressPackageStartupMessages( source("~/workspace/shallowwgs_pipeline/lib/fastPCF.R") )
+suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R') )
+suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
 
 
 data = args[1]
 patient.name = args[2]
 outdir = args[3]
 
-#data = '~/Data/Ellie/QDNAseq'
-#patient.name = 'PR1/HIN/042' #'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
-#outdir = '~/Data/Ellie/Analysis'
+# data = '~/Data/Ellie/QDNAseq'
+# patient.name = 'PR1/HIN/042' #'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
+# outdir = '~/Data/Ellie/Analysis'
 data.dirs = list.dirs(data, full.names=T, recursive=F)
 data.files = list.files(data, full.names=T, recursive=T)
 
@@ -37,7 +37,6 @@ if (!dir.exists(plot.dir))
 
 ## Patient info file
 filename = 'All_patient_info.xlsx'
-
 patient.file = grep(filename, list.files(data, full.names=T), value=T)
 if (length(patient.file) != 1)
   stop(paste("Missing patient info file in", data))
@@ -63,13 +62,8 @@ if (length(data.file) <= 0)
   stop("Missing necessary Rdata file from Multisample script")
 load(file=data.file, verbose=T)
 
-##patient.info$Samplename
-#colnames(fit.data)[1:14]
-
-patient.plot.dir
 write.table(fit.data[,c('location','chrom','start','end',patient.info$Samplename)], sep='\t', quote=F, file=paste(patient.plot.dir, 'raw_fitted.txt', sep='/'))
 write.table(raw.data[,c('location','chrom','start','end',patient.info$Samplename)], sep='\t', quote=F, file=paste(patient.plot.dir, 'raw_counts.txt', sep='/'))
-
 
 #200216 filter dodgy regions
 exclude.file = grep('qDNAseq_blacklistedRegions.txt', data.files, value=T)
@@ -94,6 +88,7 @@ if (sum(fit.data$in.blacklist) <= 0)
 window.depths.standardised = window.depths[!fit.data$in.blacklist,]
 fit.data = fit.data[!fit.data$in.blacklist,-ncol(fit.data)]
 
+
 # Some of the indicies were not run for various reasons. At the moment the patient file does not include that information
 missingIndicies = setdiff(patient.info$Samplename, colnames(window.depths.standardised))
 if (length(missingIndicies > 0))
@@ -103,22 +98,21 @@ if (length(missingIndicies > 0))
 window.depths.standardised = as.data.frame(window.depths.standardised[,na.omit( match(patient.info$Samplename, colnames(window.depths.standardised)) )])
 colnames(window.depths.standardised) = patient.info$Samplename
 
-
 raw.summary = as.data.frame(do.call(rbind, lapply(window.depths.standardised, function(x) {
+  x = x[complete.cases(x)]
   sm = summary(x)
+  sm['Var.'] = var( x[which(x <= 2 & x >= 0)] )
   sm['High.Ratio'] = length(which(x > 1.5 | x < 0.5))/length(x) 
   sm
 })))
-raw.summary$Excluded = raw.summary$High.Ratio >= 0.05
-write.table(raw.summary, file=paste(patient.plot.dir, '/', 'raw_sample_summary.txt', sep=''), sep='\t', quote=F)
-
-
+#raw.summary$Excluded = raw.summary$High.Ratio >= 0.05
+write.table(raw.summary, sep='\t', quote=F, col.names=NA,file=paste(patient.plot.dir, '/', 'raw_sample_summary.txt', sep=''),)
 write.table(do.call(rbind, lapply(window.depths.standardised, summary)), sep='\t', quote=F, col.names=NA, file=paste(patient.plot.dir, '/', patient.name,"_std_window_depths_Summary.txt",sep=""))
 
-exclude = which(raw.summary$High.Ratio >= 0.05)
-samplesExcluded = colnames(window.depths.standardised)[exclude]
+#exclude = which(raw.summary$High.Ratio >= 0.05)
+#samplesExcluded = colnames(window.depths.standardised)[exclude]
 
-window.depths.standardised[,exclude] = NA
+#window.depths.standardised[,exclude] = NA
 head(window.depths.standardised)
 ncol(window.depths.standardised)
 
@@ -147,7 +141,11 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
   filename = paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep="")
   
   data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
-head(data)
+  
+  #data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,sample,drop=F])
+  head(data)
+  
+#head(data)
   if (ncol(data) < 4) { # Single sample
     #colnames(data)[3] = patient.info$Samplename
     res = pcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
@@ -157,14 +155,22 @@ head(data)
     res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
   }
   
+  residuals = calculateSegmentResiduals(res[res$n.probes >= 67,], data)
+  residuals = residuals[which(!is.na(sdevs))]
+
   res.summary<-function(df) {
     sm = summary(df)
     sm['Var.'] = var(df)
     sm
   }
-  
+
+  seg.summary = as.data.frame(do.call(rbind, lapply(res[,-(1:5),drop=F], res.summary)))
+  seg.summary$n.segs = nrow(res)
+  seg.summary$n.filtered.segs = length(which(res$n.probes >= 67))
   write.table(do.call(rbind, lapply(res[,-(1:5),drop=F], res.summary)), sep='\t', quote=F, col.names=NA, file=paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_gamma",gamma2,"_Summary.txt",sep=""))
-  
+
+  save(residuals, file=paste(patient.plot.dir, '/', 'residuals.Rdata',sep=''))
+    
   #plotChrom(data=data,segments=res,chrom=1, layout=c(ncol(data)-2,1))
   message(paste("Writing pcf output to",filename))
   write.table(res, file=filename, sep="\t", quote=F)

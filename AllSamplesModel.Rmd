@@ -512,7 +512,7 @@ p = ggplot(ch, aes(coef, hazards, col=hazards >= qq[length(qq)])) +
   geom_point(alpha=0.8, show.legend = F) + 
   geom_text_repel(aes(x=coef, label=ifelse(hazards >= qq[length(qq)], label, '')),show.legend=F) +
   scale_color_manual(values=c('firebrick3','darkblue')) +
-  labs(title='Top features by hazard ratio', x='Coefficient value', y='Hazard') + plot.theme 
+  labs(title='Features by CV(relative risk)', x='Coefficient value', y='CV(RR)') + plot.theme 
 p
 
 ggsave('plots/haz_coef.png', plot=p, height=5, width=5, units='in', dpi=300)
