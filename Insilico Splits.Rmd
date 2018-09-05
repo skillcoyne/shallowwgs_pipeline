@@ -35,7 +35,7 @@ all.patient.info = read.patient.info(patient.file, demo.file, set='all')$info
 sum.pt = summarise.patient.info(all.patient.info)
 
 cache.dir = paste(data, 'Analysis/5e6_arms_all_logR', sep='/')
-split.dir = paste(data, 'Analysis/5e6_arms_splits_logR', sep='/')
+split.dir = paste(data, 'Analysis/5e6_arms_splits', sep='/')
 
 performance = data.frame(); rocs = list()
 select.alpha = '0.9'

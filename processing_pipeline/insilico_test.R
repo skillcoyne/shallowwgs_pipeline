@@ -9,9 +9,9 @@ suppressPackageStartupMessages(library(reshape2))
 suppressPackageStartupMessages(library(GenomicRanges))
 
 
-suppressPackageStartupMessages(source('lib/load_patient_metadata.R'))
-suppressPackageStartupMessages(source('lib/cv-pt-glm.R'))
-suppressPackageStartupMessages(source('lib/data_func.R'))
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 
 
 

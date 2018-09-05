@@ -23,7 +23,7 @@ patient.name = args[2]
 outdir = args[3]
 
 # data = '~/Data/Ellie/QDNAseq'
-# patient.name = 'PR1/HIN/042' #'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
+# patient.name = 'PR1_WSH_049' #'AD0098' # 'PR1/HIN/042' #'PR1/HIN/044'
 # outdir = '~/Data/Ellie/Analysis'
 data.dirs = list.dirs(data, full.names=T, recursive=F)
 data.files = list.files(data, full.names=T, recursive=T)
@@ -126,6 +126,8 @@ sdevs = sapply(c(1:no.samples), function(s) getMad( window.depths.standardised[!
 sdevs[sdevs==0] = NA
 sdev = exp(mean(log(sdevs[!is.na(sdevs)]))) # geometric mean across all sample sds, doesn't work when there's only one...
 
+names(sdevs) = colnames(window.depths.standardised)
+
 print("sdevs")
 print(sdevs)
 print(sdev)
@@ -140,7 +142,7 @@ good.bins = which(!is.na(rowSums(as.data.frame(window.depths.standardised[,!is.n
   ## Note that the pre processing of the data was to provide Windsorized values
   filename = paste(patient.plot.dir, '/', patient.name,"_segmentedCoverage_fitted_gamma",gamma2,".txt",sep="")
   
-  data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs)])
+  data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,!is.na(sdevs),drop=F])
   
   #data = cbind(fit.data[good.bins,c('chrom','start')],window.depths.standardised[good.bins,sample,drop=F])
   head(data)

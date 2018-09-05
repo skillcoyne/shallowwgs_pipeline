@@ -9,8 +9,8 @@ library(ggplot2)
 library(Matrix)
 library(glmnet)
 
-source('../lib/data_func.R')
-source('../lib/load_patient_metadata.R')
+source('~/workspace/shallowwgs_pipeline//lib/data_func.R')
+source('~/workspace/shallowwgs_pipeline//lib/load_patient_metadata.R')
 
 
 adjustRisk <- function(RR, offset, type='risk') {
@@ -68,7 +68,7 @@ offsetMean = log(cases/m)
 sampleNames = sub('_raw.txt', '', basename(files))
 dspred = data.frame(matrix(ncol=4, nrow=length(sampleNames), dimnames=list(sampleNames,c('Prob','RR', 'Adj.Prob','Adj.RR'))))
 
-chrlen = get.chr.lengths(file='hg19_info.txt')
+chrlen = get.chr.lengths(file='/tmp/hg19_info.txt')
 
 for (n in 1:length(files)) {
   print(n)

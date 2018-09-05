@@ -2,7 +2,7 @@ require(GenomicRanges)
 require(dplyr)
 require(data.table)
 require(tibble)
-
+require(ggplot2)
 
 plot.segmented.genome<-function(fitted, segmented, window.depths.std,probes.min=NULL) {
   chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')[1:22,]
@@ -27,6 +27,35 @@ plot.segmented.genome<-function(fitted, segmented, window.depths.std,probes.min=
 
 }
 
+sample.residual.variance<-function(segment.residuals) {
+  if (is.null(segment.residuals) | !is.list(segment.residuals)) {
+    stop("List of segment residuals required")
+  }
+  
+  cols = c('samplename','var05sd','var1sd','var2sd','var3sd','var','n.segs')
+  res.variance = (data.frame(matrix(ncol=length(cols), nrow=0, dimnames=list(c(),cols))))
+  
+  var.resids = lapply(segment.residuals, function(sample) {
+    do.call(rbind.data.frame, lapply(sample, function(y) {
+      cbind('var05sd'=var(y[y > median(y)-sd(y)/2 & y < median(y)+sd(y)/2]),
+            'var1sd'=var(y[y > median(y)-sd(y) & y < median(y)+sd(y)]),
+            'var2sd'=var(y[y > median(y)-sd(y)*2 & y < median(y)+sd(y)*2]),
+            'var3sd'=var(y[y > median(y)-sd(y)*3 & y < median(y)+sd(y)*3]),
+            'var'=var(y) )
+    }))
+  })
+  for (sample in names(var.resids)) {
+    print(sample)
+    n.segs = length(segment.residuals[[sample]])
+    
+    msd = var.resids[[sample]] %>% dplyr::summarise_all(funs(median,sd) )
+    q1 = var.resids[[sample]] %>% dplyr::summarise_all(funs(Q1=quantile),probs=0.25 )
+    q3 = var.resids[[sample]] %>% dplyr::summarise_all(funs(Q3=quantile),probs=0.75 )
+    
+    res.variance = rbind(res.variance, cbind(sample,msd,q1,q3,n.segs))
+  }
+  return(res.variance)
+}
 
 #source("fastPCF.R")
 logTV<-function(x) {
@@ -127,10 +156,12 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
   
   message(paste('Logging to',metrics.file))
   
-  if (file.exists(metrics.file)) {
-    mfile = file(metrics.file, 'a')
-  } else {
-    mfile = file(metrics.file, 'w')
+  if (!is.null(metrics.file) ) {
+    if (file.exists(metrics.file)) {
+      mfile = file(metrics.file, 'a')
+    } else {
+      mfile = file(metrics.file, 'w')
+    }
   }
   countCols = grep('loc|feat|chr|start|end', colnames(fit.data), invert=T)
   
@@ -147,14 +178,14 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
    res = seg.matrix 
   } else {
     if (ncol(data) < 4) { # Single sample
-      write("Segmenting single sample",mfile,append=T)
-      message("Segmenting single sample")
+      if (!is.null(metrics.file)) write("Segmenting single sample",mfile,append=T)
+      message(paste("Segmenting single sample gamma=",gamma2*sdev))
       res = pcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
       colnames(res)[grep('mean', colnames(res))] = colnames(raw.data)[countCols]
       res$sampleID = NULL
     } else { # for most we have multiple samples
-      write(paste("Segmenting", (ncol(data)-4), "samples"),mfile,append=T)
-      message(paste("Segmenting", (ncol(data)-2), "samples"))
+      if (!is.null(metrics.file) ) write(paste("Segmenting", (ncol(data)-4), "samples"),mfile,append=T)
+      message(paste("Segmenting", (ncol(data)-2), "samples gamma=",gamma2*sdev))
       res = multipcf( data=data, gamma=gamma2*sdev, fast=F, verbose=T, return.est=F)
     }
   }
@@ -185,7 +216,7 @@ binSWGS<-function(raw.data, fit.data, blacklist, logTransform=F, min.probes=67, 
       ggsave(filename=paste(plot.dir, '/segmentedCoverage_', colnames(res)[5+col], '_gamma',gamma2, '.png', sep=''), plot=p, height=4, width=12)
   }
 
-  close(mfile)
+  if (!is.null(metrics.file)) close(mfile)
   return(list('segvals'=res, 'resvar'=resids, 'raw.data'=data, 'plots'=plist))
 }
 
@@ -237,10 +268,7 @@ segment.matrix<-function(dt, na.replace='mean',samplenames=NULL) {
   } else {
     dt[is.na(dt)] = 0
   }
-  
-  
-  
-  
+
   return( dt )
 }
 
