@@ -25,8 +25,6 @@ adjust.cols<-function(mtx, means=NULL, sds=NULL, na.replace=0) {
   return(mtx)
 }
 
-
-
 chr.info = get.chr.lengths(file='hg19_info.txt')
 
 load('~/Data/Ellie/Analysis/5e6_arms_all/model_data.Rdata', verbose = T)
@@ -90,9 +88,11 @@ info = info %>% group_by(Status, PatientID) %>% dplyr::mutate(
 )
 
 info = info %>% group_by(Status, UniqueID, SampleType) %>% dplyr::mutate(
-  lowsca = (Status == 'P' & SampleType == 'BE' & (`mean(SCA.Ratio)` < 0.05 | `mean(Ploidy)` < 2))
+  lowsca = (SampleType == 'BE' & (`mean(SCA.Ratio)` < 0.03 | `mean(Purity)` >= 0.95))
 )
 
+table(unique(info[,c('PatientID','Status')])$Status)
+table(unique(subset(info, !exclude & !wgd & !lowsca, select=c('PatientID','Status')))$Status)
 
 if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
   load('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata', verbose=T) 
@@ -135,11 +135,17 @@ if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
   
   save(mergedSegs, mergedArms, file='tmp_seg_pt.Rdata')
 }
-#rownames(mergedSegs) = sub('\\.LogR','', rownames(mergedSegs))
-#rownames(mergedArms) = sub('\\.LogR','', rownames(mergedArms))
 
 dim(mergedSegs)
 dim(mergedArms)
+
+## Select samples
+mergedSegs = mergedSegs[unique(info$UniqueID),]
+mergedArms = mergedArms[unique(info$UniqueID),]
+
+dim(mergedSegs)
+dim(mergedArms)
+
 
 # Adjust for ploidy
 for (i in 1:nrow(mergedSegs)) {
@@ -150,9 +156,7 @@ for (i in 1:nrow(mergedSegs)) {
   mergedSegs[i,] = mergedSegs[i,]-(ploidy-1)
   mergedArms[i,] = mergedArms[i,]-(ploidy-1)
 }
-
 segmentVariance = apply(mergedSegs, 1, var)
-
 
 # Q-norm
 q.norm.by<-function(df, target) {
@@ -169,8 +173,8 @@ q.norm.by<-function(df, target) {
 copySegs = q.norm.by(mergedSegs, raw.segs)
 copyArms = q.norm.by(mergedArms, raw.arms)
 
-# copySegs = mergedSegs
-# copyArms = mergedArms
+ copySegs = mergedSegs
+ copyArms = mergedArms
 
 # grid.arrange(
 #   ggplot( melt(raw.segs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, sWGS bins (no arms)'),
@@ -219,7 +223,7 @@ if (file.exists(file)) {
     fit0 <- glmnet(df, status, alpha=a, nlambda=nl, family='binomial', standardize=F)    
     autoplot(fit0) + theme(legend.position="none")
     l = fit0$lambda
-    if (a > 0) l = more.l(l)
+    #if (a > 0) l = more.l(l)
     
     cv.patient = crossvalidate.by.patient(x=df, y=status, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     

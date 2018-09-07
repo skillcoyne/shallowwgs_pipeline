@@ -714,28 +714,25 @@ pred.qc = pred.qc %>% group_by(Status, PatientID) %>% dplyr::mutate(
   wgd = (Status == 'NP' & `mean(Ploidy)` > 2.7 )
 )
 
-pred.qc = pred.qc %>% group_by(Status, Samplename) %>% dplyr::mutate(
-  lowsca = ( Status == 'P' & (`mean(SCA.Ratio)` < 0.03 & `mean(Purity)` >= 0.95))
-)
-
 # pred.qc = pred.qc %>% group_by(Status, Samplename) %>% dplyr::mutate(
-#   lowsca = ( `mean(SCA.Ratio)` < 0.01 & `mean(Purity)` >= 0.95)
+#   lowsca = ( Status == 'P' & (`mean(SCA.Ratio)` < 0.03 & `mean(Purity)` >= 0.95))
 # )
 
-#table(subset(pred.qc, !lowsca)$Status)/table(pred.qc$Status)
+pred.qc = pred.qc %>% group_by(Status, Samplename) %>% dplyr::mutate(
+  lowsca = ( `mean(SCA.Ratio)` < 0.03 & `mean(Purity)` >= 0.95)
+)
 
 ggplot(pred.qc, aes(`mean(SCA.Ratio)`, `mean(Purity)`, color=Status)) + geom_point() + facet_grid(~Status) + 
-  geom_vline(xintercept=0.01) + geom_hline(yintercept = 0.95)
+  geom_vline(xintercept=0.03) + geom_hline(yintercept = 0.95)
+
+
+table(subset(pred.qc, !lowsca)$Status)
+table(subset(pred.qc, !lowsca)$Status)/table(pred.qc$Status)
+
 
 ggplot(pred.qc, aes(`mean(SCA.Ratio)`))  + geom_histogram() + facet_wrap(~Status, scales='free_y')
 
 ggplot(pred.qc, aes(`mean(Purity)`))  + geom_histogram() + facet_wrap(~Status, scales='free_y')
-
-
-ggplot(pred.qc, aes(Prob)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
-  scale_fill_gradientn(colors = myPal,  name='') + 
-  labs(title='Predictions, all samples model', y='n Samples', x='Unadjusted Probability')
-
 
 ```
 
@@ -814,9 +811,8 @@ ggplot(subset(pred.qc, !exclude & !wgd & !lowsca), aes(`mean(SCA.Ratio)`,Prob, c
   facet_grid(~Status) + geom_point()
 
 
-ggplot(subset(pred.qc, !exclude & !wgd & !lowsca), aes(`mean(Purity)`,Prob, color=Risk, shape=Status)) + 
+ggplot(subset(pred.qc, !exclude & !wgd & !lowsca), aes(`mean(SCA.Ratio)`,Prob, color=Risk, shape=Status)) + 
   facet_grid(~Status) + geom_point()
-
 
 
 ex.pred = subset(pred.qc, !exclude & !wgd & !lowsca)
@@ -827,7 +823,13 @@ ex.pred = subset(pred.qc, !exclude & !wgd & !lowsca)
 # 
 # nrow(subset(ex.pred, Prob > 0.5 & Status == 'NP'))/table(ex.pred$Status)['NP'] # False pos
 # nrow(subset(ex.pred, Prob < 0.5 & Status == 'NP'))/table(ex.pred$Status)['NP'] #
+
+ct = cor.test(pred.qc.ex$Prob, pred.qc.ex$`mean(SCA.Ratio)`)
+ct2 = cor.test(pred.qc$Prob, pred.qc$`mean(SCA.Ratio)`)
 ```
+
+The risk probability is correlated with the % of the genome that's been altered as identified by Xiahong, R=`r ct$estimate` and that's true even when no patients are excluded (R=`r ct2$estimate`).
+
 
 # Regression using SNP Data
 
@@ -884,7 +886,7 @@ snp.features[subjectHits(x1)]
 ```
 
 
-```{r loo, eval=T}
+```{r loo, eval=F}
 
 
 file = paste(cache.dir, 'loo.Rdata', sep='/')

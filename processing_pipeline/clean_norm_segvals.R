@@ -28,14 +28,25 @@ outdir = args[[outI]][2]
 #fitted_file='~/Data/Ellie/Analysis/multipcf_plots_fitted_perPatient/PR1_HIN_042/PR1_HIN_042_segmentedCoverage_fitted_gamma250.txt'
 #outdir='~/Data/Ellie/Cleaned'
 
+
+resid_file = grep('residuals.Rdata', list.files(dirname(fitted_file), full.names = T), value=T)
+if (length(resid_file) <= 0)
+  stop(paste("No residuals file to evaluate in ", dirname(fitted_file)))
+load(resid_file, verbose=T)
+
+residuals = sample.residual.variance(residuals)
+
+samples = as.character(subset(residuals, varMAD_median <= 0.011)$sample)
+message(paste(length(samples),'/',nrow(residuals), ' samples passed QC',sep=''))
+
 outdir = paste(outdir, sub('\\..*', '', basename(fitted_file)), sep='/')
 
-metrics.file=paste(outdir, '/', basename(fitted_file),'.out',sep='')
-if (file.exists(metrics.file)) {
-  mfile = file(metrics.file, 'a')
-} else {
-  mfile = file(metrics.file, 'w')
-}
+# metrics.file=paste(outdir, '/', dirname(fitted_file),'.out',sep='')
+# if (file.exists(metrics.file)) {
+#   mfile = file(metrics.file, 'a')
+# } else {
+#   mfile = file(metrics.file, 'w')
+# }
 
 print(paste("Writing to ", outdir, sep=''))
 
@@ -55,7 +66,8 @@ if (length(tileI) > 0)
   tile.w = as.numeric(args[[tileI]][2])
 
 message(paste("Reading file:", fitted_file, '\nMin probes:', min.probes, ' Tile width:', tile.w, sep=''))
-write(paste("Reading file:", fitted_file, '\nMin probes:', min.probes, ' Tile width:', tile.w, sep=''), mfile, append=T)
+
+#write(paste("Reading file:", fitted_file, '\nMin probes:', min.probes, ' Tile width:', tile.w, sep=''), mfile, append=T)
 
 
 gain.threshold = 1.1; loss.threshold = 0.9
@@ -64,13 +76,18 @@ if (!file.exists(fitted_file))
   stop(paste("File", fitted_file, "doesn't exist or is unreadable."))
 
 segvals = as_tibble(read.table(fitted_file,sep="\t",stringsAsFactors=F,header=T))
+
+# Select samples that passed QC
+segvals = segvals[,c('chrom','arm','start.pos','end.pos','n.probes',samples)]
+
 head(segvals)
+
 
 probesCol = grep('probe', colnames(segvals), ignore.case=T)
 probes = length(which(segvals[,probesCol] < min.probes))
 message( paste(probes, ' probes (', round(probes/nrow(segvals),2)*100, '%)',' below the minimum probe count (',min.probes,')', sep=''))
 
-write( paste(probes, ' probes (', round(probes/nrow(segvals),2)*100, '%)',' below the minimum probe count (',min.probes,')', sep=''), mfile,append=T)
+#write( paste(probes, ' probes (', round(probes/nrow(segvals),2)*100, '%)',' below the minimum probe count (',min.probes,')', sep=''), mfile,append=T)
 
 # get values
 segvals = segvals[segvals[,probesCol] >= min.probes,]

@@ -41,6 +41,7 @@ sample.residual.variance<-function(segment.residuals) {
             'var1sd'=var(y[y > median(y)-sd(y) & y < median(y)+sd(y)]),
             'var2sd'=var(y[y > median(y)-sd(y)*2 & y < median(y)+sd(y)*2]),
             'var3sd'=var(y[y > median(y)-sd(y)*3 & y < median(y)+sd(y)*3]),
+            'varMAD'=var(y[y<mad(y) & y>-mad(y)]),
             'var'=var(y) )
     }))
   })
