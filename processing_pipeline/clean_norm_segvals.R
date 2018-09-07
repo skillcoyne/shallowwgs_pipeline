@@ -18,7 +18,7 @@ if (length(fileI) < 1 | length(outI) < 1)
        \ttile=<DEF 5e6>\n
        ")
 
-suppressPackageStartupMessages( source('~/workspace/shallowWGSpipeline/lib/data_func.R') )
+suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
 
 args = sapply(args, strsplit, '=')
 
