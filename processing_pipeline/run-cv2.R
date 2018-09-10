@@ -1,3 +1,8 @@
+args = commandArgs(trailingOnly=TRUE)
+
+if (length(args) < 3)
+  stop("Missing required params: <data dir> <outdir> <info file dir> <log transform DEF: FALSE>")
+
 
 suppressPackageStartupMessages(library(ggplot2))
 suppressPackageStartupMessages(library(plyr))
@@ -9,16 +14,9 @@ suppressPackageStartupMessages(library(reshape2))
 suppressPackageStartupMessages(library(GenomicRanges))
 
 
-suppressPackageStartupMessages(source('../lib/load_patient_metadata.R'))
-suppressPackageStartupMessages(source('../lib/cv-pt-glm.R'))
-suppressPackageStartupMessages(source('../lib/data_func.R'))
-
-
-
-args = commandArgs(trailingOnly=TRUE)
-
-if (length(args) < 4)
-  stop("Missing required params: <data dir> <outdir> <info file dir> <log transform DEF: FALSE>")
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 
 data = args[1]
 #data = '~/Data/Ellie/Cleaned'
@@ -88,7 +86,7 @@ tiled.segs = do.call(rbind, lapply(segFiles, function(f) {
 }))
 dim(tiled.segs)
 
-ggplot(melt(tiled.segs), aes(Var2, value)) + geom_point()
+#ggplot(melt(tiled.segs), aes(Var2, value)) + geom_point()
 
 
 ## Log?
@@ -150,7 +148,6 @@ nl = 1000;folds = 10; splits = 5
 sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2)  
 #}
 
-nl = 1000;folds = 10; splits = 5 
 alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
 ## ----- All ----- ##
 coefs = list(); plots = list(); performance.at.1se = list(); models = list(); cvs = list()
@@ -226,6 +223,7 @@ file = paste(cache.dir, 'nolgd.Rdata', sep='/')
 message("No LGD")
 nolgd.plots = list(); coefs = list(); performance.at.1se = list()
 if (file.exists(file)) {
+  message(paste("loading file", file))
   load(file, verbose=T)
 } else {
   # No HGD/IMC/LGD in all patients
@@ -278,6 +276,7 @@ select.alpha = 0.9
 
 file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
+  message(paste("loading file", file))
   load(file, verbose=T)
   
   # Fix info
@@ -302,7 +301,9 @@ if (file.exists(file)) {
     
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
     sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(pg.samp[[pt]]$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
-                                dimnames=list(pg.samp[[pt]]$Samplename,colnames(training)), sparse=T)
+                                dimnames=list(rownames(test),colnames(training)), 
+                                sparse=T)
+    
     for(i in colnames(dysplasia.df)) sparsed_test_data[,i] = test[,i]
     
     # Fit generated on all samples, including HGD

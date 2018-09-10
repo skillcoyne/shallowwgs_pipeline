@@ -25,6 +25,7 @@ args = sapply(args, strsplit, '=')
 fitted_file = args[[fileI]][2] 
 outdir = args[[outI]][2] 
 
+fitted_file='~/Data/Ellie/Analysis/multipcf_plots_fitted_perPatient/AD0607/AD0607_segmentedCoverage_fitted_gamma250.txt'
 #fitted_file='~/Data/Ellie/Analysis/multipcf_plots_fitted_perPatient/PR1_HIN_042/PR1_HIN_042_segmentedCoverage_fitted_gamma250.txt'
 #outdir='~/Data/Ellie/Cleaned'
 
@@ -38,6 +39,8 @@ residuals = sample.residual.variance(residuals)
 
 samples = as.character(subset(residuals, varMAD_median <= 0.011)$sample)
 message(paste(length(samples),'/',nrow(residuals), ' samples passed QC',sep=''))
+if (length(samples) <= 0)
+  stop(paste("No samples passed QC from", fitted_file))
 
 outdir = paste(outdir, sub('\\..*', '', basename(fitted_file)), sep='/')
 
@@ -68,8 +71,6 @@ if (length(tileI) > 0)
 message(paste("Reading file:", fitted_file, '\nMin probes:', min.probes, ' Tile width:', tile.w, sep=''))
 
 #write(paste("Reading file:", fitted_file, '\nMin probes:', min.probes, ' Tile width:', tile.w, sep=''), mfile, append=T)
-
-
 gain.threshold = 1.1; loss.threshold = 0.9
 
 if (!file.exists(fitted_file))
@@ -79,9 +80,7 @@ segvals = as_tibble(read.table(fitted_file,sep="\t",stringsAsFactors=F,header=T)
 
 # Select samples that passed QC
 segvals = segvals[,c('chrom','arm','start.pos','end.pos','n.probes',samples)]
-
 head(segvals)
-
 
 probesCol = grep('probe', colnames(segvals), ignore.case=T)
 probes = length(which(segvals[,probesCol] < min.probes))
