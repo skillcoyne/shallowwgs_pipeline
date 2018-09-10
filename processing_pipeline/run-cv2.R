@@ -332,12 +332,13 @@ if (file.exists(file)) {
       
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
-      sy = as.matrix(sqrt(binomial.deviance(pm, labels[pg.samp[[pt]]$Samplename])))
+      sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(pg.samp[[pt]]$Samplename, names(labels))])))
       
-      pg.samp[[pt]]$Prediction = pm[,1]
-      pg.samp[[pt]]$Prediction.Dev.Resid = sy[,1] 
-      pg.samp[[pt]]$OR = or[,1]
+      rows = which(pg.samp[[pt]]$Samplename %in% rownames(pm) )
       
+      pg.samp[[pt]][rows,'Prediction'] = pm[,1]
+      pg.samp[[pt]][rows,'Prediction.Dev.Resid'] = sy[,1]
+      pg.samp[[pt]][rows,'OR'] = or[,1]
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
