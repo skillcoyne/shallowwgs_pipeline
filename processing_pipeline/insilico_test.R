@@ -1,3 +1,8 @@
+args = commandArgs(trailingOnly=TRUE)
+
+if (length(args) < 3)
+  stop("Missing required params: <data dir> <outdir> <info file dir>")
+
 
 suppressPackageStartupMessages(library(ggplot2))
 suppressPackageStartupMessages(library(plyr))
@@ -14,12 +19,6 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 
 
-
-args = commandArgs(trailingOnly=TRUE)
-
-if (length(args) < 3)
-  stop("Missing required params: <data dir> <outdir> <info file dir>")
-
 data = args[1]
 #data = '~/Data/Ellie/Cleaned'
 outdir = args[2]
@@ -29,8 +28,6 @@ infodir = args[3]
 logT = F
 if (length(args) == 4)
   logT = as.logical(args[4])
-
-
 
 x = (unclass(Sys.time()) + sample(1:1000, 1))
 cache.dir = paste(outdir, '5e6_arms_splits', sep='/')
@@ -112,7 +109,6 @@ z.arms.sd = armsList$z.sd
 allDf = subtract.arms(segs, arms)
 allDf = cbind(allDf, 'cx'=unit.var(cx.score))
 
-
 leaveout = sample(sum.patient.data$Patient, round(nrow(sum.patient.data)*.2))
 leaveoutSamples = subset(patient.info, Patient %in% leaveout)
 
@@ -120,9 +116,8 @@ patient.info = subset(patient.info, !Patient %in% leaveout)
 sum.patient.data = summarise.patient.info(patient.info)
 nrow(sum.patient.data)
 
-leaveoutDf = allDf[leaveoutSamples$Samplename,]
-
-allDf = allDf[patient.info$Samplename,]
+leaveoutDf = allDf[ intersect(leaveoutSamples$Samplename,rownames(allDf)), ]
+allDf = allDf[intersect(patient.info$Samplename,rownames(allDf)), ]
 
 ## labels: binomial: prog 1, np 0
 sampleStatus = subset(patient.info, Samplename %in% rownames(allDf), select=c('Samplename','Status'))
@@ -217,7 +212,7 @@ if (file.exists(file)) {
     
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
     sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(pg.samp[[pt]]$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
-                                dimnames=list(pg.samp[[pt]]$Samplename,colnames(training)), sparse=T)
+                                dimnames=list(rownames(test),colnames(training)), sparse=T)
     for(i in colnames(dysplasia.df)) sparsed_test_data[,i] = test[,i]
     
     # Fit generated on all samples, including HGD
@@ -246,12 +241,14 @@ if (file.exists(file)) {
       
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
-      sy = as.matrix(sqrt(binomial.deviance(pm, labels[pg.samp[[pt]]$Samplename])))
+      sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(pg.samp[[pt]]$Samplename, names(labels))])))
+
       
-      pg.samp[[pt]]$Prediction = pm[,1]
-      pg.samp[[pt]]$Prediction.Dev.Resid = sy[,1] 
-      pg.samp[[pt]]$OR = or[,1]
+      rows = which(pg.samp[[pt]]$Samplename %in% rownames(pm) )
       
+      pg.samp[[pt]][rows,'Prediction'] = pm[,1]
+      pg.samp[[pt]][rows,'Prediction.Dev.Resid'] = sy[,1]
+      pg.samp[[pt]][rows,'OR'] = or[,1]
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
