@@ -19,11 +19,11 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 
 data = args[1]
-#data = '~/Data/Ellie/Cleaned'
+# data = '~/Data/Ellie/Cleaned'
 outdir = args[2]
-#outdir = '~/Data/Ellie/Analysis'
+# outdir = '~/Data/Ellie/Analysis'
 infodir = args[3]
-#infodir = '~/Data/Ellie/QDNAseq'
+# infodir = '~/Data/Ellie/QDNAseq'
 logT = F
 if (length(args) == 4)
   logT = as.logical(args[4])
@@ -407,9 +407,10 @@ if (file.exists(file)) {
     
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
     sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(pg.sampNOHGD[[pt]]$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
-                                dimnames=list(pg.sampNOHGD[[pt]]$Samplename,colnames(training)), sparse=T)
-    for(i in colnames(dysplasia.dfNOHGD)) 
-      sparsed_test_data[,i] = test[,i]
+                                dimnames=list(rownames(test),colnames(training)), 
+                                sparse=T)
+
+    for(i in colnames(dysplasia.dfNOHGD)) sparsed_test_data[,i] = test[,i]
     
     # Fit generated on all samples, including HGD
     fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
@@ -429,7 +430,6 @@ if (file.exists(file)) {
       performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
       
       #coef.1se = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
-      
       nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
       
       coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
@@ -437,15 +437,16 @@ if (file.exists(file)) {
       
       logit <- function(p){log(p/(1-p))}
       inverse.logit <- function(or){1/(1 + exp(-or))}
-      
+
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
-      sy = as.matrix(sqrt(binomial.deviance(pm, labels[pg.sampNOHGD[[pt]]$Samplename])))
+      sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(pg.sampNOHGD[[pt]]$Samplename, names(labels))])))
       
-      pg.sampNOHGD[[pt]]$Prediction = pm[,1]
-      pg.sampNOHGD[[pt]]$OR = or[,1]
-      pg.sampNOHGD[[pt]]$Prediction.Dev.Resid = sy[,1] 
+      rows = which(pg.samp[[pt]]$Samplename %in% rownames(pm) )
       
+      pg.sampNOHGD[[pt]][rows,'Prediction'] = pm[,1]
+      pg.sampNOHGD[[pt]][rows,'Prediction.Dev.Resid'] = sy[,1]
+      pg.sampNOHGD[[pt]][rows,'OR'] = or[,1]
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }

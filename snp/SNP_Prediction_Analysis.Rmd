@@ -38,8 +38,8 @@ adjust.cols<-function(mtx, means=NULL, sds=NULL, na.replace=0) {
   return(mtx)
 }
 
-load('~/Data/Ellie/Analysis/5e6_arms_all/model_data.Rdata', verbose = T)
-load('~/Data/Ellie/Analysis/5e6_arms_all/all.pt.alpha.Rdata', verbose = T)
+load('~/Data/Ellie/Analysis/5e6_arms_all-NOQC/model_data.Rdata', verbose = T)
+load('~/Data/Ellie/Analysis/5e6_arms_all-NOQC/all.pt.alpha.Rdata', verbose = T)
 #alpha = '0'
 alpha = '0.9'
 fitV = models[[alpha]]
@@ -441,7 +441,7 @@ grid.arrange(
 Using a random normal sample and a known BE progresser sample
 
 ```{r rnormals, echo=F, warning=F, message=F, fig.width=10, fig.height=8, eval=T}
-randNormal = sample(rownames(mergedSegs)[nm.rows], 1)
+randNormal = sample( grep('BLD',rownames(mergedSegs)[nm.rows], value=T), 1)
 pt = unlist(strsplit(randNormal, '_'))[1]
 segs = subset(segments.list[[pt]], chr %in% c(1:22) & grepl(sub('_', '.*', randNormal),sample))
 segs$chr = factor(segs$chr, levels=c(1:22), ordered = T)
@@ -639,6 +639,8 @@ top='Probability')
 
 #randNormal = paste(unlist(strsplit(randNormal, '_'))[c(1,3)], collapse='_')
 #randBE = paste(unlist(strsplit(randBE, '_'))[c(1,3)], collapse='_')
+
+
 ```
 
 A quick look at the two random samples from earlier.  
@@ -648,6 +650,9 @@ The random BE should show a very high probability, but for some reason is missed
 `r pander(subset(preds, Samplename == randBE), caption='Random BE')`
 
 In the gastric/blood normals `r signif(length(which(preds.normal$Prob < 0.5))/nrow(preds.normal),2)` are predicted to have <50% probability (TPR).
+
+For blood normals only `r signif(nrow(subset(preds.normal, grepl('BLD',Samplename) & Prob < 0.5))/nrow(subset(preds.normal, grepl('BLD',Samplename) )),2)` have a <50% probabilitye (TPR).
+
 
 ## Evaluating predictions
 
@@ -688,7 +693,10 @@ p2 = ggplot(nonprog, aes(Prob)) + facet_wrap(~Timepoint, scales='free_y', nrow=1
   scale_fill_gradientn(colors = myPal,  name='') + 
   labs(title='Predictions on non-progressors', y='n Samples', x='Unadjusted Probability')
 
-p3 = ggplot(preds.normal, aes(Prob)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
+preds.normal = preds.normal %>% dplyr::mutate(Type = ifelse(grepl('BLD',Samplename), 'Blood','Gastric'))
+
+p3 = ggplot(preds.normal, aes(Prob)) + facet_wrap(~Type, ncol=2, scales = 'free') +
+  geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
   scale_fill_gradientn(colors = myPal,  name='') +
   labs(title='Predictions on BLD/Gastric', y='n Samples', x='Unadjusted Probability')
 
@@ -726,17 +734,12 @@ ggplot(pred.qc, aes(`mean(SCA.Ratio)`, `mean(Purity)`, color=Status)) + geom_poi
   geom_vline(xintercept=0.03) + geom_hline(yintercept = 0.95)
 
 
-table(subset(pred.qc, !lowsca)$Status)
-table(subset(pred.qc, !lowsca)$Status)/table(pred.qc$Status)
-
-
-ggplot(pred.qc, aes(`mean(SCA.Ratio)`))  + geom_histogram() + facet_wrap(~Status, scales='free_y')
-
-ggplot(pred.qc, aes(`mean(Purity)`))  + geom_histogram() + facet_wrap(~Status, scales='free_y')
+pander(
+  rbind(rbind('n.Samples'=table(subset(pred.qc, !lowsca)$Status)),
+  rbind('n.Patients'=table(unique(subset(pred.qc, !lowsca, select=c('PatientID','Status')))$Status))),
+caption='Number of samples and patients that pass the low SCA:high purity thresholds')
 
 ```
-
-
 
 
 ```{r echo=F}
