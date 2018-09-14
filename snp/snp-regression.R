@@ -25,12 +25,37 @@ adjust.cols<-function(mtx, means=NULL, sds=NULL, na.replace=0) {
   return(mtx)
 }
 
-chr.info = get.chr.lengths(file='hg19_info.txt')
+chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')
 
 load('~/Data/Ellie/Analysis/5e6_arms_all/model_data.Rdata', verbose = T)
 rm(labels, dysplasia.df,mn.cx,sd.cx,z.mean,z.sd,z.arms.mean,z.arms.sd)
 
 load('~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata', verbose=T)
+qcdata = qcdata %>% rowwise %>% dplyr::mutate(
+  PatientID = unlist(strsplit(Samplename, '_'))[1],
+  SampleID = unlist(strsplit(Samplename, '_'))[2],
+  EndoID = unlist(strsplit(Samplename, '_'))[3],
+  Level = unlist(strsplit(Samplename, '_'))[4]
+)
+segments.list = lapply(segments.list, function(pt) {
+  pt$sample = sub('\\.LogR','',pt$sample)
+  pt
+})
+
+qcdata$ASCAT.SCA.ratio = apply(qcdata,1,function(s) {
+  smp = subset(segments.list[[ s[['PatientID']] ]], sample == s[['Samplename']] & chr %in% c(1:22))
+  smp = smp %>% rowwise %>% dplyr::mutate(
+    #'Total' = nAraw + nBraw,
+    'Total' = nMajor + nMinor,
+    'CNV' = round(Total) - round(as.numeric(s[['Ploidy']])) )
+  
+  x = subset(smp, CNV != 0 & chr %in% c(1:22))
+  sum(x$endpos - x$startpos) / chr.info[22,'genome.length']
+})
+
+qcdata$SampleType = 'BE'
+qcdata$SampleType[grep('BLD',qcdata$Level, ignore.case=T)] = 'Blood Normal'
+qcdata$SampleType[grep('gastric',qcdata$Level, ignore.case=T)] = 'Gastric Normal'
 
 patient.info = as.data.frame(read_xlsx('~/Data/Ellie/Analysis/SNP/metadata_T1T2.xlsx'))
 patient.info$UniqueSampleID = paste(patient.info$PatientID, patient.info$`Timepoint Code`, sep='_')
@@ -43,16 +68,12 @@ colnames(sample.list)[3] = 'Total.SCA'
 
 sample.list$SCA.Ratio = sample.list$Total.SCA/max(chr.info$genome.length)
 
-sample.info  = do.call(rbind.data.frame, sapply(qcdata$Samplename, strsplit, '_'))
-colnames(sample.info) = c('PatientID','SampleID','EndoID','Level')
-sample.info[] = lapply(sample.info[], as.character)
-sample.info[which(sample.info$PatientID == 524 & sample.info$Level == 524), 'Level'] = ''
-sample.info$Samplename = qcdata$Samplename
+sample.info = qcdata[,c('PatientID','SampleID','EndoID','Level','Samplename','ASCAT.SCA.ratio')]
+sample.info = base::merge(sample.info, patient.info[,c('PatientID','UniqueSampleID','Timepoint','Timepoint Code','Status','Pathology')], by.x=c('PatientID','EndoID'), by.y=c('PatientID','Timepoint Code'))
+head(sample.info)
 
 message(paste(length(unique(sample.info$PatientID)), 'patients listed in metadata file'))
 message(paste(nrow(qcdata), 'samples available'))
-
-sample.info = base::merge(sample.info, patient.info[,c('PatientID','Timepoint','Timepoint Code','Status','Pathology')], by.x=c('PatientID','EndoID'), by.y=c('PatientID','Timepoint Code'))
 
 get.ratio<-function(PID, SID) { subset(sample.list, PatientID == PID & SampleNum == SID)$SCA.Ratio }
 sample.info = sample.info %>% rowwise() %>% dplyr::mutate(
@@ -61,38 +82,22 @@ sample.info = sample.info %>% rowwise() %>% dplyr::mutate(
 
 patient.info = patient.info %>% rowwise() %>% dplyr::mutate( Endoscopy = ifelse(Timepoint == 'T1', 1, 2) )
 
-qcdata$SampleType = 'BE'
-qcdata$SampleType[grep('BLD',rownames(qcdata), ignore.case=T)] = 'Blood Normal'
-qcdata$SampleType[grep('gastric',rownames(qcdata), ignore.case=T)] = 'Gastric Normal'
-
-qcdata = base::merge(qcdata, sample.info[,c('Samplename','Status','Timepoint','SCA.Ratio')], by='Samplename')
+qcdata = base::merge(qcdata, sample.info[,c('Samplename','Status','UniqueSampleID','Timepoint','SCA.Ratio','Pathology')], by='Samplename')
 
 ## PER ENDOSCOPY
-qcdata.samples = qcdata %>% group_by(Samplename) %>% dplyr::mutate(
-  PatientID = unlist(strsplit(Samplename, '_'))[1],
-  EndoID = unlist(strsplit(Samplename, '_'))[3],
-  Level = unlist(strsplit(Samplename, '_'))[4],
-  UniqueID = paste(PatientID, EndoID, sep='_')
-) 
+qcdata.samples = qcdata %>% group_by(PatientID, EndoID, UniqueSampleID, Status, Timepoint, SampleType, Pathology) %>% dplyr::summarise_if(is.numeric, c('mean','max','min','sd')) %>% mutate_if(is.numeric, round, digits=3)
 
-qcdata = qcdata.samples %>% group_by(PatientID, EndoID, Status, Timepoint, SampleType, UniqueID) %>% dplyr::summarise(
-  mean(Ploidy), mean(Purity), mean(Goodnessoffit), mean(SCA.Ratio)
-)
-qcdata$SCA.Ratio = round(qcdata$`mean(SCA.Ratio)`, 4)
-
-info = base::merge(qcdata, patient.info[,c('UniqueSampleID', 'Pathology')], by.x='UniqueID', by.y='UniqueSampleID')
-
-info = info %>% group_by(Status, PatientID) %>% dplyr::mutate(
+info = qcdata.samples %>% group_by(Status, PatientID, UniqueSampleID) %>% dplyr::mutate(
   exclude=(Status == 'NP' & (length(which(Pathology == 'HGD')) > 0)),
-  wgd = (Status == 'NP' & `mean(Ploidy)` > 2.7 )
-)
-
-info = info %>% group_by(Status, UniqueID, SampleType) %>% dplyr::mutate(
-  lowsca = (SampleType == 'BE' & (`mean(SCA.Ratio)` < 0.03 | `mean(Purity)` >= 0.95))
+  wgd = (Status == 'NP' & Ploidy_max > 2.7 ),
+  lowsca = (ASCAT.SCA.ratio_mean < 0.02 & Purity_mean > 0.95)
 )
 
 table(unique(info[,c('PatientID','Status')])$Status)
 table(unique(subset(info, !exclude & !wgd & !lowsca, select=c('PatientID','Status')))$Status)
+
+info = subset(info, !exclude & !wgd & !lowsca & SampleType == 'BE')
+nrow(info)
 
 if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
   load('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata', verbose=T) 
@@ -100,6 +105,7 @@ if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
 
   mergedSegs = NULL
   mergedArms = NULL
+  
   length(ptdirs)
   
   for (pt in ptdirs) {
@@ -140,8 +146,8 @@ dim(mergedSegs)
 dim(mergedArms)
 
 ## Select samples
-mergedSegs = mergedSegs[unique(info$UniqueID),]
-mergedArms = mergedArms[unique(info$UniqueID),]
+mergedSegs = mergedSegs[unique(info$UniqueSampleID),]
+mergedArms = mergedArms[unique(info$UniqueSampleID),]
 
 dim(mergedSegs)
 dim(mergedArms)
@@ -151,7 +157,7 @@ dim(mergedArms)
 for (i in 1:nrow(mergedSegs)) {
   sample = rownames(mergedSegs)[i]
   x = unlist(strsplit(sample, '_'))
-  ploidy = subset(qcdata, SampleType == 'BE' & PatientID == x[1] & EndoID == x[2])$`mean(Ploidy)`
+  ploidy = round(subset(info, UniqueSampleID == sample)$Ploidy_mean)
   if (grepl('BLD|gastric', sample, ignore.case = T)) ploidy = 2
   mergedSegs[i,] = mergedSegs[i,]-(ploidy-1)
   mergedArms[i,] = mergedArms[i,]-(ploidy-1)
@@ -173,8 +179,8 @@ q.norm.by<-function(df, target) {
 copySegs = q.norm.by(mergedSegs, raw.segs)
 copyArms = q.norm.by(mergedArms, raw.arms)
 
- copySegs = mergedSegs
- copyArms = mergedArms
+#copySegs = mergedSegs
+#copyArms = mergedArms
 
 # grid.arrange(
 #   ggplot( melt(raw.segs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, sWGS bins (no arms)'),
@@ -195,15 +201,15 @@ arrayDf = subtract.arms(ms, ma)
 arrayDf = cbind(arrayDf, 'cx'=unit.var(cx))
 
 
-slabels = as.data.frame(subset(info, !exclude & !wgd & !lowsca & SampleType == 'BE', select=c('PatientID','UniqueID','Status')))
+slabels = as.data.frame(subset(info, !exclude & !wgd & !lowsca & SampleType == 'BE', select=c('PatientID','UniqueSampleID','Status')))
 slabels$Status = factor(slabels$Status)
 #slabels = as.data.frame(pred.qc, select=c('PatientID','Samplename','Status'))
-rownames(slabels) = slabels$UniqueID
+rownames(slabels) = slabels$UniqueSampleID
 
-df = arrayDf[which(rownames(arrayDf) %in% slabels$UniqueID),]
+df = arrayDf[which(rownames(arrayDf) %in% slabels$UniqueSampleID),]
 
 status = as.integer(slabels$Status)-1
-names(status) = slabels$UniqueID
+names(status) = slabels$UniqueSampleID
 
 nl = 1000;folds = 10; splits = 5 
 sets = create.patient.sets(slabels, folds, splits, 0.15)  
@@ -223,7 +229,7 @@ if (file.exists(file)) {
     fit0 <- glmnet(df, status, alpha=a, nlambda=nl, family='binomial', standardize=F)    
     autoplot(fit0) + theme(legend.position="none")
     l = fit0$lambda
-    #if (a > 0) l = more.l(l)
+    if (a > 0) l = more.l(l)
     
     cv.patient = crossvalidate.by.patient(x=df, y=status, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
@@ -305,8 +311,8 @@ file = paste(cache.dir, 'loo.Rdata', sep='/')
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
       
-      slabels[which(slabels$UniqueID %in% rownames(pm)),'Prediction'] = pm[,1]
-      slabels[which(slabels$UniqueID %in% rownames(pm)),'RR'] = or[,1]
+      slabels[which(slabels$UniqueSampleID %in% rownames(pm)),'Prediction'] = pm[,1]
+      slabels[which(slabels$UniqueSampleID %in% rownames(pm)),'RR'] = or[,1]
       
     } else {
       warning(paste(pt, "did not have a 1se"))

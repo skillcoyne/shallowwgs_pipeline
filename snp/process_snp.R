@@ -4,50 +4,55 @@ library(ggplot2)
 library(gridExtra)
 library(dplyr)
 
-#suppressPackageStartupMessages( source('lib/data_func.R') )
 suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
 
 args = commandArgs(trailingOnly=TRUE)
 
-#if (length(args) < 2)
-#  stop("Missing data directory or summary file")
+if (length(args) < 3)
+  stop("Usage: <data directory> <all patient ASCAT Rdata> <Combine by endoscopy T/F> <exlucde low SCA T/F")
 
-if (length(args) < 1)
-  stop("Missing data directory ")
-
+chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')
 
 datadir = args[1]
-#summary.file = args[2]
+# datadir =  "~/Data/Reid_SNP/PerPatient-preLM/512"
+allpts.file = args[2]
+# allpts.file = '~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata'
+byEndo = as.logical(args[3])
+# byEndo = T
+excludeLowSCA = as.logical(args[4])
+# excludeLowSCA = T
 
-# datadir = '~/Data/Reid_SNP/PerPatient-preLM/512'
+if (!file.exists(allpts.file))
+  stop(paste(allpts.file, "doesn't exist or isn't readable"))
 
-
-byEndo = F
-if (length(args) > 2)
-  byEndo = as.logical(args[3])
+load(allpts.file, verbose=T)
+qcdata = qcdata %>% rowwise %>% dplyr::mutate(
+  PatientID = unlist(strsplit(Samplename, '_'))[1],
+  SampleID = unlist(strsplit(Samplename, '_'))[2],
+  EndoID = unlist(strsplit(Samplename, '_'))[3],
+  Level = unlist(strsplit(Samplename, '_'))[4]
+)
+segments.list = lapply(segments.list, function(pt) {
+  pt$sample = sub('\\.LogR','',pt$sample)
+  pt
+})
+qcdata$ASCAT.SCA.ratio = apply(qcdata,1,function(s) {
+  smp = subset(segments.list[[ s[['PatientID']] ]], sample == s[['Samplename']] & chr %in% c(1:22))
+  smp = smp %>% rowwise %>% dplyr::mutate(
+    #'Total' = nAraw + nBraw,
+    'Total' = nMajor + nMinor,
+    'CNV' = round(Total) - round(as.numeric(s[['Ploidy']])) )
+  x = subset(smp, CNV != 0 & chr %in% c(1:22))
+  sum(x$endpos - x$startpos) / chr.info[22,'genome.length']
+})
+qcdata$SampleType = 'BE'
+qcdata$SampleType[grep('BLD',qcdata$Level, ignore.case=T)] = 'Blood Normal'
+qcdata$SampleType[grep('gastric',qcdata$Level, ignore.case=T)] = 'Gastric Normal'
 
 if (!dir.exists(datadir))
   stop(paste(datadir, "doesn't exist or isn't readable"))
-
 print(datadir)
-#print(summary.file)
 
-#smy = read.table(summary.file, sep = '\t', header = T)
-#smy = subset(smy, Copy.number <= 12)
-
-# a = as.data.frame(smy[,c('Copy.number','var.LRR')])
-# colnames(a) = c('CN','y')
-# b = as.data.frame(smy[,c('Copy.number','mean.LRR')])
-# colnames(b) = c('CN','y')
-# 
-# fitSD = lm(y~CN, data=a)
-# fitM = lm(y~CN, data=b)
-# #fitCN = lm(mean~CN, data=b)
-
-#autoplot(fitM)
-
-### Lifted directly from ASCAT
-#Perform MAD winsorization:
 madWins <- function(x,tau,k){
   xhat <- medianFilter(x,k)
   d <- x-xhat
@@ -87,7 +92,7 @@ medianFilter <- function(x,k){
 ### ---------------------- ###
 
 
-chr.info = get.chr.lengths(file='~/tmp/hg19_info.txt')[1:22,]
+chr.info = chr.info[1:22,]
 print(chr.info)
 if (is.null(chr.info)) stop("Failed to get chr info")
 chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
@@ -101,64 +106,46 @@ segraw = ascat.output$segments_raw
 rm(ascat.pcf, ascat.gg, ascat.output)
 
 segraw = subset(segraw, chr %in% c(1:22))
-
 head(segraw)
-
-#segraw = segraw %>% rowwise() %>% dplyr::mutate( total = nMajor+nMinor )
 
 # Adjust based on the summary values per CN that we get in WGS (mostly) NP Barrett's cases
 adjust.segraw<-function(segraw, ploidy) {
   #segraw$adjLRR = NA
   segraw$totalRaw = round(with(segraw, nAraw+nBraw), 3)
-
   segraw = segraw %>% rowwise() %>% mutate(totalRaw = round(nAraw+nBraw, 3), adjRaw = totalRaw-ploidy[sample], ploidy = ploidy[sample] )
-  
-  #segraw$total = with(segraw, nMajor+nMinor)
-  # for (cn in unique(segraw$total)) {
-  #   rows = which(segraw$total == cn)
-  #   values = segraw[rows, 'medLRR', drop=T]
-  #   newSD = predict(fitSD, newdata=cbind.data.frame('CN'=cn))
-  #   
-  #   # if (cn == 2) {
-  #   #   newM = 0
-  #   # } else if (cn > 2) {
-  #   #   newM = abs(newM)
-  #   # }
-  #   if (cn == 0) {
-  #     newM = predict(fitM, newdata=cbind.data.frame('CN'=cn))
-  #     segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-  #   } else if (cn == 2) {
-  #     newSD = sd(values)
-  #     newM = 0
-  #     segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-  #   } else {
-  #     newM = mean(values)
-  #     segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-  #   }
-  # }
   return(segraw)
 }
   
 segraw = adjust.segraw(segraw, sample.ploidy)
+head(segraw)
 
 segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
+
+if (excludeLowSCA) {
+  median.SCA = median(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio) + sd(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio)
+  qcdata = subset(qcdata, (SampleType == 'BE' & ASCAT.SCA.ratio > median.SCA) | SampleType != 'BE')
+  
+  segraw$sample = sub('\\.LogR','',segraw$sample)
+  
+  segraw = subset(segraw, sample %in% intersect(qcdata$Samplename, segraw$sample))
+}
+
 
 m = (melt(segraw, measure.vars=c('adjRaw')))
 p = ggplot(m, aes(sample, value, fill=grepl('BLD|gastric',sample))) + geom_jitter() + geom_boxplot(alpha=0.8) + labs(y='Ploidy Adj. CN', x='', title=basename(datadir)) + theme(legend.position = 'none', axis.text.x = element_text(angle=45, hjust=1))
 
-ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(sample~chr, space='free_y', scales='free_x') + 
+p2 = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(sample~chr, space='free_y', scales='free_x') + 
   geom_segment(data=segraw, aes(x=startpos,xend=endpos,y=adjRaw,yend=adjRaw), color='darkgreen') + 
   #geom_hline(yintercept=c(median(segraw$adjRaw)+sd(segraw$adjRaw), median(segraw$adjRaw), median(segraw$adjRaw)-sd(segraw$adjRaw)), color='red') + 
   theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) 
 
-# m = (melt(segraw, measure.vars=c('medLRR','adjLRR')))
-# m$totalRaw = round(round(m$totalRaw,1))
-# p = ggplot(m, aes(variable, value, group=variable, fill=variable, color=variable)) + facet_grid(~total) + geom_jitter(alpha=0.5) + geom_boxplot(outlier.colour = NA) + labs(title=basename(datadir))
 plotdir = paste(datadir,'/plots', sep='')
 if (dir.exists(plotdir)) unlist(plotdir, recursive=T)
 
 dir.create(plotdir, showWarnings = F, recursive = T)
 ggsave(filename= paste(plotdir,'rawCN.png',sep='/'), plot=p, width=length(unique(segraw$sample))*2, height=6,scale=1.5, limitsize = F)
+ggsave(filename= paste(plotdir,'adjCN.png',sep='/'), plot=p2, height=length(unique(segraw$sample))*2, width=8,scale=1.5, limitsize = F)
+
 save(segraw, file=paste(datadir, 'segments_raw.Rdata',sep='/'))
 
 allsamples = NULL
@@ -215,35 +202,26 @@ for (i in 1:length(rowsPerSample)) {
   
   tiled$chr = factor(tiled$chr, levels=chr.info$chr)
 
-  p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(lims) + facet_grid(~chr,space='free_x',scales='free_x') + geom_segment(data=tiled, aes(x=start,xend=end,y=tiled[,4],yend=tiled[,4]), size=3, color='darkgreen') + theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) + labs(x='', y=valueCol, title=names(rowsPerSample)[i])
-  
+  p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(lims) + facet_grid(~chr,space='free_x',scales='free_x') + 
+    geom_segment(data=tiled, aes(x=start,xend=end,y=adjRaw,yend=adjRaw), size=3, color='darkgreen') + 
+    theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) + labs(x='', y=valueCol, title=names(rowsPerSample)[i])
+
   plist[[ names(rowsPerSample)[i] ]] = p
 }
 
 ggsave(filename = paste(plotdir,'tiled.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=5*length(plist), limitsize = F)
 
-write.table(allsamples, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_tiled.txt', sep=''))
-write.table(allarms, sep='\t', quote=F, row.names=F, file=paste(datadir,'/', basename(datadir), '_wins_arms_tiled.txt', sep=''))
-#}
+filename1 = paste(basename(datadir), '_wins_tiled',sep='') 
+filename2 = paste(basename(datadir), '_wins_arms_tiled',sep='') 
+if (excludeLowSCA) {
+  filename1 = paste(filename1, '_exLOW',sep='') 
+  filename2 = paste(filename2, '_exLOW',sep='') 
+}
+filename1 = paste(filename1, '.txt',sep='') 
+filename2 = paste(filename2, '.txt',sep='') 
+
+write.table(allsamples, sep='\t', quote=F, row.names=F, file=filename1)
+write.table(allarms, sep='\t', quote=F, row.names=F, file=filename2)
+
 print("Finished")
-
-
-# mtx = segment.matrix(allsamples)
-# for (i in 1:ncol(mtx))
-#   mtx[,i] = unit.var(mtx[,i], z.mean[i], z.sd[i])
-# 
-# armmtx = segment.matrix(allarms)
-# for (i in 1:ncol(armmtx))
-#   armmtx[,i] = unit.var(armmtx[,i], z.arms.mean[i], z.arms.sd[i])
-# 
-# cx = score.cx(mtx, 1)
-# 
-# 
-# arrayDf = subtract.arms(mtx, armmtx)
-# arrayDf = cbind(arrayDf, 'cx'=unit.var(cx, mn.cx, sd.cx))
-# 
-# predict(fitV, newx=arrayDf, s=l, type='response')
-# predict(fitV, newx=arrayDf, s=l, type='link')
-
-
 
