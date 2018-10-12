@@ -49,21 +49,8 @@ sum.patient.data = summarise.patient.info(patient.info)
 files = list.files(path=data, pattern='^probefiltered.*seg', recursive=T, full.names=T)
 files = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), files, value=T)
 
-# cleaned = list.files(path=data, pattern='tiled', full.names=T, recursive=T)
-# raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
-# 
-# cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
-# raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
-
 if (length(files) != nrow(sum.patient.data))
   stop("Files don't match")
-
-#cleaned = grep('AHM0320', cleaned, value=T, invert=T)
-#raw = grep('AHM0320', raw, value=T, invert=T)
-
-# Excluded in the spreadsheet
-#sum.patient.data = subset(sum.patient.data, Hospital.Research.ID != 'AHM0320')
-#patient.info = subset(patient.info, Hospital.Research.ID != 'AHM0320')
 
 tiled.segs = do.call(rbind, lapply(files, function(file) {
   message(file)
