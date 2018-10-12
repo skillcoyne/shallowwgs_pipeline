@@ -3,20 +3,21 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required params: <data dir> <outdir> <info file dir> <log transform DEF: FALSE>")
 
-
-suppressPackageStartupMessages(library(ggplot2))
-suppressPackageStartupMessages(library(plyr))
-suppressPackageStartupMessages(library(dplyr))
-suppressPackageStartupMessages(library(gridExtra))
+# 
+# suppressPackageStartupMessages(library(ggplot2))
+# suppressPackageStartupMessages(library(plyr))
+# suppressPackageStartupMessages(library(dplyr))
+# suppressPackageStartupMessages(library(gridExtra))
 suppressPackageStartupMessages(library(glmnet))
 suppressPackageStartupMessages(library(mice))
-suppressPackageStartupMessages(library(reshape2))
-suppressPackageStartupMessages(library(GenomicRanges))
+# suppressPackageStartupMessages(library(reshape2))
+# suppressPackageStartupMessages(library(GenomicRanges))
 
+library(BarrettsProgressionRisk)
 
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
-suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
+#suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 
 data = args[1]
 # data = '~/Data/Ellie/Cleaned'
@@ -45,13 +46,16 @@ patient.info = plyr::arrange(patient.info, Status, Hospital.Research.ID, Endosco
 sum.patient.data = summarise.patient.info(patient.info)
 #nrow(sum.patient.data)
 
-cleaned = list.files(path=data, pattern='tiled', full.names=T, recursive=T)
-raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
+files = list.files(path=data, pattern='^probefiltered.*seg', recursive=T, full.names=T)
+files = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), files, value=T)
 
-cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
-raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
+# cleaned = list.files(path=data, pattern='tiled', full.names=T, recursive=T)
+# raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
+# 
+# cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
+# raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
 
-if (length(raw) != nrow(sum.patient.data))
+if (length(files) != nrow(sum.patient.data))
   stop("Files don't match")
 
 #cleaned = grep('AHM0320', cleaned, value=T, invert=T)
@@ -61,36 +65,24 @@ if (length(raw) != nrow(sum.patient.data))
 #sum.patient.data = subset(sum.patient.data, Hospital.Research.ID != 'AHM0320')
 #patient.info = subset(patient.info, Hospital.Research.ID != 'AHM0320')
 
-armFiles = grep('arms', cleaned, value=T)
-segFiles = grep('arms', cleaned, invert=T, value=T)
-
-length(segFiles) == length(armFiles)
-
-# Get the SD, mean, and variance(?) per sample
-sampleVar = do.call(rbind, lapply(raw, function(f) {
-  t = read.table(f, sep='\t', header=T)
-  sampleCols = grep('chr|arm|start|end|probes', colnames(t), invert = T)
-  x = do.call(rbind, lapply(sampleCols, function(i){
-    cbind('Sample.Mean'=mean(t[,i]),
-          'Sample.SD'=sd(t[,i]),
-          'Sample.Var'=var(t[,i]))
-  }))
-  rownames(x) = colnames(t)[sampleCols]
-  return(x)
+tiled.segs = do.call(rbind, lapply(files, function(file) {
+  message(file)
+  segvals = read.table(file, header=T, sep='\t')
+  BarrettsProgressionRisk::tileSegments(segvals, 5e6, verbose=F)
 }))
 
-# Load segment files
-tiled.segs = do.call(rbind, lapply(segFiles, function(f) {
-  fx = load.segment.matrix(f)
-  fx
+tiled.arms = do.call(rbind, lapply(files, function(file) {
+  message(file)
+  segvals = read.table(file, header=T, sep='\t')
+  BarrettsProgressionRisk::tileSegments(segvals, 'arms',verbose=F)
 }))
+
 dim(tiled.segs)
-
-#ggplot(melt(tiled.segs), aes(Var2, value)) + geom_point()
-
 
 ## Log?
 if (logT) tiled.segs = t(apply(tiled.segs, 1, logTransform))
+
+head(tiled.segs)
 
 segsList = prep.matrix(tiled.segs)
 
@@ -104,13 +96,6 @@ z.sd = segsList$z.sd
 cx.score = score.cx(segs,1)
 mn.cx = mean(cx.score)
 sd.cx = sd(cx.score)
-
-# Load arm files  
-tiled.arms = do.call(rbind, lapply(armFiles, function(f) {
-  fx = load.segment.matrix(f)
-  fx
-}))
-dim(tiled.arms)
 
 if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
 armsList = prep.matrix(tiled.arms)

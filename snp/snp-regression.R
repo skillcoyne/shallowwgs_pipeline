@@ -96,7 +96,9 @@ info = qcdata.samples %>% group_by(Status, PatientID, UniqueSampleID) %>% dplyr:
 table(unique(info[,c('PatientID','Status')])$Status)
 table(unique(subset(info, !exclude & !wgd & !lowsca, select=c('PatientID','Status')))$Status)
 
-info = subset(info, !exclude & !wgd & !lowsca & SampleType == 'BE')
+#info = subset(info, !exclude & !wgd & !lowsca & SampleType == 'BE')
+#info = subset(info, !exclude & !wgd & SampleType == 'BE')
+info = subset(info, SampleType == 'BE')
 nrow(info)
 
 if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
@@ -215,7 +217,7 @@ nl = 1000;folds = 10; splits = 5
 sets = create.patient.sets(slabels, folds, splits, 0.15)  
 ## ----- All ----- ##
 coefs = list(); plots = list(); performance.at.1se = list(); models = list(); cvs = list()
-cache.dir = '~/Data/Ellie/Analysis/SNP'
+cache.dir = '~/Data/Ellie/Analysis/SNP/no-low'
 dir.create(cache.dir, recursive = T, showWarnings = F)
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {

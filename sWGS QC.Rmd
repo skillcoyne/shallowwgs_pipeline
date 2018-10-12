@@ -1,0 +1,119 @@
+---
+title: "sWGS QC"
+author: "Sarah Killcoyne"
+date: "8/30/2018"
+output: 
+  html_document: 
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(pander)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+
+dir1 = '~/Data/Ellie/Analysis/multipcf_plots_fitted_perPatient'
+dir2 = '~/Data/Ellie/Analysis/VAL_Cohort/sWGS/'
+
+```
+
+## Initial sWGS dataset (Ellie's)
+
+```{r, echo=F}
+res.variance = read.table(paste(dir1,'resid_var.txt',sep='/'),header=T)
+#pander(head(res.variance[,grep('var1sd',colnames(res.variance))]), caption='Residuals across segments per sample')
+pander(head(res.variance[,grep('varMAD',colnames(res.variance))]), caption='Residuals across segments per sample')
+```
+
+```{r, echo=F, fig.height=10}
+res.variance = arrange(res.variance,varMAD_median)
+cutoff = round(median(res.variance$varMAD_median)+sd(res.variance$varMAD_median)*2, 3)
+#cutoff = 0.015
+
+grid.arrange(
+  ggplot(res.variance,aes(sample=varMAD_median)) + stat_qq() + geom_hline(yintercept=cutoff, linetype='dashed',color='grey') + 
+    labs(title='Normal Q-Q plot (all)', x='Theoretical quantiles',y='Sample quantiles') + theme_bw(),
+  ggplot(subset(res.variance,varMAD_median < cutoff), aes(sample=varMAD_median)) + stat_qq() + 
+    labs(title='Normal Q-Q plot (samples<cutoff)', x='Theoretical quantiles',y='Sample quantiles') + theme_bw(),
+  top='var( seg<MAD(seg) | seg>-MAD(seg)  )'
+)
+```
+
+```{r, echo=F}
+ggplot(res.variance, aes(varMAD_median)) + geom_histogram(bins=50,color='lightblue') + 
+  geom_vline(xintercept = cutoff, linetype='dashed', color='grey') + labs(x='var( seg<MAD(seg) | seg>-MAD(seg)  )') +
+  theme_bw()
+```
+
+The cutoff=`r cutoff`. Samples with a variance greater than this are:
+
+```{r, echo=F}
+pander( arrange(subset(res.variance, round(varMAD_median,3) > cutoff, select=c(pid,sample, varMAD_median,varMAD_sd, varMAD_Q1,varMAD_Q3)), pid, varMAD_median) )
+
+failedQC = arrange(subset(res.variance, round(varMAD_median,3) > cutoff, select=c(pid,sample, varMAD_median,varMAD_sd, varMAD_Q1,varMAD_Q3)), pid, varMAD_median)
+
+```
+
+`r nrow(failedQC)` samples (`r signif(nrow(failedQC)/nrow(res.variance)*100,2)`%) would have failed due to high variance across all the segments. A manual check of these agrees with most of these. One or two samples would appear to be driven by some extreme segments, and this could be further evaluated, and stricter cutoffs do pick up additional samples that are borderline.  However, this cutoff appears to be reasonable.
+
+## Validation dataset
+
+Cutoff from above dataset applied to the validation set.
+
+```{r, echo=F}
+resVal = read.table(paste(dir2,'resid_var.txt',sep='/'),header=T)
+pander(head(resVal[,grep('var1',colnames(resVal))]), caption='Residuals across segments per sample')
+
+resVal = arrange(resVal,varMAD_median)
+
+ggplot(resVal,aes(sample=varMAD_median)) + stat_qq() + geom_hline(yintercept=cutoff, linetype='dashed',color='grey') + 
+  labs(title='Normal Q-Q plot (all)', x='Theoretical quantiles',y='Sample quantiles') + theme_bw()
+
+
+ggplot(resVal, aes(varMAD_median)) + geom_histogram(bins=50,color='lightblue') + 
+  geom_vline(xintercept = cutoff, linetype='dashed', color='grey') + labs(x='var(median(segments)+1sd(segments))') +
+  theme_bw()
+
+failedQCVal = arrange(subset(resVal, round(varMAD_median,3) > cutoff, select=c(pid,sample, varMAD_median,varMAD_sd, varMAD_Q1,varMAD_Q3)), pid, varMAD_median)
+
+
+setdiff(as.character(resVal$sample),as.character(failedQCVal$sample))
+
+```
+
+The result from this is that `r nrow(failedQCVal)` samples (`r signif(nrow(failedQCVal)/nrow(resVal)*100,3)`%) would have failed due to high variance across all the segments. A manual check of these agrees with all of them.
+
+
+## If we learned it from all residuals
+
+```{r}
+res.variance[c('pid','sample')] = lapply(res.variance[c('pid','sample')], as.character)
+resVal[c('pid','sample')] = lapply(resVal[c('pid','sample')], as.character) 
+
+res.variance$cohort = 'discovery'
+resVal$cohort = 'validation'
+
+ar = rbind(res.variance, resVal)
+ar$cohort = factor(ar$cohort)
+
+#newcutoff = round(median(ar$varMAD_median)+sd(ar$varMAD_median)*2, 3)
+newcutoff = 0.015
+
+ggplot(ar,aes(sample=varMAD_median)) + stat_qq() + geom_hline(yintercept=newcutoff, linetype='dashed',color='grey') + 
+    labs(title='Normal Q-Q plot (all)', x='Theoretical quantiles',y='Sample quantiles') + theme_bw()
+
+ggplot(ar, aes(varMAD_median)) + geom_histogram(bins=50,color='lightblue') + 
+  geom_vline(xintercept = newcutoff, linetype='dashed', color='grey') + labs(x='var(MAD)') +
+  theme_bw()
+
+fc = arrange(subset(ar, round(varMAD_median,3) > newcutoff, select=c(pid,sample, varMAD_median,varMAD_sd, varMAD_Q1,varMAD_Q3)), pid, varMAD_median)
+
+setdiff(fc$sample,c(as.character(failedQC$sample), as.character(failedQCVal$sample)))
+
+```
+
+
+

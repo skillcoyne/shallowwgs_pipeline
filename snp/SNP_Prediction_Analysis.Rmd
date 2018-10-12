@@ -164,8 +164,8 @@ anno$x = 0.4
 anno$y = median(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio)
 
 
-ggplot(subset(qcdata,SampleType == 'BE'), aes(Purity, ASCAT.SCA.ratio, color=Status, group=Status)) + geom_point() + facet_grid(~Status, scales = 'free') + ylim(0,0.005) + 
-  geom_hline(yintercept = x) + geom_text(data=anno, aes(x, y, label=label), nudge_y = 0.0001) +
+ggplot(subset(qcdata,SampleType == 'BE'), aes(Purity, ASCAT.SCA.ratio, color=Status, group=Status)) + geom_point() + facet_grid(~Status, scales = 'free') + ylim(0,0.01) + 
+  geom_hline(yintercept = anno$y[1]) + geom_text(data=anno, aes(x, y, label=label), nudge_y = 0.0001) +
   geom_text(data=anno, aes(x, y, label=paste(round(Ratio,2)*100,'% samples',sep='')), nudge_y = -0.0001)
 
 
@@ -230,9 +230,9 @@ qcdata %>% dplyr::group_by( Status, SampleType) %>% dplyr::summarise( median(ASC
 
 lowsca = subset(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_max <= 0.01 & Purity_max > 0.98 )
 
-table(unique(lowsca[,c('PatientID','Status')])$Status)/table(unique(qcdata.endo[,c('PatientID','Status')])$Status)
+#table(unique(lowsca[,c('PatientID','Status')])$Status)/table(unique(qcdata.endo[,c('PatientID','Status')])$Status)
 
-table(unique(subset(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_max <= 0.001, select=c('PatientID','Status')))$Status)
+#table(unique(subset(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_max <= 0.001, select=c('PatientID','Status')))$Status)
   
 
 ggplot(subset(qcdata.endo,SampleType == 'BE'), aes(Status, ASCAT.SCA.ratio_max, group=Status)) + geom_boxplot() + geom_hline(yintercept = 0.002, color='red')
@@ -860,7 +860,7 @@ The risk probability is correlated with the % of the genome that's been altered 
 ```{r regression, echo=F, message=F, eval=T}
 folds = 10; splits = 5
 ## ----- All ----- ##
-cache.dir = '~/Data/Ellie/Analysis/SNP'
+cache.dir = '~/Data/Ellie/Analysis/SNP/no-low/'
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
  message(paste("loading", file))

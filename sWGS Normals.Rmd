@@ -1,0 +1,131 @@
+---
+title: "sWGS Normals"
+author: "Sarah Killcoyne"
+date: "7/30/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(Matrix)
+library(glmnet)
+library(ggplot2)
+library(gridExtra)
+library(pander)
+source('lib/load_patient_metadata.R')
+source('lib/data_func.R')
+source('lib/fastPCF.R')
+
+data.files = list.files('~/Data/Ellie/QDNAseq', full.names = T)
+
+rpi = read.patient.info('~/Data/Ellie/QDNAseq/All_patient_info.xlsx')
+normals = rpi$removed
+path = read_excel('~/Data/Ellie/QDNAseq/All_patient_info.xlsx', 'Normals')[,c('Patient ID', 'Hospital Research ID', 'Pathology notes','Plate Index','SLX ID 1')]
+colnames(path)[c(1,4,5)] = c('Patient','Plate.Index','SLX.ID')
+path$SLX.ID = sub('SLX-','', gsub(' ', '', path$SLX.ID))
+normals = merge(normals, path, by=c('Patient','Plate.Index','SLX.ID'))
+
+data.file = grep('MultisampleCopynumberBinnedAndFitted2.RData', data.files, value=T)
+if (length(data.file) <= 0)
+  stop("Missing necessary Rdata file from Multisample script")
+load(file=data.file, verbose=T)
+
+loc.cols = c('location','chrom','start','end')
+fit.data = fit.data[,c(loc.cols,normals$Samplename)]
+raw.data = raw.data[,c(loc.cols,normals$Samplename)]
+
+exclude.file = grep('qDNAseq_blacklistedRegions.txt', data.files, value=T)
+if (length(data.file) <= 0)
+  stop(paste("Missing necessary exclusion file from 'qDNAseq_blacklistedRegions.txt' in",data))
+blacklisted.regions = read.table(exclude.file,sep="\t",header=T,stringsAsFactors=F)
+
+if (file.exists('/tmp/normals.Rdata')) {
+  load('/tmp/normals.Rdata', verbose=T)
+} else {
+  plist = list()
+  seg.residuals = list()
+  tiled.normals = NULL; tiled.normal.arms = NULL
+  for (sample in normals$Samplename) {
+    binned = binSWGS(raw.data[,c(loc.cols,sample)],fit.data[,c(loc.cols,sample)],blacklisted.regions,min.probes=67,gamma2=250,metrics.file=NULL)
+    plist[[sample]] = binned$plots[[1]]
+    seg.residuals[[sample]] = binned$resvar[[sample]]
+    
+    tiled = tile.segmented.data(binned$segvals,chr.info=get.chr.lengths(file='/tmp/hg19_info.txt'),verbose=T)
+    tiled.arms = tile.segmented.data(binned$segvals,chr.info=get.chr.lengths(file='/tmp/hg19_info.txt'),size='arms', verbose=T)
+    if (is.null(tiled.normals) | is.null(tiled.normal.arms)) {
+      tiled.normals = tiled
+      tiled.normal.arms = tiled.arms
+    } else {
+      tiled.normals = cbind(tiled.normals, tiled[,sample,drop=F])
+      tiled.normal.arms = cbind(tiled.normal.arms, tiled.arms[,sample,drop=F])
+    }
+  }
+  save(tiled.normals, tiled.normal.arms, plist, seg.residuals, file='/tmp/normals.Rdata')
+}
+
+
+resids = sample.residual.variance(seg.residuals)
+resids = merge(normals[,c('Patient','Hospital.Research.ID','Samplename')], resids, by.x='Samplename', by.y='sample')
+
+failedQC = arrange(subset(resids, round(var1sd_median,3) > 0.012, select=c(Hospital.Research.ID,Samplename, var1sd_median,var1sd_sd, var1sd_Q1,var1sd_Q3)),  var1sd_median)
+
+
+pander(normals[,c('Patient','Hospital.Research.ID','Status','Endoscopy.Year','Pathology notes')], caption='Normal samples', justify='left')
+```
+
+
+`r nrow(failedQC)` samples failed the variant residual QC based on a cutoff determined by the discovery cohort.
+
+
+```{r, echo=F, warning=F, fig.height=30, fig.width=8}
+do.call(grid.arrange, c(plist, ncol=1))
+```
+
+## Predictions
+
+Using the model trained on the progressors and non-progressors in the initial cohort the normal samples can be predicted as well.
+
+```{r, echo=F}
+modeldir = '~/Data/Ellie/Analysis/5e6_arms_all'
+file = paste(modeldir, 'model_data.Rdata', sep='/')
+if (!file.exists(file))
+  stop(paste("Missing data file", file))
+load(file, verbose=F)
+file = paste(modeldir, 'all.pt.alpha.Rdata', sep='/')
+if (!file.exists(file))
+  stop(paste("Missing data file", file))
+load(file, verbose=F)
+rm(dysplasia.df,coefs,plots,labels)
+
+select.alpha = '0.9'
+fitV = models[[select.alpha]]
+lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
+
+
+tiled.segs = segment.matrix(tiled.normals)
+tiled.arms = segment.matrix(tiled.normal.arms)
+
+cx.score = score.cx(tiled.segs,1)
+
+for (i in 1:ncol(tiled.segs)) 
+  tiled.segs[,i] = unit.var(tiled.segs[,i], z.mean[i], z.sd[i])
+for (i in 1:ncol(tiled.arms)) 
+  tiled.arms[,i] = unit.var(tiled.arms[,i], z.arms.mean[i], z.arms.sd[i])
+
+mergedDf = subtract.arms(tiled.segs, tiled.arms)
+mergedDf = cbind(mergedDf, 'cx' = unit.var(cx.score, mn.cx, sd.cx))
+
+sparsed_test_data <- Matrix(data=0, nrow=nrow(mergedDf),  ncol=ncol(mergedDf),
+                            dimnames=list(rownames(mergedDf),colnames(mergedDf)), sparse=T)
+for(col in colnames(mergedDf)) sparsed_test_data[,col] = mergedDf[,col]
+  
+preds = predict(fitV, newx=sparsed_test_data, s=lambda.opt, type='response')
+
+high = preds[preds > 0.7,,drop=F]
+
+pander(subset(normals, Samplename %in% rownames(high), select=c('Patient','Hospital.Research.ID','Status','Endoscopy.Year','Pathology notes')), caption='Normal samples predicted to be high risk')
+
+```
+
+
