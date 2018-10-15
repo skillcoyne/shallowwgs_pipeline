@@ -11,7 +11,7 @@ library(BarrettsProgressionRisk)
 #if (length(args) < 3)
 #  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir>")
 
-source('lib/load_patient_metadata.R')
+source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 #data = args[1]
 #patient.file = args[2]
@@ -20,7 +20,7 @@ data = '~/Data/Ellie/QDNAseq'
 patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
 outdir = '~/Data/Ellie/Analysis'
 
-patient.null = NULL
+patient.name = NULL
 if (length(args) == 4)
   patient.name = args[4]
 
@@ -120,7 +120,10 @@ if (!file.exists(datafile)) {
     }
     print(dim(fit.data))
   }
-  
+ 
+  fit.data = as.data.frame(fit.data)
+  raw.data = as.data.frame(raw.data)
+   
   save(fit.data, raw.data, file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
 } else {
   load(datafile, verbose=T)
@@ -146,19 +149,19 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   
   cols = which(colnames(fit.data) %in% subset(all.patient.info$info, Hospital.Research.ID == pt)$Samplename)
 
-  write.table(fit.data[,c(1:4,cols),with=F], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'fittedReadCounts.txt',sep='/')) 
-  write.table(raw.data[,c(1:4,cols),with=F], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'rawReadCounts.txt',sep='/')) 
+  write.table(fit.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'fittedReadCounts.txt',sep='/')) 
+  write.table(raw.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'rawReadCounts.txt',sep='/')) 
   
-  segmented = BarrettsProgressionRisk::segmentRawData(raw.data[,c(1:4,cols),with=F],fit.data[,c(1:4,cols),with=F])
+  segmented = BarrettsProgressionRisk::segmentRawData(raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)])
   
   filename = paste(pd, '/', pt,"_probefiltered_segvals_gamma250.txt",sep="")
   write.table(segmented$seg.vals, file=filename, sep="\t", quote=F)
   save(segmented, file=paste(pd, 'segment.Rdata', sep = '/'))
 
   message("Saving plots")
-  ggsave(filename=paste(plot.dir, '/', pt,'_cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(cols), units='in')
+  ggsave(filename=paste(plot.dir, '/', pt,'_cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(cols), units='in', limitsize = F)
   
-  ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(cols), units='in')
+  ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(cols), units='in', limitsize=F)
   
   }
 
