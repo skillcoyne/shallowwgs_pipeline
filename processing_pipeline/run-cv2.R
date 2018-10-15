@@ -3,21 +3,13 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required params: <data dir> <outdir> <info file dir> <log transform DEF: FALSE>")
 
-# 
-# suppressPackageStartupMessages(library(ggplot2))
-# suppressPackageStartupMessages(library(plyr))
-# suppressPackageStartupMessages(library(dplyr))
-# suppressPackageStartupMessages(library(gridExtra))
 suppressPackageStartupMessages(library(glmnet))
 suppressPackageStartupMessages(library(mice))
-# suppressPackageStartupMessages(library(reshape2))
-# suppressPackageStartupMessages(library(GenomicRanges))
 
 library(BarrettsProgressionRisk)
 
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
-#suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 
 data = args[1]
 # data = '~/Data/Ellie/Cleaned'

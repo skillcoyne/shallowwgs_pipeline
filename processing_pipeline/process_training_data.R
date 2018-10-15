@@ -1,22 +1,18 @@
 ## load all of Ellie's data, merge, then break into per-patient raw/fitted files. Run segmentation and save results.
 
-library(plyr)
-library(ggplot2)
-library(ggdendro)
-library(BarrettsProgressionRisk)
-# this version removes qDNAseq 'blacklisted' regions and uses 'fitted' read counts
 
-#args = commandArgs(trailingOnly=TRUE)
+args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 3)
   stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir> <patient name OPT>")
 
+library(BarrettsProgressionRisk)
 source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 data = args[1]
 patient.file = args[2]
 outdir = args[3]
-#data = '~/Data/Ellie/QDNAseq'
+#data = '~/Data/Ellie/QDNAseq/training/'
 #patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
 #outdir = '~/Data/Ellie/Analysis'
 
@@ -24,12 +20,9 @@ patient.name = NULL
 if (length(args) == 4)
   patient.name = args[4]
 
-
 all.patient.info = read.patient.info(patient.file, set='All')
 if (is.null(all.patient.info))
   stop(paste("Failed to read patient file", patient.file))
-
-
 
 data.dirs = list.dirs(data, full.names=T, recursive=F)
 if (length(data.dirs) <= 0)
@@ -144,6 +137,9 @@ if ( !dir.exists(multipcfdir) )
 if (!is.null(patient.name))
   pts_slx = subset(pts_slx, Hospital.Research.ID == patient.name)
 
+tiled = NULL
+arms.tiled = NULL
+
 for (pt in unique(pts_slx$Hospital.Research.ID)) {
   print(pt)
   pd = paste(multipcfdir, pt,sep='/')
@@ -155,17 +151,30 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   #write.table(raw.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'rawReadCounts.txt',sep='/')) 
   
   segmented = BarrettsProgressionRisk::segmentRawData(raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)])
-  
-  filename = paste(pd, '/', pt,"_probefiltered_segvals_gamma250.txt",sep="")
-  write.table(segmented$seg.vals, file=filename, sep="\t", quote=F)
-  save(segmented, file=paste(pd, 'segment.Rdata', sep = '/'))
+  tile = BarrettsProgressionRisk::tileSegments(segmented$seg.vals, size=5e6)
+  arms = BarrettsProgressionRisk::tileSegments(segmented$seg.vals, size='arms')
+
+  if (is.null(tiled)) {
+    tiled = tile
+    arms.tiled = arms 
+  } else {
+    tiled = rbind(tiled, tile)
+    arms.tiled = rbind(arms.tiled, arms)
+  }
+    
+  #filename = paste(pd, '/', pt,"_probefiltered_segvals_gamma250.txt",sep="")
+  #write.table(segmented$seg.vals, file=filename, sep="\t", quote=F)
+  save(segmented, tile, arms, file=paste(pd, 'segment.Rdata', sep = '/'))
 
   message("Saving plots")
   ggsave(filename=paste(plot.dir, '/', pt,'_cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(cols), units='in', limitsize = F)
   
   ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(cols), units='in', limitsize=F)
-  
-  }
+}
+
+write.table(tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled.txt', sep='/'))
+write.table(arms.tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled.txt', sep='/'))
+
 
 message("Finished")
 q(save="no")
