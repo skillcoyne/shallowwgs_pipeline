@@ -8,17 +8,17 @@ library(BarrettsProgressionRisk)
 
 #args = commandArgs(trailingOnly=TRUE)
 
-#if (length(args) < 3)
-#  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir>")
+if (length(args) < 3)
+  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir> <patient name OPT>")
 
 source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
-#data = args[1]
-#patient.file = args[2]
-#outdir = args[3]
-data = '~/Data/Ellie/QDNAseq'
-patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
-outdir = '~/Data/Ellie/Analysis'
+data = args[1]
+patient.file = args[2]
+outdir = args[3]
+#data = '~/Data/Ellie/QDNAseq'
+#patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
+#outdir = '~/Data/Ellie/Analysis'
 
 patient.name = NULL
 if (length(args) == 4)
@@ -29,6 +29,8 @@ all.patient.info = read.patient.info(patient.file, set='All')
 if (is.null(all.patient.info))
   stop(paste("Failed to read patient file", patient.file))
 
+
+
 data.dirs = list.dirs(data, full.names=T, recursive=F)
 if (length(data.dirs) <= 0)
   stop(paste("No directories in", data))
@@ -37,7 +39,7 @@ pts_slx = arrange(unique(all.patient.info$info[c('SLX.ID','Hospital.Research.ID'
 
 data.dirs = grep(paste(unique(pts_slx$SLX.ID), collapse='|'), data.dirs, value=T)
 
-datafile = paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/')
+datafile = paste(data,"merged_qdnaseq_output.Rdata", sep='/')
 if (!file.exists(datafile)) {
   # Load the data, binding each new data file into single data table
   fit.data = NULL
@@ -124,7 +126,7 @@ if (!file.exists(datafile)) {
   fit.data = as.data.frame(fit.data)
   raw.data = as.data.frame(raw.data)
    
-  save(fit.data, raw.data, file=paste(data,"MultisampleCopynumberBinnedAndFitted1.RData", sep='/'))
+  save(fit.data, raw.data, file=datafile)
 } else {
   load(datafile, verbose=T)
 }
@@ -149,8 +151,8 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   
   cols = which(colnames(fit.data) %in% subset(all.patient.info$info, Hospital.Research.ID == pt)$Samplename)
 
-  write.table(fit.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'fittedReadCounts.txt',sep='/')) 
-  write.table(raw.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'rawReadCounts.txt',sep='/')) 
+  #write.table(fit.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'fittedReadCounts.txt',sep='/')) 
+  #write.table(raw.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'rawReadCounts.txt',sep='/')) 
   
   segmented = BarrettsProgressionRisk::segmentRawData(raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)])
   
