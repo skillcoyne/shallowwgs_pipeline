@@ -1,5 +1,7 @@
 ## load all of Ellie's data, merge, then break into per-patient raw/fitted files. Run segmentation and save results.
 
+options(bitmapType = "cairo")
+
 
 args = commandArgs(trailingOnly=TRUE)
 
