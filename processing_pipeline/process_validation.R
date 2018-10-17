@@ -26,7 +26,7 @@ if (length(args) == 4)
 patient.info = readxl::read_xlsx(patient.file)
 patient.info$Samplename = gsub('-', '_', paste(patient.info$`Index Sequence`,strip.whitespace(patient.info$`SLX-ID`),sep="_"))
 
-patient.info
+#patient.info
 
 data.dirs = list.dirs(data, full.names=T, recursive=F)
 if (length(data.dirs) <= 0)
@@ -41,23 +41,43 @@ for (slx in unique(patient.info$`SLX-ID`)) {
   print(slx)
   dir = grep(slx,data.dirs,value=T)
   
-  rawFile = paste(dir,grep('^raw',list.files(dir,'txt',full.names=F), value=T),sep='/')
-  fittedFile = paste(dir,grep('^fitted',list.files(dir,'txt',full.names=F), value=T),sep='/')
+  rawFile = grep('raw',list.files(dir,'txt',full.names=T), value=T)
+  fittedFile = grep('fitted',list.files(dir,'txt',full.names=T), value=T)
   
   if (length(rawFile) < 1 | length(fittedFile) < 1) {
     message(paste("Missing raw or fitted file for SLX ID",slx,"in",dir))
     next
+  } else if (length(rawFile) == 1) {
+    raw.data = data.table::fread(rawFile)
+    fitted.data = data.table::fread(fittedFile)
+  } else {
+    raw.data = NULL; fitted.data = NULL
+    for (file in rawFile) {
+      print(file)
+      raw = data.table::fread(file)
+      fit = data.table::fread(grep(sub('\\.binSize.*','',basename(file)), fittedFile, value=T))
+      colnames(fit)[5] = sub('\\.binSize.*','',basename(file))
+      colnames(raw)[5] = sub('\\.binSize.*','',basename(file))
+      
+      if (is.null(fitted.data)) {
+        fitted.data = fit
+        raw.data = raw
+      } else {
+        fitted.data = merge(fitted.data, fit, by=c('location','chrom','start','end'), all=T) 
+        raw.data = merge(raw.data, raw, by=c('location','chrom','start','end'), all=T) 
+      }
+    }
   }
 
-  raw.data = data.table::fread(rawFile)
-  fitted.data = data.table::fread(fittedFile)
   
-  colnames(raw.data) = gsub('tp','', colnames(raw.data))
-  colnames(fitted.data) = gsub('tp','', colnames(fitted.data))
+  if ( length(which(grepl('tp',colnames(raw.data)))) > 0) {
+    colnames(raw.data) = gsub('tp','', colnames(raw.data))
+    colnames(fitted.data) = gsub('tp','', colnames(fitted.data))
+  }
   
   ids = unique(subset(patient.info, `SLX-ID` == slx)$`Patient ID`)
   for (id in ids) {
-    print(paste('Patient',id))
+    message(paste('Patient',id))
     samples = sub('-','_',subset(patient.info, `Patient ID` == id & `SLX-ID` == slx)$`Index Sequence`)
 
     rcols = grep(paste(samples,collapse='|'), colnames(raw.data))
