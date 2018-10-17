@@ -137,8 +137,8 @@ if ( !dir.exists(multipcfdir) )
 if (!is.null(patient.name))
   pts_slx = subset(pts_slx, Hospital.Research.ID == patient.name)
 
-tiled = NULL
-arms.tiled = NULL
+tiled = NULL; tile.MSE = NULL
+arms.tiled = NULL; arm.MSE = NULL
 
 for (pt in unique(pts_slx$Hospital.Research.ID)) {
   print(pt)
@@ -151,15 +151,19 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   #write.table(raw.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'rawReadCounts.txt',sep='/')) 
   
   segmented = BarrettsProgressionRisk::segmentRawData(raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)])
-  tile = BarrettsProgressionRisk::tileSegments(segmented$seg.vals, size=5e6)
-  arms = BarrettsProgressionRisk::tileSegments(segmented$seg.vals, size='arms')
+  tile = BarrettsProgressionRisk::tileSegments(segmented, size=5e6)
+  arms = BarrettsProgressionRisk::tileSegments(segmented, size='arms')
 
   if (is.null(tiled)) {
-    tiled = tile
-    arms.tiled = arms 
+    tiled = tile$tiles
+    arms.tiled = arms$tiles
+    tile.MSE = tile$error
+    arm.MSE = arms$error
   } else {
-    tiled = rbind(tiled, tile)
-    arms.tiled = rbind(arms.tiled, arms)
+    tiled = rbind(tiled, tile$tiles)
+    arms.tiled = rbind(arms.tiled, arms$tiles)
+    tile.MSE = rbind(tile.MSE, tile$error)
+    arm.MSE = rbind(arm.MSE, arms$error)
   }
     
   #filename = paste(pd, '/', pt,"_probefiltered_segvals_gamma250.txt",sep="")
@@ -173,7 +177,10 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
 }
 
 write.table(tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled.txt', sep='/'))
+write.table(tile.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled_MSE.txt', sep='/'))
+
 write.table(arms.tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled.txt', sep='/'))
+write.table(arm.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled_MSE.txt', sep='/'))
 
 
 message("Finished")
