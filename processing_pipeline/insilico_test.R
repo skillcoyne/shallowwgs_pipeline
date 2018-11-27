@@ -3,10 +3,10 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required params: <data dir> <outdir> <info file dir>")
 
+library(BarrettsProgressionRisk)
 
-suppressPackageStartupMessages(library(ggplot2))
-suppressPackageStartupMessages(library(plyr))
-suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(tidyverse))
+
 suppressPackageStartupMessages(library(gridExtra))
 suppressPackageStartupMessages(library(glmnet))
 suppressPackageStartupMessages(library(mice))
@@ -20,11 +20,11 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_
 
 
 data = args[1]
-#data = '~/Data/Ellie/Cleaned'
+# data = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient'
 outdir = args[2]
-#outdir = '~/Data/Ellie/Analysis'
+# outdir = '~/Data/Ellie/Analysis'
 infodir = args[3]
-#infodir = '~/Data/Ellie/QDNAseq'
+# infodir = '~/Data/Ellie/QDNAseq/training'
 logT = F
 if (length(args) == 4)
   logT = as.logical(args[4])
@@ -43,71 +43,71 @@ demo.file = list.files(infodir, pattern='Demographics_full.xlsx', recursive=T, f
 if ( length(patient.file) < 1 | length(demo.file) < 1)
   stop("Missing files in info dir: All_patient_info.xlsx and Demographics_full.xlsx")
 
-patient.info = read.patient.info(patient.file, demo.file, set='All')$info
-patient.info = plyr::arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
-patient.info = subset(patient.info, Hospital.Research.ID != 'AHM0320')
+patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% arrange(Status, Patient, Endoscopy.Year, Pathology)
 sum.patient.data = summarise.patient.info(patient.info)
 
-cleaned = list.files(path=data, pattern='tiled', full.names=T, recursive=T)
-raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
+cleaned = list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T)
+#raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
 
 cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
-raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
+#raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
 
 arms = grep('arms', cleaned, value=T)
 segs = grep('arms', cleaned, invert=T, value=T)
 
 length(segs) == length(arms)
 
-# Get the SD, mean, and variance(?) per sample
-sampleVar = do.call(rbind, lapply(raw, function(f) {
-  t = read.table(f, sep='\t', header=T)
-  sampleCols = grep('chr|arm|start|end|probes', colnames(t), invert = T)
-  x = do.call(rbind, lapply(sampleCols, function(i){
-    cbind('Sample.Mean'=mean(t[,i]),
-          'Sample.SD'=sd(t[,i]),
-          'Sample.Var'=var(t[,i]))
-  }))
-  rownames(x) = colnames(t)[sampleCols]
-  return(x)
-}))
+# # Get the SD, mean, and variance(?) per sample
+# sampleVar = do.call(rbind, lapply(raw, function(f) {
+#   t = read.table(f, sep='\t', header=T)
+#   sampleCols = grep('chr|arm|start|end|probes', colnames(t), invert = T)
+#   x = do.call(rbind, lapply(sampleCols, function(i){
+#     cbind('Sample.Mean'=mean(t[,i]),
+#           'Sample.SD'=sd(t[,i]),
+#           'Sample.Var'=var(t[,i]))
+#   }))
+#   rownames(x) = colnames(t)[sampleCols]
+#   return(x)
+# }))
 
-# Load segment files
-tiled.segs = do.call(rbind, lapply(segs, function(f) {
-  fx = load.segment.matrix(f)
-  fx
-}))
-dim(tiled.segs)
+
+seg.tiles = do.call(bind_rows, lapply(segs, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+colnames(seg.tiles)[1] = 'sample'
+samples = seg.tiles$sample
+
+seg.tiles = as.matrix(seg.tiles[,-1])
+rownames(seg.tiles) = samples
 
 if (logT) tiled.segs = t(apply(tiled.segs, 1, logTransform))
-segsList = prep.matrix(tiled.segs)
+
+segsList = prep.matrix(seg.tiles)
 
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
 segs = segsList$matrix
 
-
 # Complexity score
-cx.score = score.cx(segs,1)
+cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
 mn.cx = mean(cx.score)
 sd.cx = sd(cx.score)
 
 # Load arm files  
-tiled.arms = do.call(rbind, lapply(arms, function(f) {
-  fx = load.segment.matrix(f)
-  fx
-}))
-dim(tiled.arms)
+arm.tiles = do.call(bind_rows, lapply(arms, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+colnames(arm.tiles)[1] = 'sample'
 
+samples = arm.tiles$sample
+arm.tiles = as.matrix(arm.tiles[,-1])
+rownames(arm.tiles) = samples
 if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
-armsList = prep.matrix(tiled.arms)
+
+armsList = prep.matrix(arm.tiles)
 arms = armsList$matrix
 
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd
 
-allDf = subtract.arms(segs, arms)
-allDf = cbind(allDf, 'cx'=unit.var(cx.score))
+allDf = BarrettsProgressionRisk::subtractArms(segs,arms)
+allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score))
 
 leaveout = sample(sum.patient.data$Patient, round(nrow(sum.patient.data)*.2))
 leaveoutSamples = subset(patient.info, Patient %in% leaveout)

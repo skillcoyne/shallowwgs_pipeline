@@ -189,7 +189,7 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
       ggsave(filename=paste(plotdir, '/', sample, '_cvg_binned_fitted.png',sep=''), plot=plots[[sample]] + lab(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
   } else {
 
-    ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(cols), units='in', limitsize=F)
+    ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(info$Sample), units='in', limitsize=F)
     
     ggsave(filename=paste(pd, '/cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(info$Sample), units='in', limitsize = F)
     
