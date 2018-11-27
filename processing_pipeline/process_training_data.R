@@ -22,7 +22,7 @@ patient.name = NULL
 if (length(args) == 4)
   patient.name = args[4]
 
-all.patient.info = read.patient.info(patient.file, set='All')
+all.patient.info = read.patient.info(patient.file, set='All')$info
 if (is.null(all.patient.info))
   stop(paste("Failed to read patient file", patient.file))
 
@@ -30,10 +30,11 @@ data.dirs = list.dirs(data, full.names=T, recursive=F)
 if (length(data.dirs) <= 0)
   stop(paste("No directories in", data))
 
-pts_slx = arrange(unique(all.patient.info$info[c('SLX.ID','Hospital.Research.ID')]), Hospital.Research.ID)
+pts_slx = arrange(unique(all.patient.info[c('SLX.ID','Hospital.Research.ID')]), Hospital.Research.ID)
 
 data.dirs = grep(paste(unique(pts_slx$SLX.ID), collapse='|'), data.dirs, value=T)
 
+#datafile = paste(data,'excluded_qdnaseq_output.Rdata',sep='/')
 datafile = paste(data,"merged_qdnaseq_output.Rdata", sep='/')
 if (!file.exists(datafile)) {
   # Load the data, binding each new data file into single data table
@@ -58,26 +59,25 @@ if (!file.exists(datafile)) {
         
         message( paste('FIT:', basename(fitted.file), '  RAW:', basename(raw.file)) )
         
-        #fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
-        fit = data.table::fread(fitted.file)
+        n = ncol(readr::read_tsv(fitted.file,col_names=T, n_max=1))
+        
+        fit = readr::read_tsv(fitted.file, col_types=paste(c('cc',rep('n',n-2)),collapse=''))
+        
         f.cols = grep('D\\d', colnames(fit))
         colnames(fit)[f.cols] = paste(colnames(fit)[f.cols], slx, sep="_") 
         
-        #raw = read.table(raw.file,sep="\t",header=T,stringsAsFactors=F) # raw reads
-        raw = data.table::fread(raw.file)
+        raw = readr::read_tsv(raw.file, col_types=paste(c('cc',rep('n',n-2)),collapse=''))
+        
         r.cols = grep('D\\d', colnames(raw))
         colnames(raw)[r.cols] = paste(colnames(raw)[r.cols], slx, sep="_") 
-        raw = raw[,colnames(fit),with=F]	    
+        raw = raw[,colnames(fit)]	    
         
         if (is.null(fit.data)) {
           fit.data = fit
           raw.data = raw
         } else {
-          fit.data = merge(fit.data, fit, by=c('location','chrom','start','end'), all=T) 
-          raw.data = merge(raw.data, raw, by=c('location','chrom','start','end'), all=T) 
-          
-          #fit.data = cbind(fit.data,fit[,f.cols])
-          #raw.data = cbind(raw.data,raw[,f.cols])
+          fit.data = full_join(fit.data, fit, by=c('location','chrom','start','end'), all=T) 
+          raw.data = full_join(raw.data, raw, by=c('location','chrom','start','end'), all=T) 
         }
       }
     } else { # individual index
@@ -93,39 +93,31 @@ if (!file.exists(datafile)) {
         if (!file.exists(fitted.file) || !file.exists(raw.file)) 
           stop("Missing fitted/raw file ")
   
-        fit = data.table::fread(fitted.file)      
-        #fit = read.table(fitted.file,sep="\t",header=T,stringsAsFactors=F)  # fitted reads
+        n = ncol(readr::read_tsv(fitted.file,col_names=T, n_max=1))
+        
+        fit = readr::read_tsv(fitted.file, col_types=paste(c('cc',rep('n',n-2)),collapse=''))
+        
         colnames(fit)[5] = paste(spl[[1]][2],slx,sep="_")
         
-        raw = data.table::fread(raw.file)
-        #raw = read.table(raw.file,sep="\t",header=T,stringsAsFactors=F) # raw reads
+        raw = readr::read_tsv(raw.file, col_types=paste(c('cc',rep('n',n-2)),collapse=''))
         colnames(raw)[5] = paste(spl[[1]][2],slx,sep="_")
         
         if (is.null(fit.data)) {
           fit.data = fit
           raw.data = raw
         } else { # add to table
-          fit.data = merge(fit.data, fit, by=c('location','chrom','start','end'), all=T) 
-          raw.data = merge(raw.data, raw, by=c('location','chrom','start','end'), all=T) 
-          #fit.data = cbind(fit.data,fit[,5])
-          #raw.data = cbind(raw.data, raw[,5])
-          
-          #colnames(fit.data)[ncol(fit.data)] = colnames(fit)[5]
-          #colnames(raw.data)[ncol(raw.data)] = colnames(raw)[5]
+          fit.data = full_join(fit.data, fit, by=c('location','chrom','start','end'), all=T) 
+          raw.data = full_join(raw.data, raw, by=c('location','chrom','start','end'), all=T) 
         }	  
       }
     }
     print(dim(fit.data))
   }
  
-  fit.data = as.data.frame(fit.data)
-  raw.data = as.data.frame(raw.data)
-   
   save(fit.data, raw.data, file=datafile)
 } else {
   load(datafile, verbose=T)
 }
-
 
 plot.dir = paste(outdir, "coverage_binned_fitted", sep='/')
 if ( !dir.exists(plot.dir) ) 
@@ -147,15 +139,24 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   pd = paste(multipcfdir, pt,sep='/')
   dir.create(pd,showWarnings = F)
   
-  cols = which(colnames(fit.data) %in% subset(all.patient.info$info, Hospital.Research.ID == pt)$Samplename)
+  info = all.patient.info %>% filter(Hospital.Research.ID == pt) %>% select('Patient','Samplename','Endoscopy.Year','Block','Pathology','p53.Status') 
+  colnames(info) = c('Patient','Sample','Endoscopy','GEJ.Distance','Pathology','p53 IHC')
+  info = info %>% rowwise %>% dplyr::mutate( Endoscopy = paste(as.character(Endoscopy), '01', '01', sep='-')   )
+  info = BarrettsProgressionRisk::loadSampleInformation(info, path=c('BE','ID','LGD','HGD','IMC'))
 
-  #write.table(fit.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'fittedReadCounts.txt',sep='/')) 
-  #write.table(raw.data[,c(1:4,cols)], sep='\t', quote=F, row.names=F, col.names=T, file=paste(pd,'rawReadCounts.txt',sep='/')) 
-  
-  segmented = BarrettsProgressionRisk::segmentRawData(raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)])
+  cols = which(colnames(fit.data) %in% subset(all.patient.info, Hospital.Research.ID == pt)$Samplename)
+
+  segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)])
   tile = BarrettsProgressionRisk::tileSegments(segmented, size=5e6)
   arms = BarrettsProgressionRisk::tileSegments(segmented, size='arms')
 
+  write.table(tile$tiles, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/5e06_cleaned_tiled_segvals.txt'))
+  write.table(arms$tiles, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/arms_cleaned_tiled_segvals.txt'))
+
+  write.table(tile$error, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/5e06_tiled_MSE.txt'))
+  write.table(arms$error, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/arms_tiled_MSE.txt'))
+  
+    
   if (is.null(tiled)) {
     tiled = tile$tiles
     arms.tiled = arms$tiles
@@ -173,16 +174,35 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   save(segmented, tile, arms, file=paste(pd, 'segment.Rdata', sep = '/'))
 
   message("Saving plots")
-  ggsave(filename=paste(plot.dir, '/', pt,'_cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(cols), units='in', limitsize = F)
-  
-  ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(cols), units='in', limitsize=F)
+
+  if (length(info$Sample) > 6) {
+    plotdir = paste0(pd,'/segmented_plots')
+    dir.create(plotdir, showWarnings=F )
+    plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
+    for (sample in names(plots)) 
+      ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + lab(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
+    
+    plotdir = paste0(pd,'/coverage_plots')
+    dir.create(plotdir, showWarnings=F )
+    plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list')
+    for (sample in names(plots))
+      ggsave(filename=paste(plotdir, '/', sample, '_cvg_binned_fitted.png',sep=''), plot=plots[[sample]] + lab(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
+  } else {
+    ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(cols), units='in', limitsize=F)
+    
+    ggsave(filename=paste(pd, '/cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(cols), units='in', limitsize = F)
+    
+  }
+
 }
 
-write.table(tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled.txt', sep='/'))
-write.table(tile.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled_MSE.txt', sep='/'))
+if (is.null(patient.name)) {
+  write.table(tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled.txt', sep='/'))
+  write.table(tile.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled_MSE.txt', sep='/'))
 
-write.table(arms.tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled.txt', sep='/'))
-write.table(arm.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled_MSE.txt', sep='/'))
+  write.table(arms.tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled.txt', sep='/'))
+  write.table(arm.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled_MSE.txt', sep='/'))
+}
 
 
 message("Finished")

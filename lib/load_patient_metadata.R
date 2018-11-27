@@ -27,7 +27,7 @@ summarise.patient.info<-function(df) {
   return(arrange(sum.pt, Status, total.samples, highest.path))
 }
 
-read.patient.info<-function(file, file2=NULL, set='All') {
+read.patient.info<-function(file, file2=NULL, set='All', sheet=NULL) {
   if (!file.exists(file))
     stop(paste(file, "doesn't exist or is not readable."))
   
@@ -35,8 +35,8 @@ read.patient.info<-function(file, file2=NULL, set='All') {
     library(readxl)
     
     patient.info = NULL;  
-      sheet = 'All combined'
-      ws = read_excel(file, sheet = sheet)
+      if (is.null(sheet)) sheet = 'All combined'
+      ws = readxl::read_xlsx(file, sheet = sheet)
 
       slx.cols = grep('SLX', colnames(ws), value=T)
       slx.cols = slx.cols[order(slx.cols)]
@@ -140,7 +140,7 @@ read.patient.info<-function(file, file2=NULL, set='All') {
   
   patient.info$PID = sub('_$', '', unlist(lapply(patient.info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1])))
   
-  return(list('info'=patient.info, 'removed'=removed))
+  return(list('info'=patient.info, 'normal'=removed))
 }
 
 add.demographics<-function(file, patient.info) {
