@@ -140,7 +140,9 @@ read.patient.info<-function(file, file2=NULL, set='All', sheet=NULL) {
   
   patient.info$PID = sub('_$', '', unlist(lapply(patient.info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1])))
   
-  return(list('info'=patient.info, 'normal'=removed))
+  patient.info$Patient = as.integer(patient.info$Patient)
+  
+  return(list('info'=as_tibble(patient.info), 'normal'=as_tibble(removed)))
 }
 
 add.demographics<-function(file, patient.info) {
