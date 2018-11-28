@@ -8,6 +8,7 @@ suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 suppressPackageStartupMessages( library(tidyverse) )
 suppressPackageStartupMessages(library(glmnet))
 
+suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
 
