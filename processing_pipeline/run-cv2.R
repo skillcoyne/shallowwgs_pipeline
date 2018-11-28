@@ -36,14 +36,9 @@ if ( length(patient.file) != 1 | length(demo.file) != 1)
 
 patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% dplyr::arrange(Status, Patient, Endoscopy.Year, Pathology)
 sum.patient.data = summarise.patient.info(patient.info)
-#nrow(sum.patient.data)
-
 
 cleaned = list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T)
-#raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
-
 cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
-#raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
 
 arms = grep('arms', cleaned, value=T)
 segs = grep('arms', cleaned, invert=T, value=T)
@@ -108,11 +103,8 @@ dim(allDf)
 dysplasia.df = as.matrix(allDf[sampleStatus$Samplename,])
 dim(dysplasia.df)
 
-#raw.segs = seg.tiles[sampleStatus$Samplename,]; raw.arms = arm.tiles[sampleStatus$Samplename,]
-
 save(dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
 rm(raw.segs, raw.arms)
-
 
 nl = 1000;folds = 10; splits = 5 
 
@@ -228,7 +220,6 @@ if (file.exists(file)) {
 ## --------- LOO --------- ##
 message("LOO")
 
-
 pg.samp = patient.info %>% rowwise %>% dplyr::mutate(
   PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])
 ) %>% filter(Samplename %in% rownames(dysplasia.df))
@@ -252,12 +243,10 @@ if (file.exists(file)) {
     samples = subset(pg.samp, Hospital.Research.ID != pt)$Samplename
     
     train.rows = which(rownames(dysplasia.df) %in% samples)
-    training = dysplasia.df[train.rows,]
-    test = as.matrix(dysplasia.df[-train.rows,])
-    #if (ncol(test) <= 1) next
-    if ( nrow(test) == ncol(dysplasia.df) ) test = t(test)
-    
-    
+    training = dysplasia.df[train.rows,,drop=F]
+    test = as.matrix(dysplasia.df[-train.rows,,drop=F])
+    if (ncol(test) <= 0) next # shouldn't be any but...
+
     patient.samples = pg.samp %>% filter(Hospital.Research.ID == pt) %>% select(Samplename)
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
     sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
@@ -334,13 +323,10 @@ if (file.exists(file)) {
     samples = subset(pg.sampNOHGD, Hospital.Research.ID != pt)$Samplename
 
     train.rows = which(rownames(dysplasia.dfNOHGD) %in% samples)
-    training = dysplasia.df[train.rows,]
-    test = as.matrix(dysplasia.dfNOHGD[-train.rows,])
+    training = dysplasia.df[train.rows,,drop=F]
+    test = as.matrix(dysplasia.dfNOHGD[-train.rows,,drop=F])
     
     if (nrow(test) <= 0) next
-    
-    #if (ncol(test) <= 1) next
-    if ( nrow(test) == ncol(dysplasia.df) ) test = t(test)
     
     patient.samples = pg.sampNOHGD %>% filter(Hospital.Research.ID == pt) %>% select(Samplename)
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
@@ -371,10 +357,6 @@ if (file.exists(file)) {
       
       logit <- function(p){log(p/(1-p))}
       inverse.logit <- function(or){1/(1 + exp(-or))}
-
-      pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
-      or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
-      sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(pg.sampNOHGD[[pt]]$Samplename, names(labels))])))
 
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       colnames(pm) = 'Prediction'
