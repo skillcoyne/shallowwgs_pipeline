@@ -3,20 +3,20 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required params: <data dir> <outdir> <info file dir> <log transform DEF: FALSE>")
 
-suppressPackageStartupMessages(library(glmnet))
-suppressPackageStartupMessages(library(mice))
 
-library(BarrettsProgressionRisk)
+suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
+suppressPackageStartupMessages( library(tidyverse) )
+suppressPackageStartupMessages(library(glmnet))
 
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
 
 data = args[1]
-# data = '~/Data/Ellie/Cleaned'
+# data = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/'
 outdir = args[2]
-# outdir = '~/Data/Ellie/Analysis'
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis'
 infodir = args[3]
-# infodir = '~/Data/Ellie/QDNAseq'
+# infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 logT = F
 if (length(args) == 4)
   logT = as.logical(args[4])
@@ -32,59 +32,69 @@ demo.file = list.files(infodir, pattern='Demographics_full.xlsx', recursive=T, f
 if ( length(patient.file) != 1 | length(demo.file) != 1)
   stop("Missing files in info dir: All_patient_info.xlsx and Demographics_full.xlsx")
 
-patient.info = read.patient.info(patient.file, demo.file, set='All')$info
-
-patient.info = plyr::arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
+patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% dplyr::arrange(Status, Patient, Endoscopy.Year, Pathology)
 sum.patient.data = summarise.patient.info(patient.info)
 #nrow(sum.patient.data)
 
-files = list.files(path=data, pattern='^probefiltered.*seg', recursive=T, full.names=T)
-files = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), files, value=T)
 
-if (length(files) != nrow(sum.patient.data))
-  stop("Files don't match")
+cleaned = list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T)
+#raw = list.files(path=data, pattern='raw', full.names=T, recursive=T)
 
-tiled.segs = do.call(rbind, lapply(files, function(file) {
-  message(file)
-  segvals = read.table(file, header=T, sep='\t')
-  BarrettsProgressionRisk::tileSegments(segvals, 5e6, verbose=F)
-}))
+cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
+#raw = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), raw, value=T)
 
-tiled.arms = do.call(rbind, lapply(files, function(file) {
-  message(file)
-  segvals = read.table(file, header=T, sep='\t')
-  BarrettsProgressionRisk::tileSegments(segvals, 'arms',verbose=F)
-}))
+arms = grep('arms', cleaned, value=T)
+segs = grep('arms', cleaned, invert=T, value=T)
 
-dim(tiled.segs)
+length(segs) == length(arms)
 
-## Log?
-if (logT) tiled.segs = t(apply(tiled.segs, 1, logTransform))
+seg.tiles = do.call(bind_rows, lapply(segs, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+colnames(seg.tiles)[1] = 'sample'
+samples = seg.tiles$sample
 
-head(tiled.segs)
+seg.tiles = as.matrix(seg.tiles[,-1])
+rownames(seg.tiles) = samples
 
-segsList = prep.matrix(tiled.segs)
+if (logT) seg.tiles = t(apply(seg.tiles, 1, logTransform))
+
+segsList = prep.matrix(seg.tiles)
+
+z.mean = segsList$z.mean
+z.sd = segsList$z.sd
+segs = segsList$matrix
+
+# Complexity score
+cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
+mn.cx = mean(cx.score)
+sd.cx = sd(cx.score)
 
 # After mean centering set all NA values to 0
 segs = segsList$matrix
-
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
 
 # Complexity score
-cx.score = score.cx(segs,1)
+cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
 mn.cx = mean(cx.score)
 sd.cx = sd(cx.score)
 
-if (logT) tiled.arms = t(apply(tiled.arms, 1, logTransform))
-armsList = prep.matrix(tiled.arms)
+# Load arm files  
+arm.tiles = do.call(bind_rows, lapply(arms, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+colnames(arm.tiles)[1] = 'sample'
+
+samples = arm.tiles$sample
+arm.tiles = as.matrix(arm.tiles[,-1])
+rownames(arm.tiles) = samples
+if (logT) arm.tiles = t(apply(arm.tiles, 1, logTransform))
+
+armsList = prep.matrix(arm.tiles)
 arms = armsList$matrix
 
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd
 
-allDf = subtract.arms(segs, arms)
-allDf = cbind(allDf, 'cx'=unit.var(cx.score))
+allDf = BarrettsProgressionRisk::subtractArms(segs, arms)
+allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx))
 
 ## labels: binomial: prog 1, np 0
 sampleStatus = subset(patient.info, Samplename %in% rownames(allDf), select=c('Samplename','Status'))
@@ -96,9 +106,9 @@ dim(allDf)
 dysplasia.df = as.matrix(allDf[sampleStatus$Samplename,])
 dim(dysplasia.df)
 
-raw.segs = tiled.segs[sampleStatus$Samplename,]; raw.arms = tiled.arms[sampleStatus$Samplename,]
+#raw.segs = seg.tiles[sampleStatus$Samplename,]; raw.arms = arm.tiles[sampleStatus$Samplename,]
 
-save(raw.segs, raw.arms, dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
+save(dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
 rm(raw.segs, raw.arms)
 
 
@@ -216,46 +226,28 @@ if (file.exists(file)) {
 ## --------- LOO --------- ##
 message("LOO")
 
-pg.samp = lapply(unique(patient.info$Hospital.Research.ID), function(pt) {
-  info = subset(patient.info, Hospital.Research.ID == pt)
-  info$Prediction = NA
-  info$Prediction.Dev.Resid = NA
-  info$OR = NA
-  info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
-  return(info)
-})
-names(pg.samp) = unique(patient.info$Hospital.Research.ID)
 
-pg.samp = lapply(pg.samp, function(pt) {
-  if (nrow(pt) == 1) {
-    pt = cbind(pt, t(as.data.frame(sampleVar[pt$Samplename,])))
-  } else {
-    pt = cbind(pt, sampleVar[pt$Samplename, ])
-  }
-  return(pt)
-})
+pg.samp = patient.info %>% rowwise %>% dplyr::mutate(
+  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])
+) %>% filter(Samplename %in% rownames(dysplasia.df))
 
 select.alpha = 0.9
-
 
 file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
   message(paste("loading file", file))
   load(file, verbose=T)
-  
-  # Fix info
-#  pg.samp = lapply(pg.samp, function(df) {
-#    merge(df[,c('Samplename',setdiff(colnames(df), colnames(patient.info))) ], subset(patient.info, Patient == unique(df$Patient)), by='Samplename')
-#  })
 } else {
   secf = all.coefs[[select.alpha]]
   a = select.alpha
   
   performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
   # Remove each patient (LOO)
-  for (pt in names(pg.samp)) {
+  for (pt in unique(pg.samp$Hospital.Research.ID)) {
+  #for (pt in names(pg.samp)) {
     print(pt)
-    samples = subset(patient.info, Hospital.Research.ID != pt)$Samplename
+    #samples = subset(patient.info, Hospital.Research.ID != pt)$Samplename
+    samples = subset(pg.samp, Hospital.Research.ID != pt)$Samplename
     
     train.rows = which(rownames(dysplasia.df) %in% samples)
     training = dysplasia.df[train.rows,]
@@ -263,10 +255,11 @@ if (file.exists(file)) {
     #if (ncol(test) <= 1) next
     if ( nrow(test) == ncol(dysplasia.df) ) test = t(test)
     
+    
+    patient.samples = pg.samp %>% filter(Hospital.Research.ID == pt) %>% select(Samplename)
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
-    sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(pg.samp[[pt]]$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
-                                dimnames=list(rownames(test),colnames(training)), 
-                                sparse=T)
+    sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
+                                dimnames=list(rownames(test),colnames(training)), sparse=T)
     
     for(i in colnames(dysplasia.df)) sparsed_test_data[,i] = test[,i]
     
@@ -284,25 +277,27 @@ if (file.exists(file)) {
     if ( length(cv$lambda.1se) > 0 ) {
       performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
       
-      #coef.1se = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
-      
       nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
       
       coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
-      #coef.stability(coef.1se, cv$non.zero.cf)
-      
+
       logit <- function(p){log(p/(1-p))}
       inverse.logit <- function(or){1/(1 + exp(-or))}
       
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
-      or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
-      sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(pg.samp[[pt]]$Samplename, names(labels))])))
+      colnames(pm) = 'Prediction'
       
-      rows = which(pg.samp[[pt]]$Samplename %in% rownames(pm) )
+      rr = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
+      colnames(rr) = 'RR'
       
-      pg.samp[[pt]][rows,'Prediction'] = pm[,1]
-      pg.samp[[pt]][rows,'Prediction.Dev.Resid'] = sy[,1]
-      pg.samp[[pt]][rows,'OR'] = or[,1]
+      sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(patient.samples$Samplename, names(labels))])))
+      colnames(sy) = 'Prediction.Dev.Resid'
+      
+      pg.samp = pg.samp %>% 
+        full_join(as_tibble(pm, rownames='Samplename'), by='Samplename') %>% 
+        full_join(as_tibble(rr, rownames='Samplename'), by='Samplename') %>% 
+        full_join(as_tibble(sy, rownames='Samplename'), by='Samplename')
+      
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
@@ -312,39 +307,16 @@ if (file.exists(file)) {
 
 ## --------- LOO NO HGD--------- ##
 message("LOO NO HGD")
-#info = do.call(rbind, lapply(patient.data, function(df) df$info))
-#info = subset(info, Pathology %nin% c('HGD','IMC'))
-#info$Pathology = droplevels(info$Pathology)
-pg.sampNOHGD = lapply(unique(patient.info$Hospital.Research.ID), function(pt) {
-  info = subset(patient.info, Hospital.Research.ID == pt & Pathology %nin% c('HGD','IMC'))
-  if (nrow(info) <= 0) return(NA)
-  info$Prediction = NA
-  info$Prediction.Dev.Resid = NA
-  info$OR = NA
-  info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
-  return(info)
-})
-names(pg.sampNOHGD) = unique(patient.info$Hospital.Research.ID)
-pg.sampNOHGD = pg.sampNOHGD[!is.na(pg.sampNOHGD)]
 
-pg.sampNOHGD = lapply(pg.sampNOHGD, function(pt) {
-  if (nrow(pt) == 1) {
-    pt = cbind(pt, t(as.data.frame(sampleVar[pt$Samplename,])))
-  } else {
-    pt = cbind(pt, sampleVar[pt$Samplename, ])
-  }
-  return(pt)
-})
+pg.sampNOHGD = patient.info %>% rowwise %>% dplyr::mutate(
+  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])
+) %>% filter(Samplename %in% rownames(dysplasia.df) & Pathology %nin% c('HGD','IMC'))
 
 select.alpha = 0.9
 
 file = paste(cache.dir, 'loonohgd.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
-  # Fix info
-#  pg.sampNOHGD = lapply(pg.sampNOHGD, function(df) {
-#    merge(df[,c('Samplename',setdiff(colnames(df), colnames(patient.info))) ], subset(patient.info, Patient == unique(df$Patient)), by='Samplename')
-#  })
 } else {
   dysplasia.dfNOHGD = dysplasia.df[intersect(rownames(dysplasia.df),subset(patient.info, Pathology %nin% c('HGD','IMC'))$Samplename),]
   
@@ -353,12 +325,11 @@ if (file.exists(file)) {
   
   performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
   # Remove each patient (LOO)
-  for (pt in names(pg.sampNOHGD)) {
+  for (pt in unique(pg.sampNOHGD$Hospital.Research.ID)) {
+  #for (pt in names(pg.sampNOHGD)) {
     print(pt)
-    #tmp.patient.data = patient.data[subset(sum.patient.data, Hospital.Research.ID != pt)$Hospital.Research.ID]
-    #samples = as.vector(unlist(sapply(tmp.patient.data, function(df) df$info$Samplename )))
-    samples = subset(patient.info, Hospital.Research.ID != pt)$Samplename
-    samples = intersect(samples, subset(patient.info, Pathology %nin% c('HGD','IMC'))$Samplename)
+
+    samples = subset(pg.sampNOHGD, Hospital.Research.ID != pt)$Samplename
 
     train.rows = which(rownames(dysplasia.dfNOHGD) %in% samples)
     training = dysplasia.df[train.rows,]
@@ -369,19 +340,16 @@ if (file.exists(file)) {
     #if (ncol(test) <= 1) next
     if ( nrow(test) == ncol(dysplasia.df) ) test = t(test)
     
+    patient.samples = pg.sampNOHGD %>% filter(Hospital.Research.ID == pt) %>% select(Samplename)
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
-    sparsed_test_data <- Matrix(data=0, nrow=ifelse(length(pg.sampNOHGD[[pt]]$Samplename) > 1, nrow(test), 1),  ncol=ncol(training),
-                                dimnames=list(rownames(test),colnames(training)), 
-                                sparse=T)
+    sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
+                                dimnames=list(rownames(test),colnames(training)), sparse=T)
 
     for(i in colnames(dysplasia.dfNOHGD)) sparsed_test_data[,i] = test[,i]
     
     # Fit generated on all samples, including HGD
     fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
     l = fitLOO$lambda
-    
-    #pf = rep(1, ncol(dysplasia.df))
-    #pf[which(colnames(dysplasia.df) %in% rownames(secf))] = 0.01
     
     cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
                                   pts=subset(sets, Samplename %in% samples), fit=fitLOO, standardize=F)
@@ -405,12 +373,21 @@ if (file.exists(file)) {
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       or = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
       sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(pg.sampNOHGD[[pt]]$Samplename, names(labels))])))
+
+      pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
+      colnames(pm) = 'Prediction'
       
-      rows = which(pg.samp[[pt]]$Samplename %in% rownames(pm) )
+      rr = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
+      colnames(rr) = 'RR'
       
-      pg.sampNOHGD[[pt]][rows,'Prediction'] = pm[,1]
-      pg.sampNOHGD[[pt]][rows,'Prediction.Dev.Resid'] = sy[,1]
-      pg.sampNOHGD[[pt]][rows,'OR'] = or[,1]
+      sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(patient.samples$Samplename, names(labels))])))
+      colnames(sy) = 'Prediction.Dev.Resid'
+      
+      pg.sampNOHGD = pg.sampNOHGD %>% 
+        full_join(as_tibble(pm, rownames='Samplename'), by='Samplename') %>% 
+        full_join(as_tibble(rr, rownames='Samplename'), by='Samplename') %>% 
+        full_join(as_tibble(sy, rownames='Samplename'), by='Samplename')
+      
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
