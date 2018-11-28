@@ -61,7 +61,7 @@ dysplasia.df = dysplasia.df[intersect(patient.info$Samplename,rownames(dysplasia
 labels = labels[rownames(dysplasia.df)]
 dim(dysplasia.df)
 
-save(dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
+save(dysplasia.df, labels, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
 
 
 nl = 1000; folds = 10; splits = 5 
