@@ -1,7 +1,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
-if (length(args) < 3)
-  stop("Missing required params: <data dir> <outdir> <info file dir>")
+if (length(args) < 2)
+  stop("Missing required params:<outdir> <info file dir>")
 
 suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 suppressPackageStartupMessages(library(tidyverse))
@@ -14,9 +14,7 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 
 
-data = args[1]
-# data = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient'
-outdir = args[2]
+outdir = args[1]
 # outdir = '~/Data/Ellie/Analysis'
 infodir = args[3]
 # infodir = '~/Data/Ellie/QDNAseq/training'
