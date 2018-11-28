@@ -102,6 +102,8 @@ all.coefs = coefs
 # ----------------- #
 
 # Predict leave out samples
+select.alpha = 0.9
+
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
@@ -130,7 +132,7 @@ pg.samp = patient.info %>% rowwise %>% dplyr::mutate(
   PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])
 ) %>% filter(Samplename %in% rownames(dysplasia.df))
 
-select.alpha = 0.9
+
 file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
