@@ -16,7 +16,7 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_
 
 outdir = args[1]
 # outdir = '~/Data/Ellie/Analysis'
-infodir = args[3]
+infodir = args[2]
 # infodir = '~/Data/Ellie/QDNAseq/training'
 logT = F
 if (length(args) == 4)
