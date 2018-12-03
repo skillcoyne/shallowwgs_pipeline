@@ -221,7 +221,10 @@ if (file.exists(file)) {
 message("LOO")
 
 pg.samp = patient.info %>% rowwise %>% dplyr::mutate(
-  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])
+  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1]),
+  Prediction = NA,
+  RR = NA,
+  Prediction.Dev.Resid = NA
 ) %>% filter(Samplename %in% rownames(dysplasia.df))
 
 select.alpha = 0.9
@@ -283,11 +286,15 @@ if (file.exists(file)) {
       
       sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(patient.samples$Samplename, names(labels))])))
       colnames(sy) = 'Prediction.Dev.Resid'
+      if (nrow(test) == 1) rownames(sy) = rownames(pm)
       
-      pg.samp = pg.samp %>% 
-        full_join(as_tibble(pm, rownames='Samplename'), by='Samplename') %>% 
-        full_join(as_tibble(rr, rownames='Samplename'), by='Samplename') %>% 
-        full_join(as_tibble(sy, rownames='Samplename'), by='Samplename')
+      patient = pg.samp %>% filter(Hospital.Research.ID == pt) %>% arrange(Samplename) 
+      
+      patient$Prediction = pm[patient$Samplename,]
+      patient$RR = rr[patient$Samplename,]
+      patient$Prediction.Dev.Resid = sy[patient$Samplename,]
+      
+      pg.samp[which(pg.samp$Hospital.Research.ID == pt),] = patient
       
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
@@ -300,7 +307,10 @@ if (file.exists(file)) {
 message("LOO NO HGD")
 
 pg.sampNOHGD = patient.info %>% rowwise %>% dplyr::mutate(
-  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])
+  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1]),
+  Prediction = NA,
+  RR = NA,
+  Prediction.Dev.Resid = NA
 ) %>% filter(Samplename %in% rownames(dysplasia.df) & Pathology %nin% c('HGD','IMC'))
 
 select.alpha = 0.9
@@ -366,11 +376,16 @@ if (file.exists(file)) {
       
       sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(patient.samples$Samplename, names(labels))])))
       colnames(sy) = 'Prediction.Dev.Resid'
+      if (nrow(test) == 1) rownames(sy) = rownames(pm)
+
+      patient = pg.sampNOHGD %>% filter(Hospital.Research.ID == pt) %>% arrange(Samplename) 
       
-      pg.sampNOHGD = pg.sampNOHGD %>% 
-        full_join(as_tibble(pm, rownames='Samplename'), by='Samplename') %>% 
-        full_join(as_tibble(rr, rownames='Samplename'), by='Samplename') %>% 
-        full_join(as_tibble(sy, rownames='Samplename'), by='Samplename')
+      patient$Prediction = pm[patient$Samplename,]
+      patient$RR = rr[patient$Samplename,]
+      patient$Prediction.Dev.Resid = sy[patient$Samplename,]
+      
+      pg.sampNOHGD[which(pg.sampNOHGD$Hospital.Research.ID == pt),] = patient
+      
       
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))

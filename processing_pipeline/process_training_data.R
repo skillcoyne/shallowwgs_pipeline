@@ -177,13 +177,13 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     dir.create(plotdir, showWarnings=F )
     plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
     for (sample in names(plots)) 
-      ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + lab(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
+      ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
     
     plotdir = paste0(pd,'/coverage_plots')
     dir.create(plotdir, showWarnings=F )
     plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list')
     for (sample in names(plots))
-      ggsave(filename=paste(plotdir, '/', sample, '_cvg_binned_fitted.png',sep=''), plot=plots[[sample]] + lab(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
+      ggsave(filename=paste(plotdir, '/', sample, '_cvg_binned_fitted.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
   } else {
 
     ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(info$Sample), units='in', limitsize=F)

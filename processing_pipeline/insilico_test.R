@@ -24,10 +24,13 @@ if (length(args) == 4)
 
 x = (unclass(Sys.time()) + sample(1:1000, 1))
 cache.dir = paste(outdir, '5e6_arms_splits', sep='/')
+cache.dir = paste('/tmp', '5e6_arms_splits', sep='/')
+
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
-cache.dir = paste(cache.dir, as.character(x) , sep='/')
+#cache.dir = paste(cache.dir, as.character(x) , sep='/')
 
 dir.create(cache.dir, showWarnings = F, recursive = T)
+print(cache.dir)
 
 ## Hospital.Research.ID info file
 patient.file = list.files(infodir, pattern='All_patient_info.xlsx', recursive=T, full.names=T)
@@ -48,14 +51,14 @@ rm(plots,coefs,performance.at.1se, cvs, models)
 
 # By patient
 leaveout = sample(sum.patient.data$Patient, round(nrow(sum.patient.data)*.2))
-leaveoutSamples = patient.info %>% filter(Patient %in% leaveout & Samplename %in% rownames(dysplasia.df)) 
+leaveoutSamples = all.patient.info %>% filter(Patient %in% leaveout & Samplename %in% rownames(dysplasia.df)) 
 
 patient.info = all.patient.info %>% filter(!Patient %in% leaveout)
 sum.patient.data = summarise.patient.info(patient.info)
 nrow(sum.patient.data)
 
-leaveoutDf = dysplasia.df[ intersect(leaveoutSamples$Samplename,rownames(dysplasia.df)), ]
-dysplasia.df = dysplasia.df[intersect(patient.info$Samplename,rownames(dysplasia.df)), ]
+leaveoutDf = dysplasia.df[ intersect(leaveoutSamples$Samplename,rownames(dysplasia.df)),,drop=F ]
+dysplasia.df = dysplasia.df[intersect(patient.info$Samplename,rownames(dysplasia.df)),,drop=F ]
 
 ## labels: binomial: prog 1, np 0
 labels = labels[rownames(dysplasia.df)]
@@ -129,9 +132,11 @@ save(vpd, file=paste(cache.dir, 'leaveout_predictions.Rdata', sep='/'))
 message("LOO")
 
 pg.samp = all.patient.info %>% rowwise %>% dplyr::mutate(
-  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])
+  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1]),
+  Prediction = NA,
+  RR = NA,
+  Prediction.Dev.Resid = NA
 ) %>% filter(Samplename %in% rownames(dysplasia.df))
-
 
 file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
@@ -146,7 +151,7 @@ if (file.exists(file)) {
     print(pt)
     
     samples = all.patient.info %>% filter(Hospital.Research.ID != pt & Samplename %in% rownames(dysplasia.df)) %>% select(Samplename)
-    
+
     train.rows = which(rownames(dysplasia.df) %in% samples$Samplename)
     training = dysplasia.df[train.rows,,drop=F]
     test = as.matrix(dysplasia.df[-train.rows,,drop=F])
@@ -181,17 +186,22 @@ if (file.exists(file)) {
       
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       colnames(pm) = 'Prediction'
-      
+
       rr = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
       colnames(rr) = 'RR'
-      
+
       sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(patient.samples$Samplename, names(labels))])))
       colnames(sy) = 'Prediction.Dev.Resid'
+      if (nrow(test) == 1) rownames(sy) = rownames(pm)
       
-      pg.samp = pg.samp %>% 
-        full_join(as_tibble(pm, rownames='Samplename'), by='Samplename') %>% 
-        full_join(as_tibble(rr, rownames='Samplename'), by='Samplename') %>% 
-        full_join(as_tibble(sy, rownames='Samplename'), by='Samplename')
+      patient = pg.samp %>% filter(Hospital.Research.ID == pt) %>% arrange(Samplename) 
+      
+      patient$Prediction = pm[patient$Samplename,]
+      patient$RR = rr[patient$Samplename,]
+      patient$Prediction.Dev.Resid = sy[patient$Samplename,]
+      
+      pg.samp[which(pg.samp$Hospital.Research.ID == pt),] = patient
+
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
