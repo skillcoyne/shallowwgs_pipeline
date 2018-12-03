@@ -36,8 +36,8 @@ demo.file = list.files(infodir, pattern='Demographics_full.xlsx', recursive=T, f
 if ( length(patient.file) < 1 | length(demo.file) < 1)
   stop("Missing files in info dir: All_patient_info.xlsx and Demographics_full.xlsx")
 
-patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% arrange(Status, Patient, Endoscopy.Year, Pathology)
-sum.patient.data = summarise.patient.info(patient.info)
+all.patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% arrange(Status, Patient, Endoscopy.Year, Pathology)
+sum.patient.data = summarise.patient.info(all.patient.info)
 
 
 modeldir = paste0(outdir, '/5e6_arms_all')
@@ -50,7 +50,7 @@ rm(plots,coefs,performance.at.1se, cvs, models)
 leaveout = sample(sum.patient.data$Patient, round(nrow(sum.patient.data)*.2))
 leaveoutSamples = patient.info %>% filter(Patient %in% leaveout & Samplename %in% rownames(dysplasia.df)) 
 
-patient.info = patient.info %>% filter(!Patient %in% leaveout)
+patient.info = all.patient.info %>% filter(!Patient %in% leaveout)
 sum.patient.data = summarise.patient.info(patient.info)
 nrow(sum.patient.data)
 
@@ -104,7 +104,7 @@ all.coefs = coefs
 # Predict leave out samples
 select.alpha = 0.9
 
-file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
+#file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
@@ -118,7 +118,7 @@ colnames(pred) = 'Prediction'
 rr = predict(fitV, newx=leaveoutDf, s=lambda.opt, type='link')
 colnames(rr) = 'RR'
 
-vpd = patient.info %>% filter(Samplename %in% rownames(leaveoutDf)) %>%
+vpd = all.patient.info %>% dplyr::filter(Samplename %in% rownames(leaveoutDf)) %>%
   dplyr::mutate(  PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])) %>% 
   full_join(as_tibble(pred, rownames='Samplename'), by='Samplename') %>% 
   full_join(as_tibble(rr, rownames='Samplename'), by='Samplename')
@@ -128,7 +128,7 @@ save(vpd, file=paste(cache.dir, 'leaveout_predictions.Rdata', sep='/'))
 ## --------- LOO --------- ##
 message("LOO")
 
-pg.samp = patient.info %>% rowwise %>% dplyr::mutate(
+pg.samp = all.patient.info %>% rowwise %>% dplyr::mutate(
   PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1])
 ) %>% filter(Samplename %in% rownames(dysplasia.df))
 
@@ -145,15 +145,13 @@ if (file.exists(file)) {
   for (pt in unique(pg.samp$Hospital.Research.ID)) {
     print(pt)
     
-    samples = patient.info %>% filter(Hospital.Research.ID != pt & Samplename %in% rownames(dysplasia.df)) %>% select(Samplename)
+    samples = all.patient.info %>% filter(Hospital.Research.ID != pt & Samplename %in% rownames(dysplasia.df)) %>% select(Samplename)
     
     train.rows = which(rownames(dysplasia.df) %in% samples$Samplename)
-    training = dysplasia.df[train.rows,]
-    test = as.matrix(dysplasia.df[-train.rows,])
-    #if (ncol(test) <= 1) next
-    if ( nrow(test) == ncol(dysplasia.df) ) test = t(test)
-    
-    patient.samples = patient.info %>% filter(Hospital.Research.ID == pt & Samplename %in% rownames(dysplasia.df)) %>% select(Samplename)
+    training = dysplasia.df[train.rows,,drop=F]
+    test = as.matrix(dysplasia.df[-train.rows,,drop=F])
+
+    patient.samples = all.patient.info %>% filter(Hospital.Research.ID == pt & Samplename %in% rownames(dysplasia.df)) %>% select(Samplename)
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
     sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
                                 dimnames=list(rownames(test),colnames(training)), sparse=T)
@@ -172,9 +170,7 @@ if (file.exists(file)) {
     
     if ( length(cv$lambda.1se) > 0 ) {
       performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
-      
       #coef.1se = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
-      
       nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
       
       coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]

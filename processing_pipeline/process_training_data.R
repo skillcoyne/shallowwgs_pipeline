@@ -14,9 +14,9 @@ source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 data = args[1]
 patient.file = args[2]
 outdir = args[3]
-#data = '~/Data/Ellie/QDNAseq/training/'
-#patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
-#outdir = '~/Data/Ellie/Analysis'
+# data = '~/Data/Ellie/QDNAseq/training/'
+# patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
+# outdir = '~/Data/Ellie/Analysis'
 
 patient.name = NULL
 if (length(args) == 4)
@@ -127,7 +127,6 @@ multipcfdir = paste(outdir, "multipcf_perPatient", sep='/')
 if ( !dir.exists(multipcfdir) ) 
   dir.create(multipcfdir)
 
-
 if (!is.null(patient.name))
   pts_slx = subset(pts_slx, Hospital.Research.ID == patient.name)
 
@@ -169,8 +168,6 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     arm.MSE = rbind(arm.MSE, arms$error)
   }
     
-  #filename = paste(pd, '/', pt,"_probefiltered_segvals_gamma250.txt",sep="")
-  #write.table(segmented$seg.vals, file=filename, sep="\t", quote=F)
   save(segmented, tile, arms, file=paste(pd, 'segment.Rdata', sep = '/'))
 
   message("Saving plots")
