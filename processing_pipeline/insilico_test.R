@@ -24,10 +24,9 @@ if (length(args) == 4)
 
 x = (unclass(Sys.time()) + sample(1:1000, 1))
 cache.dir = paste(outdir, '5e6_arms_splits', sep='/')
-cache.dir = paste('/tmp', '5e6_arms_splits', sep='/')
 
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
-#cache.dir = paste(cache.dir, as.character(x) , sep='/')
+cache.dir = paste(cache.dir, as.character(x) , sep='/')
 
 dir.create(cache.dir, showWarnings = F, recursive = T)
 print(cache.dir)
