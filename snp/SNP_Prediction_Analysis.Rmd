@@ -21,7 +21,9 @@ source('~/workspace/shallowwgs_pipeline/lib/data_func.R')
 source('~/workspace/shallowwgs_pipeline/lib/common_plots.R')
 
 
-chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')
+library(BarrettsProgressionRisk)
+
+chr.info = BarrettsProgressionRisk:::chrInfo(build='hg19')
 
 adjust.cols<-function(mtx, means=NULL, sds=NULL, na.replace=0) {
   if (!is.null(means)) {
@@ -38,8 +40,8 @@ adjust.cols<-function(mtx, means=NULL, sds=NULL, na.replace=0) {
   return(mtx)
 }
 
-load('~/Data/Ellie/Analysis/5e6_arms_all-NOQC/model_data.Rdata', verbose = T)
-load('~/Data/Ellie/Analysis/5e6_arms_all-NOQC/all.pt.alpha.Rdata', verbose = T)
+load('~/Data/Ellie/Analysis/5e6_arms_all/model_data.Rdata', verbose = T)
+load('~/Data/Ellie/Analysis/5e6_arms_all/all.pt.alpha.Rdata', verbose = T)
 #alpha = '0'
 alpha = '0.9'
 fitV = models[[alpha]]

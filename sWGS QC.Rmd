@@ -16,7 +16,7 @@ library(ggplot2)
 library(gridExtra)
 
 dir1 = '~/Data/Ellie/Analysis/multipcf_plots_fitted_perPatient'
-dir2 = '~/Data/Ellie/Analysis/VAL_Cohort/sWGS/'
+dir2 = '~/Data/Ellie/Analysis/val_test/'
 
 ```
 
@@ -64,6 +64,8 @@ failedQC = arrange(subset(res.variance, round(varMAD_median,3) > cutoff, select=
 Cutoff from above dataset applied to the validation set.
 
 ```{r, echo=F}
+list.files(dir2
+
 resVal = read.table(paste(dir2,'resid_var.txt',sep='/'),header=T)
 pander(head(resVal[,grep('var1',colnames(resVal))]), caption='Residuals across segments per sample')
 
@@ -111,9 +113,12 @@ ggplot(ar, aes(varMAD_median)) + geom_histogram(bins=50,color='lightblue') +
 
 fc = arrange(subset(ar, round(varMAD_median,3) > newcutoff, select=c(pid,sample, varMAD_median,varMAD_sd, varMAD_Q1,varMAD_Q3)), pid, varMAD_median)
 
-setdiff(fc$sample,c(as.character(failedQC$sample), as.character(failedQCVal$sample)))
 
 ```
+
+Using the cutoff `r newcutoff` learned from all of them we would fail `r length(which(resVal$varMAD_median > newcutoff))` samples from the training dataset (Ellie's) and `r length(which(resVal$varMAD_median > newcutoff))` from the initial validation dataset. So while it's less stringent it still fails `r length(which(failedQCVal$varMAD_median > newcutoff))/nrow(resVal)*100`% versus `r length(which(failedQC$varMAD_median > newcutoff))/nrow(res.variance)*100`% of the training dataset.
+
+
 
 
 

@@ -6,22 +6,20 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-library(ggplot2)
+library(tidyverse)
 library(ggrepel)
 library(pander)
 library(reshape2)
 library(gridExtra)
-library(plyr) 
-library(dplyr)
 library(pROC)
 
 source('lib/load_patient_metadata.R')
 source('lib/cv-pt-glm.R')
 source('lib/common_plots.R')
 
-data = '~/Data/Ellie'
+data = '~/Data/BarrettsProgressionRisk'
 
-data.files = list.files(paste(data, 'QDNAseq',sep='/'), full.names=T)
+data.files = list.files(paste(data, 'QDNAseq/training',sep='/'), full.names=T)
 analysis.files = list.files(paste(data, 'Analysis', sep='/'), full.names=T)
 
 ## Hospital.Research.ID info file
@@ -34,7 +32,7 @@ all.patient.info = read.patient.info(patient.file, demo.file, set='all')$info
 
 sum.pt = summarise.patient.info(all.patient.info)
 
-cache.dir = paste(data, 'Analysis/5e6_arms_all_logR', sep='/')
+cache.dir = paste(data, 'Analysis/5e6_arms_all', sep='/')
 split.dir = paste(data, 'Analysis/5e6_arms_splits', sep='/')
 
 performance = data.frame(); rocs = list()

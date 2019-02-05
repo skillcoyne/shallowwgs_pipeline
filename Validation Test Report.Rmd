@@ -1,0 +1,217 @@
+---
+title: "sWGS validation/protocol tests"
+author: "Sarah Killcoyne"
+date: "14 Jan 2019"
+output: 
+  html_document: 
+    toc: yes
+
+---
+
+```{r setup, include=FALSE}
+
+
+library(BarrettsProgressionRisk)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(gridExtra)
+library(reshape2)
+
+source('lib/load_patient_metadata.R')
+
+knitr::opts_chunk$set(echo = F, warning = F, message=F)
+options(knitr.table.format = "html") 
+
+
+dirs = list(
+  training = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_plots_fitted_perPatient',
+  val_1 = '~/Data/BarrettsProgressionRisk/Analysis/val_test/',
+  protocol = '~/Data/BarrettsProgressionRisk/Analysis/protocol_test/',
+  kit = '~/Data/BarrettsProgressionRisk/Analysis/kit_test/'
+)
+
+```
+
+## Training
+
+*	777 samples, 88 patients all FFPE, from various sites
+*	8 technical repeat samples, 2 patients
+*	8 samples from normal gastric/duodenum tissue, 7 patients
+*	16 excluded samples, 1 patient (due to clinical pathology)
+
+
+We had no formal QC process when we initially used these to train.  We manually inspected the segmentation plots and that was all.  There were 10 samples from 5 patients that I looked at and thought they were overdispersed, but they did not appear to have a significant effect on the model.  This is likely due to the fact that there were so few.
+
+One patient (AH0254) had a single 50X sequence performed from their final timepoint as well as 7 sWGS samples.  Of those samples 2 fail on manual inspection due to overdispersion of the data.  The remaining 5 samples are good quality.  All were sequenced in the same batch with 68 other samples.
+
+```{r}
+get.png<-function(n,dir) {
+  list.files(path=dir, pattern=n, full.names=T, recursive=T)
+}
+
+plot.dir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_plots_fitted_perPatient/'
+
+pts = read.patient.info('~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx')$info
+
+train = left_join(readr::read_tsv(list.files(dirs$training, 'resid_var.txt', full.names=T)), read.patient.info('~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx')$info, by=c('sample'='Samplename')) %>% select(pid,sample,SLX.ID,varMAD_median)
+
+failed = train %>% filter(varMAD_median > 0.015)
+
+pass.fail = train %>% summarise( Pass= length(which(varMAD_median<0.015))/nrow(train), Fail=length(which(varMAD_median>=0.015))/nrow(train), group='Training')
+
+failed.tbl = failed %>% rowwise() %>% dplyr::mutate(varMAD_median = signif(varMAD_median,4)) %>%
+ dplyr::mutate(
+   sample = text_spec(sample, link=paste0('file:///',get.png(sample, paste(plot.dir, pid, sep='/') ))), 
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= 0.011, "green", "red"))) %>% dplyr::select(pid,sample,varMAD_median)
+
+
+```
+
+We later developed a computational cutoff. A cutoff was selected for the median variance across segments in a sample of 0.015.  Any sample above that is considered to have failed QC.  In the initial training set that results in `r nrow(failed)` samples failing QC.  A manual check confirms that these samples are overdispersed (especially the two from AH0254).  This is `r round(nrow(failed)/nrow(train)*100,2)`% of our samples.
+
+`r failed.tbl %>% kable(format = "html", escape = F) %>% kable_styling("striped", full_width = F)`
+
+`r kable(train %>% dplyr::summarise_at(vars(varMAD_median), funs(median,mean,sd,min,max)), caption='Summary statistics for the variance across all training samples') %>% kable_styling(bootstrap_options=c('bordered',full_width=F))`
+
+
+
+## Initial Validation
+
+*	92 samples, 49 patients, multiple sites
+  + 84 FFPE
+  + 10 frozen
+  + 3 cytosponge
+* 2 samples were excluded due to insufficient reads
+
+```{r}
+val = do.call(bind_rows, lapply(list.files(dirs$val_1, 'residuals', recursive = T, full.names = T), function(f) {
+  readr::read_tsv(f, col_types = 'cdddddl')
+}))
+
+val = right_join(readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/ValidationCohort.xlsx') %>% mutate(Samplename = paste0('SLX-',`SLX-ID`, '.', sub('-','_',`Index Sequence`))) %>% select(`Hospital Research ID`,`Block ID`, `Patient ID`, Samplename),val, by=c('Samplename'='sample'))
+
+val.fail = val %>% filter(varMAD_median > 0.015) %>% select(`Hospital Research ID`, Samplename, varMAD_median)
+
+pass.fail = bind_rows(pass.fail, 
+  val %>% summarise( Pass= length(which(varMAD_median<=0.011))/nrow(val), Fail=length(which(varMAD_median>0.011))/nrow(val), group='Validation'))
+```
+
+By manual inspection I would say 66 of these were poor quality data. Using that same cutoff in the intial validation cohort we would fail `r round(nrow(val.fail)/nrow(val)*100,2)`% of our `r nrow(val)` samples. However, a manual inspection fails many more and when we used our initial more stringent cutoff of 0.011 we failed `r round(nrow(val %>% filter(varMAD_median > 0.011))/nrow(val)*100,2)`% of samples which agreed closely with manual inspection.
+
+`r kable(val.fail %>% dplyr::summarise_at(vars(varMAD_median), funs(median,mean,sd,min,max)), caption='Summary statistics for the variance across all initial validation samples') %>% kable_styling(bootstrap_options=c('bordered',full_width=F))`
+
+## Speedvac Test
+
+* 16 samples, 12 samples from the training dataset and 4 from the validation set
+* 8 Speedvac'd
+* 8 were not
+
+There was some concern initially that the Speedvac itself was causing the difference as Ellie had used the one at the CI, while all of the validation dataset were run in the MRC. On both manual inspection and via the computational cutoff only the 4 samples that were not in the initial training dataset failed QC.
+
+```{r}
+
+plot.dir = '~/Data/BarrettsProgressionRisk/QDNAseq/protocol_test'
+proc.dir = '~/Data/BarrettsProgressionRisk/Analysis/protocol_test'
+
+speedvac = do.call(bind_rows, lapply(list.files(dirs$protocol, 'residuals', recursive = T, full.names = T), function(f) {
+  readr::read_tsv(f, col_types='cdddddl')
+})) %>% select(sample, varMAD_median)
+
+speedvac = right_join(readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/protocol_test/Speedvac Pilot samples.xlsx') , speedvac, by=c('Sample'='sample'))
+
+pass.fail = bind_rows(pass.fail, 
+  speedvac %>% summarise( Pass= length(which(varMAD_median<=0.011))/nrow(speedvac), Fail=length(which(varMAD_median>0.011))/nrow(speedvac), group='Speedvac'))
+
+speedvac.tbl = speedvac %>% arrange(Speedvac, `Ellie’s Cohort`, `Manual QC`) %>% rowwise() %>% dplyr::mutate(varMAD_median = signif(varMAD_median,4)) %>%
+ dplyr::mutate(
+   #Speedvac = cell_spec(Speedvac, "html", background = ifelse(Speedvac == 'Yes', 'lightblue', 'yellow')),
+   ID = text_spec(paste(`SLX-ID`, `Index Sequence`,sep='.'),link=paste0('file:///',get.png( paste(`SLX-ID`, sub('-','_',`Index Sequence`),sep='.'), plot.dir ))),
+   Sample = text_spec(Sample, link=paste0('file:///', get.png(paste0(Sample, '_segmentedCoverage.png'), paste(proc.dir,`Patient ID`,sep='/')))),
+   #text_spec(Sample, link=paste0('file:///',get.png( paste(`SLX-ID`, sub('-','_',`Index Sequence`),sep='.'), plot.dir ))),
+   `Manual QC` = cell_spec(`Manual QC`, "html", background = ifelse(`Manual QC` == 'Pass', "green", "red"), color='white'),
+   `Ellie’s Cohort` = cell_spec(`Ellie’s Cohort`, "html", color = ifelse(`Ellie’s Cohort` == 'Yes', "blue", "brown")),
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= 0.011, "green", "red"))) %>%
+  dplyr::select(ID,Sample, Speedvac, `Ellie’s Cohort`, `Manual QC`, varMAD_median) %>% rename(`Ellie’s Cohort` = 'Previously Extracted')
+
+rowsY = grep('Yes',speedvac.tbl$Speedvac)
+rowsN = grep('No',speedvac.tbl$Speedvac)
+
+speedvac.tbl %>%
+  kable(format = "html", escape = F) %>% kable_styling("striped", full_width=F) %>%
+  group_rows("Speedvac", rowsY[1], rowsY[length(rowsY)],label_row_css = "background-color: #666; color: #fff;") %>%
+  group_rows("No Speedvac", rowsN[1], rowsN[length(rowsN)],label_row_css = "background-color: #666; color: #fff;")
+```
+
+All 4 that were not from Ellie's cohort failed manual QC (only 2 failed by cutoffs, but the other 2 were marginal). The difference in these data were only that the samples used from the training dataset (n=12) were already extracted while the 4 that were new had to be extracted from scratch. As the training samples had been extracted using GeneRead and the new samples used AllPrep we considered that  the kit could be an issue.
+
+
+## Kit Test
+
+*	12 cell line FFPE samples 
+  + 10 cell lines
+  + 2 NP patients from an earlier set
+* 7 AllPrep
+* 5 GeneRead
+
+
+```{r}
+
+kit = do.call(bind_rows, lapply(list.files(dirs$kit, 'residuals', recursive = T, full.names = T), function(f) {
+  readr::read_tsv(f, col_types='cdddddl')
+})) %>% select(sample, varMAD_median)
+
+
+kit = right_join(readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/kit_test/kit_pilot.xlsx') %>% select(Number, Sample, `Index Sequence`, `Cell line Type`, `Kit Extraction`, `Manual QC`), kit, by=c('Sample'='sample')) %>% arrange(`Manual QC`)
+
+cell.line<-function(cl) {
+  if (grepl('Non',cl)) return('NP')
+  if (grepl('Barr',cl)) return('BE')
+  if (grepl('Colon',cl)) return('COAD')
+  return(cl)
+}
+
+extract<-function(kit) {
+  if (grepl('All',kit)) return('Allprep')
+  return('GeneRead')
+}
+
+kit = kit %>% rowwise %>% mutate(`Cell line Type` = cell.line(`Cell line Type`), `Kit Extraction`=extract(`Kit Extraction`))
+kit = kit %>% rename(`Kit Extraction`='Kit', `Cell line Type`='Type') %>% arrange(Kit)
+
+pass.fail = bind_rows(pass.fail, 
+  kit %>% summarise( Pass= length(which(varMAD_median<=0.011))/nrow(kit), Fail=length(which(varMAD_median>0.011))/nrow(kit), group='Kit'))
+
+plot.dir= '~/Data/BarrettsProgressionRisk/QDNAseq/kit_test/SLX-15639'
+proc.dir = '~/Data/BarrettsProgressionRisk/Analysis/kit_test'
+
+kit.tbl = kit %>% dplyr::mutate(varMAD_median = signif(varMAD_median,4)) %>% rowwise() %>%
+ dplyr::mutate(
+   Sample = text_spec(Sample, link=paste0('file:///',get.png('png',paste(proc.dir,as.character(Number),'plots',sep='/')))),
+   `Manual QC` = cell_spec(`Manual QC`, "html", background = ifelse(`Manual QC` == 'PASS', "green", "red"), color='white'),
+   `Index Sequence` = text_spec(`Index Sequence`, link=paste0('file:///',get.png(sub('-','_',`Index Sequence`),plot.dir))),   
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= 0.011, "green", "red"))) %>%
+  dplyr::select(`Index Sequence`, Sample, Kit, Type, `Manual QC`, varMAD_median) 
+
+rowsY = grep('GeneRead',kit.tbl$Kit)
+rowsN = grep('GeneRead',kit.tbl$Kit, invert = T)
+
+kit.tbl %>%
+  kable(format = "html", escape = F) %>% kable_styling("bordered", full_width = F) %>%
+  group_rows("Kit: GeneRead", rowsY[1], rowsY[length(rowsY)],label_row_css = "background-color: #666; color: #fff;") %>%
+  group_rows("Kit: AllPrep", rowsN[1], rowsN[length(rowsN)],label_row_css = "background-color: #666; color: #fff;") 
+```
+
+In the Generead vs Allprep kit test we were testing to see whether the specific kit used made the difference.  Ellie had used GeneRead for all of her samples, while we had started to use Allprep.  While it is not conclusive, the GeneRead's did perform better.  However, even here the failure rate was too high and most of the GeneRead's passed manual QC but would not have passed computational QC (<0.015).  
+
+Under manual QC 4 samples would appear to be of good enough quality to analyze, 3 were Generead and 1 was Allprep.  All others were poor quality.  However, I would not call this definitive simply because there were so few and that’s still a high rate of failure.
+
+
+# Conclusion
+
+Currently we are guessing that there is a step during extraction that is causing the problem.  All of Ellie’s samples used in the Speedvac test were extracted prior to use by us, though not necessarily all by Ellie. As the protocol being used was from Ellie's thesis and conversations with her, rather than direct training, it seems possible that something was undocumented/unclear and therefore lost in the mix. 
+
+```{r}
+ggplot(melt(pass.fail, id.vars = 'group'), aes(group, value,group=group,fill=variable)) + geom_col(position = position_stack()) + labs(y='Ratio of samples', x='') + theme_bw()
+```
+

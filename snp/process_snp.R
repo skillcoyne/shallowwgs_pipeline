@@ -1,8 +1,8 @@
 options(bitmapType = "cairo")
 
-library(ggplot2)
+library(tidyverse)
 library(gridExtra)
-library(dplyr)
+
 
 suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
 
@@ -14,6 +14,7 @@ if (length(args) < 3)
 chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')
 
 datadir = args[1]
+datadir = '~/Data/Reid_SNP/PerPatient/1001'
 # datadir =  "~/Data/Reid_SNP/PerPatient-preLM/512"
 allpts.file = args[2]
 # allpts.file = '~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata'
@@ -26,28 +27,42 @@ if (!file.exists(allpts.file))
   stop(paste(allpts.file, "doesn't exist or isn't readable"))
 
 load(allpts.file, verbose=T)
+sampletype<-function(level) {
+  type = 'BE'
+  if (grepl('BLD',level,ignore.case=T)) {
+    type = 'Blood Normal'
+  } else if (grepl('gastric',level,ignore.case=T)) {
+    type = 'Gastric Normal'
+  }
+  return(type)
+}
+
 qcdata = qcdata %>% rowwise %>% dplyr::mutate(
   PatientID = unlist(strsplit(Samplename, '_'))[1],
   SampleID = unlist(strsplit(Samplename, '_'))[2],
   EndoID = unlist(strsplit(Samplename, '_'))[3],
-  Level = unlist(strsplit(Samplename, '_'))[4]
+  Level = unlist(strsplit(Samplename, '_'))[4], 
+  Samplename = sub('_$','',Samplename), 
+  SampleType = sampletype(Level)
 )
 segments.list = lapply(segments.list, function(pt) {
   pt$sample = sub('\\.LogR','',pt$sample)
   pt
 })
-qcdata$ASCAT.SCA.ratio = apply(qcdata,1,function(s) {
+
+qcdata$`ASCAT SCA Ratio` = apply(qcdata,1,function(s) {
   smp = subset(segments.list[[ s[['PatientID']] ]], sample == s[['Samplename']] & chr %in% c(1:22))
   smp = smp %>% rowwise %>% dplyr::mutate(
     #'Total' = nAraw + nBraw,
     'Total' = nMajor + nMinor,
     'CNV' = round(Total) - round(as.numeric(s[['Ploidy']])) )
+  
   x = subset(smp, CNV != 0 & chr %in% c(1:22))
-  sum(x$endpos - x$startpos) / chr.info[22,'genome.length']
+  sum(x$endpos - x$startpos) / chr.info[22,'genome.length',drop=T]
 })
-qcdata$SampleType = 'BE'
-qcdata$SampleType[grep('BLD',qcdata$Level, ignore.case=T)] = 'Blood Normal'
-qcdata$SampleType[grep('gastric',qcdata$Level, ignore.case=T)] = 'Gastric Normal'
+
+lowSCACutoff = median((qcdata %>% filter(SampleType != 'BE') %>% select(`ASCAT SCA Ratio`))$`ASCAT SCA Ratio`)
+
 
 if (!dir.exists(datadir))
   stop(paste(datadir, "doesn't exist or isn't readable"))
@@ -100,36 +115,23 @@ chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
 file = list.files(datadir,'^ascat.Rdata',full.names=T)
 print(file)
 load(file, verbose=T)
-sample.ploidy = ascat.output$ploidy
-segraw = ascat.output$segments_raw
-
+sample.ploidy = round(ascat.output$ploidy,2)
+segraw = as_tibble(ascat.output$segments_raw)
+segraw = segraw %>% rowwise %>% dplyr::mutate( sample = sub('\\.LogR','',sample))
+names(sample.ploidy) =  sub('\\.LogR','',names(sample.ploidy))
 rm(ascat.pcf, ascat.gg, ascat.output)
 
-segraw = subset(segraw, chr %in% c(1:22))
-head(segraw)
+segraw = segraw %>% filter(chr %in% c(1:22)) %>% rowwise() %>% 
+  dplyr::mutate(
+    ploidy = sample.ploidy[sample],
+    # Adjust based on the summary values per CN that we get in WGS (mostly) NP Barrett's cases
+    totalRaw = round(nAraw+nBraw,3),
+    adjRaw = totalRaw-ploidy, 
+    chr = factor(chr, levels=c(1:22), ordered=T)
+) %>% arrange(sample, chr, startpos)
 
-# Adjust based on the summary values per CN that we get in WGS (mostly) NP Barrett's cases
-adjust.segraw<-function(segraw, ploidy) {
-  #segraw$adjLRR = NA
-  segraw$totalRaw = round(with(segraw, nAraw+nBraw), 3)
-  segraw = segraw %>% rowwise() %>% mutate(totalRaw = round(nAraw+nBraw, 3), adjRaw = totalRaw-ploidy[sample], ploidy = ploidy[sample] )
-  return(segraw)
-}
-  
-segraw = adjust.segraw(segraw, sample.ploidy)
-head(segraw)
-
-segraw$chr = factor(segraw$chr, levels=c(1:22), ordered=T)
-
-if (excludeLowSCA) {
-  median.SCA = median(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio) + sd(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio)
-  qcdata = subset(qcdata, (SampleType == 'BE' & ASCAT.SCA.ratio > median.SCA) | SampleType != 'BE')
-  
-  segraw$sample = sub('\\.LogR','',segraw$sample)
-  
-  segraw = subset(segraw, sample %in% intersect(qcdata$Samplename, segraw$sample))
-}
-
+if (excludeLowSCA) 
+  qcdata = qcdata %>% filter(SampleType == 'BE' & Samplename %in% intersect(Samplename, segraw$sample) & `ASCAT SCA Ratio` > lowSCACutoff  )
 
 m = (melt(segraw, measure.vars=c('adjRaw')))
 p = ggplot(m, aes(sample, value, fill=grepl('BLD|gastric',sample))) + geom_jitter() + geom_boxplot(alpha=0.8) + labs(y='Ploidy Adj. CN', x='', title=basename(datadir)) + theme(legend.position = 'none', axis.text.x = element_text(angle=45, hjust=1))
