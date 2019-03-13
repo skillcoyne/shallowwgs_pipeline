@@ -7,6 +7,7 @@ if (length(args) < 3)
 
 library(tidyverse)
 library(ggrepel)
+library(gridExtra)
 library(BarrettsProgressionRisk)
 source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
@@ -14,18 +15,16 @@ data = args[1]
 patient.file = args[2]
 outdir = args[3]
 
-data = '~/Data/BarrettsProgressionRisk//QDNAseq/kit_test/'
-patient.file = '~/Data/BarrettsProgressionRisk/QDNAseq/kit_test/kit_pilot.xlsx'
-outdir = '~/Data/BarrettsProgressionRisk/Analysis/kit_test'
+#data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
+#patient.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/validation_samples.xlsx'
+#outdir = '~/Data/BarrettsProgressionRisk/Analysis/val_test/'
 
 patient.name = NULL
 if (length(args) == 4)
   patient.name = args[4]
 
 patient.info = readxl::read_xlsx(patient.file)
-patient.info$Samplename = gsub('-', '_', paste(patient.info$`Index Sequence`,strip.whitespace(patient.info$`SLX-ID`),sep="_"))
-
-colnames(patient.info)[1] = 'Patient ID'
+patient.info$Samplename = gsub('-', '_', paste(patient.info$`Index Sequence`,strip.whitespace(sub('SLX-','',patient.info$`SLX-ID`)),sep="_"))
 
 #patient.info
 
@@ -35,10 +34,9 @@ if (length(data.dirs) <= 0)
 
 pts_slx = arrange(unique(patient.info[c('SLX-ID','Patient ID')]), `Patient ID`)
 
-preds = tibble()
-failedQC = tibble()
-
-for (slx in unique(patient.info$`SLX-ID`)) {
+preds = tibble(); failedQC = tibble()
+for (slx in unique(pts_slx$`SLX-ID`)) {
+#for (slx in unique(patient.info$`SLX-ID`)) {
   print(slx)
   dir = grep(slx,data.dirs,value=T)
   
@@ -49,14 +47,15 @@ for (slx in unique(patient.info$`SLX-ID`)) {
     message(paste("Missing raw or fitted file for SLX ID",slx,"in",dir))
     next
   } else if (length(rawFile) == 1) {
-    raw.data = data.table::fread(rawFile)
-    fitted.data = data.table::fread(fittedFile)
+    raw.data = read_tsv(rawFile, col_types = cols('chrom'=col_character()))
+    fitted.data = read_tsv(fittedFile, col_types = cols('chrom'=col_character()))
   } else {
     raw.data = NULL; fitted.data = NULL
     for (file in rawFile) {
       print(file)
-      raw = data.table::fread(file)
-      fit = data.table::fread(grep(sub('\\.binSize.*','',basename(file)), fittedFile, value=T))
+      raw = read_tsv(file, col_types = cols('chrom'=col_character()))
+      fit = read_tsv(grep(sub('\\.binSize.*','',basename(file)), fittedFile, value=T), col_types = cols('chrom'=col_character()))
+
       colnames(fit)[5] = sub('\\.binSize.*','',basename(file))
       colnames(raw)[5] = sub('\\.binSize.*','',basename(file))
       
@@ -75,50 +74,66 @@ for (slx in unique(patient.info$`SLX-ID`)) {
     colnames(fitted.data) = gsub('tp','', colnames(fitted.data))
   }
 
-  for (s in (patient.info %>% filter(`SLX-ID` == slx))$Sample) {
+  patients = (pts_slx %>% filter(`SLX-ID` == slx)) %>% select(`Patient ID`) %>% pull
+  for (pid in  patients) {
+  #for (s in (patient.info %>% filter(`SLX-ID` == slx)) ) {
     #message(paste('Patient',id))
-    message(paste('Sample',s))
+    message(paste('Patient',pid))
     
-    pid = patient.info %>% filter(Sample == s) %>% select(`Patient ID`) %>% pull
-    
-    samples = patient.info %>% filter(Sample == s & `SLX-ID` == slx) %>% mutate(`Index Sequence` = sub('-', '_', gsub('tp', '', `Index Sequence`)), Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.') ) %>% select(Samplename) %>% pull
-    
-    rcols = grep(paste(samples,collapse='|'), colnames(raw.data))
-    fcols = grep(paste(samples,collapse='|'), colnames(fitted.data))
-      
-    rd = raw.data[,c(1:4,rcols),with=F]
-    fd = fitted.data[,c(1:4,fcols),with=F]
+    si = patient.info %>% filter(`Patient ID` == pid) 
     
     plot.dir = paste(outdir, pid, 'plots',sep='/')
+    if (length(list.files(plot.dir)) >= nrow(si)) next  # skip patients I've already done
+                                       
     dir.create(plot.dir, showWarnings = F, recursive = T)
+
+    if (length(which(grepl(slx, colnames(raw.data)))) > 0) {
+      si = si %>% mutate(Sample = paste(`SLX-ID`, gsub('-','_',si$`Index Sequence`), sep='.'))
+    } else {
+      si = si %>% mutate(Sample = Samplename)
+    }
     
+    samples = si$Sample
+    #samples = patient.info %>% filter(Sample == s & `SLX-ID` == slx) %>% select(Sample)
+    #samples = patient.info %>% filter(Sample == s & `SLX-ID` == slx) %>% mutate(`Index Sequence` = sub('-', '_', gsub('tp', '', `Index Sequence`)), Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.') ) %>% select(Samplename) %>% pull
+    
+    rcols = grep(paste(samples,collapse='|'), colnames(raw.data), value=T)
+    fcols = grep(paste(samples,collapse='|'), colnames(fitted.data))
+    
+    rd = raw.data %>% select(location,chrom,start,end,!!rcols)
+    fd = fitted.data %>% select(location,chrom,start,end,!!fcols)
+      
     tryCatch({
       
-      si = patient.info %>% filter(Sample == s) %>% mutate(Endoscopy = '2019/01/01')
-      
+      if (is.null(si[['Endoscopy']])) si = si %>% mutate(Endoscopy = '2019/01/01')
+
       segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,verbose=F)
       residuals = BarrettsProgressionRisk::sampleResiduals(segmented)
       
       failedQC = bind_rows(failedQC, residuals)
       
-      prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented)
-      preds = bind_rows(preds, predictions(prr))
+      #prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented)
+      #preds = bind_rows(preds, predictions(prr))
       
-      #plot = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'plot')
-      ggsave(paste(plot.dir, paste(s, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=grid.arrange(BarrettsProgressionRisk::plotSegmentData(segmented,'plot')), height=4*length(rcols), width=20, units='in')
+      #plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list')
+      plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
+      for (s in names(plots))
+        ggsave(paste(plot.dir, paste(s, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=plots[[s]], height=4, width=20, units='in')
       
-      readr::write_tsv(residuals, path=paste(dirname(plot.dir), paste(s,'residuals.txt',sep='_'), sep='/'))
-      save(segmented, prr, paste(dirname(plot.dir), 'riskObj.Rdata',sep='/'))
+      ggsave(paste(plot.dir, paste(pid, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=do.call(grid.arrange, c(plots,ncol=1)), height=4*length(rcols), width=20, units='in')
+      
+      readr::write_tsv(residuals, path=paste(dirname(plot.dir), 'residuals.txt',sep='/'))
+      save(segmented, file=paste(dirname(plot.dir), 'segObj.Rdata',sep='/'))
       
       if (nrow(subset(residuals, !Pass)) > 0)
-        failedQC = bind_rows(failedQC,cbind.data.frame('Patient ID'=id,subset(residuals, !Pass), stringsAsFactors=F))
+        failedQC = bind_rows(failedQC, residuals %>% filter(!Pass) %>% mutate(`Patient ID` = pid) %>% select(`Patient ID`, everything()) )
       
-      if (nrow(subset(residuals,Pass)) > 0) {
-        pr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, verbose=F)
-        preds = predictions(pr)
-        } else {
-        message(paste('All samples failed QC for patient ID',id))
-        }
+      # if (nrow(subset(residuals,Pass)) > 0) {
+      #   pr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, verbose=F)
+      #   preds = predictions(pr)
+      #   } else {
+      #   message(paste('All samples failed QC for patient ID',pid))
+      #   }
     }, error = function(e) {
       message(paste("Error in risk prediction for patient",id,',skipping:\n\t',e))
     })

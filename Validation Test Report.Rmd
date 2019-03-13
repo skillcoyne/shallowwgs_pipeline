@@ -1,7 +1,7 @@
 ---
 title: "sWGS validation/protocol tests"
 author: "Sarah Killcoyne"
-date: "14 Jan 2019"
+date: "27 Feb 2019"
 output: 
   html_document: 
     toc: yes
@@ -28,9 +28,11 @@ dirs = list(
   training = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_plots_fitted_perPatient',
   val_1 = '~/Data/BarrettsProgressionRisk/Analysis/val_test/',
   protocol = '~/Data/BarrettsProgressionRisk/Analysis/protocol_test/',
-  kit = '~/Data/BarrettsProgressionRisk/Analysis/kit_test/'
+  kit = '~/Data/BarrettsProgressionRisk/Analysis/kit_test/',
+  ci_protocol = '~/Data/BarrettsProgressionRisk/Analysis/ci_protocol/'
 )
 
+qc.cutoff = 0.011
 ```
 
 ## Training
@@ -63,7 +65,7 @@ pass.fail = train %>% summarise( Pass= length(which(varMAD_median<0.015))/nrow(t
 failed.tbl = failed %>% rowwise() %>% dplyr::mutate(varMAD_median = signif(varMAD_median,4)) %>%
  dplyr::mutate(
    sample = text_spec(sample, link=paste0('file:///',get.png(sample, paste(plot.dir, pid, sep='/') ))), 
-   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= 0.011, "green", "red"))) %>% dplyr::select(pid,sample,varMAD_median)
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= qc.cutoff, "green", "red"))) %>% dplyr::select(pid,sample,varMAD_median)
 
 
 ```
@@ -89,12 +91,17 @@ val = do.call(bind_rows, lapply(list.files(dirs$val_1, 'residuals', recursive = 
   readr::read_tsv(f, col_types = 'cdddddl')
 }))
 
-val = right_join(readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/ValidationCohort.xlsx') %>% mutate(Samplename = paste0('SLX-',`SLX-ID`, '.', sub('-','_',`Index Sequence`))) %>% select(`Hospital Research ID`,`Block ID`, `Patient ID`, Samplename),val, by=c('Samplename'='sample'))
+val = right_join(readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/ValidationCohort.xlsx') %>% mutate(Samplename = paste0('SLX-',`SLX-ID`, '.', sub('-','_',`Index Sequence`))) %>% select(`Hospital Research ID`,`Block ID`, `Patient ID`, Samplename, `Sample Type`, Collection),val, by=c('Samplename'='sample'))
 
 val.fail = val %>% filter(varMAD_median > 0.015) %>% select(`Hospital Research ID`, Samplename, varMAD_median)
 
 pass.fail = bind_rows(pass.fail, 
-  val %>% summarise( Pass= length(which(varMAD_median<=0.011))/nrow(val), Fail=length(which(varMAD_median>0.011))/nrow(val), group='Validation'))
+  val %>% summarise( Pass= length(which(varMAD_median<=qc.cutoff))/nrow(val), Fail=length(which(varMAD_median>qc.cutoff))/nrow(val), group='Validation'))
+
+
+val %>% group_by(`Sample Type`, Collection ) %>% dplyr::summarise(
+  Pass=length(which(varMAD_median<=qc.cutoff)), Fail=length(which(varMAD_median>qc.cutoff))
+) %>% kable(caption='Pass/Fail by sample type') %>% kable_styling('bordered', full_width = F)
 ```
 
 By manual inspection I would say 66 of these were poor quality data. Using that same cutoff in the intial validation cohort we would fail `r round(nrow(val.fail)/nrow(val)*100,2)`% of our `r nrow(val)` samples. However, a manual inspection fails many more and when we used our initial more stringent cutoff of 0.011 we failed `r round(nrow(val %>% filter(varMAD_median > 0.011))/nrow(val)*100,2)`% of samples which agreed closely with manual inspection.
@@ -131,7 +138,7 @@ speedvac.tbl = speedvac %>% arrange(Speedvac, `Ellie’s Cohort`, `Manual QC`) %
    #text_spec(Sample, link=paste0('file:///',get.png( paste(`SLX-ID`, sub('-','_',`Index Sequence`),sep='.'), plot.dir ))),
    `Manual QC` = cell_spec(`Manual QC`, "html", background = ifelse(`Manual QC` == 'Pass', "green", "red"), color='white'),
    `Ellie’s Cohort` = cell_spec(`Ellie’s Cohort`, "html", color = ifelse(`Ellie’s Cohort` == 'Yes', "blue", "brown")),
-   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= 0.011, "green", "red"))) %>%
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= qc.cutoff, "green", "red"))) %>%
   dplyr::select(ID,Sample, Speedvac, `Ellie’s Cohort`, `Manual QC`, varMAD_median) %>% rename(`Ellie’s Cohort` = 'Previously Extracted')
 
 rowsY = grep('Yes',speedvac.tbl$Speedvac)
@@ -190,7 +197,7 @@ kit.tbl = kit %>% dplyr::mutate(varMAD_median = signif(varMAD_median,4)) %>% row
    Sample = text_spec(Sample, link=paste0('file:///',get.png('png',paste(proc.dir,as.character(Number),'plots',sep='/')))),
    `Manual QC` = cell_spec(`Manual QC`, "html", background = ifelse(`Manual QC` == 'PASS', "green", "red"), color='white'),
    `Index Sequence` = text_spec(`Index Sequence`, link=paste0('file:///',get.png(sub('-','_',`Index Sequence`),plot.dir))),   
-   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= 0.011, "green", "red"))) %>%
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= qc.cutoff, "green", "red"))) %>%
   dplyr::select(`Index Sequence`, Sample, Kit, Type, `Manual QC`, varMAD_median) 
 
 rowsY = grep('GeneRead',kit.tbl$Kit)
@@ -206,10 +213,54 @@ In the Generead vs Allprep kit test we were testing to see whether the specific 
 
 Under manual QC 4 samples would appear to be of good enough quality to analyze, 3 were Generead and 1 was Allprep.  All others were poor quality.  However, I would not call this definitive simply because there were so few and that’s still a high rate of failure.
 
+## CI Protocol
+
+At this point we were guessing that the extraction method itself may be at issue, and that there could be small protocol errors that we were unaware of.  We selected a set of samples that had been previously sequenced by Ellie and Cassandra, and then a number of new samples as well.  
+
+Cassandra worked with Anna Piskorz from the Brenton lab at the CI to do the extractions using their protocol and their kits, and Anna then did the library prep as well.  However, again a very high percentage failed.  Most concerning is that the samples from Ellie's cohort failed and the orginal ones done in 2017 by Ellie all looked fine.  
+
+```{r}
+ci = do.call(bind_rows, lapply(list.files(dirs$ci_protocol, 'residuals', recursive = T, full.names = T), function(f) {
+  readr::read_tsv(f, col_types='cdddddl')
+})) %>% select(sample, varMAD_median) %>% dplyr::mutate( Pass = varMAD_median<=qc.cutoff)
+
+info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/ci_protocol/ci_protocol_trial.xlsx') %>%  
+  dplyr::mutate( sample = paste0(`SLX-ID`, '.', sub('-', '_', gsub('tp','', `Index Sequence`))))
+
+ci = left_join(ci, info, by='sample') %>% arrange(Pass)
+ 
+
+pass.fail = bind_rows(pass.fail, 
+  ci %>% dplyr::summarise( Pass= length(which(varMAD_median<=qc.cutoff))/nrow(ci), Fail=length(which(varMAD_median>qc.cutoff))/nrow(ci), group='CI Protocols'))
+
+plot.dir= '~/Data/BarrettsProgressionRisk/QDNAseq/ci_protocol/SLX-15634'
+proc.dir = '~/Data/BarrettsProgressionRisk/Analysis/ci_protocol'
+
+ci.tbl = ci %>% dplyr::mutate(varMAD_median = signif(varMAD_median,4)) %>% rowwise() %>%
+ dplyr::mutate(
+   Sample = text_spec(sample, link=paste0('file:///',get.png('png',paste(proc.dir,as.character(Number),'plots',sep='/')))),
+   `Manual QC` = cell_spec(`Manual QC`, "html", background = ifelse(`Manual QC` == 'PASS', "green", "red"), color='white'),
+   `Computational QC` = cell_spec(Pass, "html", background = ifelse(Pass == T, "green", "red"), color='white'),
+   `Index Sequence` = text_spec(`Index Sequence`, link=paste0('file:///',get.png('png',paste(proc.dir,as.character(Number),'plots',sep='/')))),   
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= qc.cutoff, "green", "red"))) %>%
+  dplyr::select(`Patient ID`,`Index Sequence`, Cohort, `Manual QC`, `Computational QC`, varMAD_median) %>% arrange(Cohort)
+
+rowsE = grep('Ellie',ci.tbl$Cohort)
+rowsC = grep('Cass',ci.tbl$Cohort)
+rowsN = grep('New', ci.tbl$Cohort)
+
+ci.tbl %>%
+  kable(format = "html", escape = F) %>% kable_styling("bordered", full_width = F) %>%
+  group_rows("Cohort: Ellie's", rowsE[1], rowsE[length(rowsE)],label_row_css = "background-color: #666; color: #fff;") %>%
+  group_rows("Cohort: Cassandra's", rowsC[1], rowsC[length(rowsC)],label_row_css = "background-color: #666; color: #fff;")  %>%
+  group_rows("Cohort: New Samples", rowsN[1], rowsN[length(rowsN)],label_row_css = "background-color: #666; color: #fff;") 
+
+```
+
 
 # Conclusion
 
-Currently we are guessing that there is a step during extraction that is causing the problem.  All of Ellie’s samples used in the Speedvac test were extracted prior to use by us, though not necessarily all by Ellie. As the protocol being used was from Ellie's thesis and conversations with her, rather than direct training, it seems possible that something was undocumented/unclear and therefore lost in the mix. 
+???
 
 ```{r}
 ggplot(melt(pass.fail, id.vars = 'group'), aes(group, value,group=group,fill=variable)) + geom_col(position = position_stack()) + labs(y='Ratio of samples', x='') + theme_bw()
