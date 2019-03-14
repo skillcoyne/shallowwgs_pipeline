@@ -86,27 +86,37 @@ We later developed a computational cutoff. A cutoff was selected for the median 
   + 3 cytosponge
 * 2 samples were excluded due to insufficient reads
 
+NOTE: Until March I had only 49 patients and 92 samples.  I discovered another two SLX runs (15633/15637) that I had no metadata for and no emails.
+I've now included them but have also broken out the batches to make it clearer.
+
 ```{r}
 val = do.call(bind_rows, lapply(list.files(dirs$val_1, 'residuals', recursive = T, full.names = T), function(f) {
-  readr::read_tsv(f, col_types = 'cdddddl')
-}))
+  readr::read_tsv(f, col_types = 'cdddddl') %>% mutate(`Patient ID` = as.character(basename(dirname(f))))
+})) %>% select(sample, varMAD_median, n.segs, `Patient ID`) %>% mutate(varMAD_median = round(varMAD_median, 3))
 
-val = right_join(readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/ValidationCohort.xlsx') %>% mutate(Samplename = paste0('SLX-',`SLX-ID`, '.', sub('-','_',`Index Sequence`))) %>% select(`Hospital Research ID`,`Block ID`, `Patient ID`, Samplename, `Sample Type`, Collection),val, by=c('Samplename'='sample'))
+val = full_join(
+  readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/validation_samples.xlsx', col_types='text') %>% 
+                   mutate(Samplename = paste0(`SLX-ID`, '.', sub('-','_',`Index Sequence`))) %>% 
+                   select(`Hospital Research ID`,`Block ID`, `Patient ID`, Samplename, `Sample Type`, Collection, `SLX-ID`),
+                 val, by=c('Samplename'='sample','Patient ID'))
+
+#val = right_join(readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/ValidationCohort.xlsx') %>% mutate(Samplename = paste0('SLX-',`SLX-ID`, '.', sub('-','_',`Index Sequence`))) %>% select(`Hospital Research ID`,`Block ID`, `Patient ID`, Samplename, `Sample Type`, Collection),val, by=c('Samplename'='sample'))
 
 val.fail = val %>% filter(varMAD_median > 0.015) %>% select(`Hospital Research ID`, Samplename, varMAD_median)
 
 pass.fail = bind_rows(pass.fail, 
   val %>% summarise( Pass= length(which(varMAD_median<=qc.cutoff))/nrow(val), Fail=length(which(varMAD_median>qc.cutoff))/nrow(val), group='Validation'))
 
+sval = val %>% group_by(`SLX-ID` ) %>% dplyr::summarise_at(vars(varMAD_median), funs(min,mean,median,max),na.rm=T)
 
-val %>% group_by(`Sample Type`, Collection ) %>% dplyr::summarise(
+val %>% group_by(`Sample Type`, `SLX-ID` ) %>% dplyr::summarise(
   Pass=length(which(varMAD_median<=qc.cutoff)), Fail=length(which(varMAD_median>qc.cutoff))
-) %>% kable(caption='Pass/Fail by sample type') %>% kable_styling('bordered', full_width = F)
+) %>% kable(caption='Pass/Fail by batch') %>% kable_styling('striped')
 ```
 
-By manual inspection I would say 66 of these were poor quality data. Using that same cutoff in the intial validation cohort we would fail `r round(nrow(val.fail)/nrow(val)*100,2)`% of our `r nrow(val)` samples. However, a manual inspection fails many more and when we used our initial more stringent cutoff of 0.011 we failed `r round(nrow(val %>% filter(varMAD_median > 0.011))/nrow(val)*100,2)`% of samples which agreed closely with manual inspection.
+By manual inspection I would say 66 of the intial 92 were poor quality data. Using that same cutoff in the intial validation cohort we would fail `r round(nrow(val.fail)/nrow(val)*100,2)`% of our `r nrow(val)` samples. However, a manual inspection fails many more and when we used our initial more stringent cutoff of 0.011 we failed `r round(nrow(val %>% filter(varMAD_median > 0.011))/nrow(val)*100,2)`% of samples which agreed closely with manual inspection.
 
-`r kable(val.fail %>% dplyr::summarise_at(vars(varMAD_median), funs(median,mean,sd,min,max)), caption='Summary statistics for the variance across all initial validation samples') %>% kable_styling(bootstrap_options=c('bordered',full_width=F))`
+`r sval %>% kable(caption='Summary of variance per batch. Red rows are where the median value of the variance for the entire batch was greater than the cutoff') %>% kable_styling('striped') %>% row_spec(which(sval$median > cutoff), color='red')`
 
 ## Speedvac Test
 

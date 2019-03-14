@@ -35,6 +35,8 @@ if (length(data.dirs) <= 0)
 pts_slx = arrange(unique(patient.info[c('SLX-ID','Patient ID')]), `Patient ID`)
 
 preds = tibble(); failedQC = tibble()
+
+merged.raw = NULL; merged.fit = NULL
 for (slx in unique(pts_slx$`SLX-ID`)) {
 #for (slx in unique(patient.info$`SLX-ID`)) {
   print(slx)
@@ -73,87 +75,93 @@ for (slx in unique(pts_slx$`SLX-ID`)) {
     colnames(raw.data) = gsub('tp','', colnames(raw.data))
     colnames(fitted.data) = gsub('tp','', colnames(fitted.data))
   }
-
-  patients = (pts_slx %>% filter(`SLX-ID` == slx)) %>% select(`Patient ID`) %>% pull
-  for (pid in  patients) {
-  #for (s in (patient.info %>% filter(`SLX-ID` == slx)) ) {
-    #message(paste('Patient',id))
-    message(paste('Patient',pid))
-    
-    si = patient.info %>% filter(`Patient ID` == pid) 
-    
-    plot.dir = paste(outdir, pid, 'plots',sep='/')
-    if (length(list.files(plot.dir)) >= nrow(si)) next  # skip patients I've already done
-                                       
-    dir.create(plot.dir, showWarnings = F, recursive = T)
-
-    if (length(which(grepl(slx, colnames(raw.data)))) > 0) {
-      si = si %>% mutate(Sample = paste(`SLX-ID`, gsub('-','_',si$`Index Sequence`), sep='.'))
-    } else {
-      si = si %>% mutate(Sample = Samplename)
-    }
-    
-    samples = si$Sample
-    #samples = patient.info %>% filter(Sample == s & `SLX-ID` == slx) %>% select(Sample)
-    #samples = patient.info %>% filter(Sample == s & `SLX-ID` == slx) %>% mutate(`Index Sequence` = sub('-', '_', gsub('tp', '', `Index Sequence`)), Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.') ) %>% select(Samplename) %>% pull
-    
-    rcols = grep(paste(samples,collapse='|'), colnames(raw.data), value=T)
-    fcols = grep(paste(samples,collapse='|'), colnames(fitted.data))
-    
-    rd = raw.data %>% select(location,chrom,start,end,!!rcols)
-    fd = fitted.data %>% select(location,chrom,start,end,!!fcols)
-      
-    tryCatch({
-      
-      if (is.null(si[['Endoscopy']])) si = si %>% mutate(Endoscopy = '2019/01/01')
-
-      segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,verbose=F)
-      residuals = BarrettsProgressionRisk::sampleResiduals(segmented)
-      
-      failedQC = bind_rows(failedQC, residuals)
-      
-      #prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented)
-      #preds = bind_rows(preds, predictions(prr))
-      
-      #plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list')
-      plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
-      for (s in names(plots))
-        ggsave(paste(plot.dir, paste(s, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=plots[[s]], height=4, width=20, units='in')
-      
-      ggsave(paste(plot.dir, paste(pid, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=do.call(grid.arrange, c(plots,ncol=1)), height=4*length(rcols), width=20, units='in')
-      
-      readr::write_tsv(residuals, path=paste(dirname(plot.dir), 'residuals.txt',sep='/'))
-      save(segmented, file=paste(dirname(plot.dir), 'segObj.Rdata',sep='/'))
-      
-      if (nrow(subset(residuals, !Pass)) > 0)
-        failedQC = bind_rows(failedQC, residuals %>% filter(!Pass) %>% mutate(`Patient ID` = pid) %>% select(`Patient ID`, everything()) )
-      
-      # if (nrow(subset(residuals,Pass)) > 0) {
-      #   pr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, verbose=F)
-      #   preds = predictions(pr)
-      #   } else {
-      #   message(paste('All samples failed QC for patient ID',pid))
-      #   }
-    }, error = function(e) {
-      message(paste("Error in risk prediction for patient",id,',skipping:\n\t',e))
-    })
+  
+  if (is.null(merged.fit)) {
+    merged.fit = fitted.data
+    merged.raw = raw.data
+  } else {
+    merged.fit = full_join(merged.fit, fitted.data, by=c('location','chrom','start','end'))
+    merged.raw = full_join(merged.raw, raw.data, by=c('location','chrom','start','end'))
   }
+  
+  print(dim(merged.fit))
+}
+
+#patients = (pts_slx %>% filter(`SLX-ID` == slx)) %>% select(`Patient ID`) %>% pull
+patients = pts_slx$`Patient ID`
+for (pid in  patients) {
+  message(paste('Patient',pid))
+    
+  si = patient.info %>% filter(`Patient ID` == pid) 
+    
+  plot.dir = paste(outdir, pid, 'plots',sep='/')
+  if (length(list.files(plot.dir)) >= nrow(si)) next  # skip patients I've already done
+
+  dir.create(plot.dir, showWarnings = F, recursive = T)
+  si = si %>% mutate(Sample = paste(`SLX-ID`, gsub('-','_',si$`Index Sequence`), sep='.'))
+
+  samples = si$Sample
+
+  rcols = grep(paste(samples,collapse='|'), colnames(merged.raw))
+  fcols = grep(paste(samples,collapse='|'), colnames(merged.fit))
+    
+  rd = merged.raw %>% select(location,chrom,start,end,!!rcols)
+  fd = merged.fit %>% select(location,chrom,start,end,!!fcols)
+
+  rd = rd %>% dplyr::rename_at(vars(matches(paste(samples,collapse='|'))), funs( str_match(.,paste(samples,collapse='|'))))
+  fd = fd %>% dplyr::rename_at(vars(matches(paste(samples,collapse='|'))), funs( str_match(.,paste(samples,collapse='|'))))
+    
+  tryCatch({
+      
+    if (is.null(si[['Endoscopy']])) si = si %>% mutate(Endoscopy = '2019/01/01')
+
+    segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,verbose=F)
+    residuals = BarrettsProgressionRisk::sampleResiduals(segmented)
+      
+    failedQC = bind_rows(failedQC, residuals)
+      
+    #prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented)
+    #preds = bind_rows(preds, predictions(prr))
+      
+    #plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list')
+    plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
+    for (s in names(plots))
+      ggsave(paste(plot.dir, paste(s, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=plots[[s]], height=4, width=20, units='in')
+      
+    ggsave(paste(plot.dir, paste(pid, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=do.call(grid.arrange, c(plots,ncol=1)), height=4*length(rcols), width=20, units='in')
+      
+    readr::write_tsv(residuals, path=paste(dirname(plot.dir), 'residuals.txt',sep='/'))
+    save(segmented, file=paste(dirname(plot.dir), 'segObj.Rdata',sep='/'))
+      
+    if (nrow(subset(residuals, !Pass)) > 0)
+      failedQC = bind_rows(failedQC, residuals %>% filter(!Pass) %>% mutate(`Patient ID` = pid) %>% select(`Patient ID`, everything()) )
+      
+    # if (nrow(subset(residuals,Pass)) > 0) {
+    #   pr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, verbose=F)
+    #   preds = predictions(pr)
+    #   } else {
+    #   message(paste('All samples failed QC for patient ID',pid))
+    #   }
+  }, error = function(e) {
+    message(paste("Error in risk prediction for patient",id,',skipping:\n\t',e))
+  })
 }
 
 
-y = c(0.3,0.5,0.8)
-names(y) = c('Low','Moderate','High')
-preds$y = y[preds$Risk]
 
-pcal = showPredictionCalibration() + 
-  geom_point(data=preds, aes(Probability,y), color='grey39', shape=18, size=5, show.legend = F) + 
-  geom_point(data=preds, aes(Probability,y,color=Risk), shape=18, size=4, show.legend=F) +
-  geom_text_repel(data=preds, aes(Probability,y,label=`Patient ID`,angle=45), show.legend=F )
-
-ggsave(filename=paste(outdir, 'predictions_plot.png',sep='/'), plot=pcal, width=10, height=10, units='in')
-
-
-write.table(preds, sep='\t', quote=F, row.names=F, file=paste(outdir, 'predictions.txt', sep='/'))
-write.table(failedQC, sep='\t', quote=F, row.names=F, file=paste(outdir, 'failed_qc_samples.txt', sep='/'))
-  
-print("Finished")
+# y = c(0.3,0.5,0.8)
+# names(y) = c('Low','Moderate','High')
+# preds$y = y[preds$Risk]
+# 
+# pcal = showPredictionCalibration() + 
+#   geom_point(data=preds, aes(Probability,y), color='grey39', shape=18, size=5, show.legend = F) + 
+#   geom_point(data=preds, aes(Probability,y,color=Risk), shape=18, size=4, show.legend=F) +
+#   geom_text_repel(data=preds, aes(Probability,y,label=`Patient ID`,angle=45), show.legend=F )
+# 
+# ggsave(filename=paste(outdir, 'predictions_plot.png',sep='/'), plot=pcal, width=10, height=10, units='in')
+# 
+# 
+# write.table(preds, sep='\t', quote=F, row.names=F, file=paste(outdir, 'predictions.txt', sep='/'))
+# write.table(failedQC, sep='\t', quote=F, row.names=F, file=paste(outdir, 'failed_qc_samples.txt', sep='/'))
+#   
+# print("Finished")
