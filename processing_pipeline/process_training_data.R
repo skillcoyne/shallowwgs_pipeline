@@ -146,6 +146,8 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   cols = which(colnames(fit.data) %in% subset(all.patient.info, Hospital.Research.ID == pt)$Samplename)
 
   segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)])
+  residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
+  
   tile = BarrettsProgressionRisk::tileSegments(segmented, size=5e6)
   arms = BarrettsProgressionRisk::tileSegments(segmented, size='arms')
 
@@ -154,53 +156,73 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
 
   write.table(tile$error, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/5e06_tiled_MSE.txt'))
   write.table(arms$error, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/arms_tiled_MSE.txt'))
+
+  readr::write_tsv(residuals, path=paste0(pd,'/residuals.tsv'))
+    
+    
+  # if (is.null(tiled)) {
+  #   tiled = tile$tiles
+  #   arms.tiled = arms$tiles
+  #   tile.MSE = tile$error
+  #   arm.MSE = arms$error
+  # } else {
+  #   tiled = rbind(tiled, tile$tiles)
+  #   arms.tiled = rbind(arms.tiled, arms$tiles)
+  #   tile.MSE = rbind(tile.MSE, tile$error)
+  #   arm.MSE = rbind(arm.MSE, arms$error)
+  # }
   
-    
-  if (is.null(tiled)) {
-    tiled = tile$tiles
-    arms.tiled = arms$tiles
-    tile.MSE = tile$error
-    arm.MSE = arms$error
-  } else {
-    tiled = rbind(tiled, tile$tiles)
-    arms.tiled = rbind(arms.tiled, arms$tiles)
-    tile.MSE = rbind(tile.MSE, tile$error)
-    arm.MSE = rbind(arm.MSE, arms$error)
-  }
-    
-  save(segmented, tile, arms, file=paste(pd, 'segment.Rdata', sep = '/'))
+  save(segmented,file=paste(pd, 'segment.Rdata', sep = '/'), compress='bzip2')
 
   message("Saving plots")
 
-  if (length(info$Sample) > 6) {
-    plotdir = paste0(pd,'/segmented_plots')
-    dir.create(plotdir, showWarnings=F )
-    plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
-    for (sample in names(plots)) 
-      ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
-    
-    plotdir = paste0(pd,'/coverage_plots')
-    dir.create(plotdir, showWarnings=F )
-    plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list')
-    for (sample in names(plots))
-      ggsave(filename=paste(plotdir, '/', sample, '_cvg_binned_fitted.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
-  } else {
+  plotdir = paste0(pd,'/segmented_plots')
+  dir.create(plotdir, showWarnings=F )
+  plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
+  for (sample in names(plots)) 
+    ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize=F)
 
-    ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(info$Sample), units='in', limitsize=F)
-    
-    ggsave(filename=paste(pd, '/cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(info$Sample), units='in', limitsize = F)
-    
-  }
+  ggsave(filename=paste0(plotdir, '/', pt, '_segmented.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
+
+
+  plotdir = paste0(pd,'/cvg_binned_fitted')
+  dir.create(plotdir, showWarnings=F )
+  plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list') 
+  for (sample in names(plots))    
+    ggsave(filename=paste0(plotdir, '/', sample, '_cvg_binned.png'), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize = F)
+
+  ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
+  
+
+  # if (length(info$Sample) > 6) {
+  #   
+  #   dir.create(plotdir, showWarnings=F )
+  #   plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
+  #   for (sample in names(plots)) 
+  #     ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
+  #   
+  #   plotdir = paste0(pd,'/coverage_plots')
+  #   dir.create(plotdir, showWarnings=F )
+  #   plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list')
+  #   for (sample in names(plots))
+  #     ggsave(filename=paste(plotdir, '/', sample, '_cvg_binned_fitted.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
+  # } else {
+  # 
+  #   ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(info$Sample), units='in', limitsize=F)
+  #   
+  #   ggsave(filename=paste(pd, '/cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(info$Sample), units='in', limitsize = F)
+  #   
+  # }
 
 }
 
-if (is.null(patient.name)) {
-  write.table(tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled.txt', sep='/'))
-  write.table(tile.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled_MSE.txt', sep='/'))
-
-  write.table(arms.tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled.txt', sep='/'))
-  write.table(arm.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled_MSE.txt', sep='/'))
-}
+# if (is.null(patient.name)) {
+#   write.table(tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled.txt', sep='/'))
+#   write.table(tile.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled_MSE.txt', sep='/'))
+# 
+#   write.table(arms.tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled.txt', sep='/'))
+#   write.table(arm.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled_MSE.txt', sep='/'))
+# }
 
 
 message("Finished")
