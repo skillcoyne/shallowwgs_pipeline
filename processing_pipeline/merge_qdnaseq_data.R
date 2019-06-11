@@ -1,7 +1,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
-if (length(args) < 3)
-  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir> <patient name OPT>")
+if (length(args) <2)
+  stop("Missing required arguments: <qdna data dir> <patient spreadsheet>")
 
 
 library(tidyverse)
@@ -12,13 +12,11 @@ library(tidyverse)
 
 data = args[1]
 val.file = args[2]
-outdir = args[3]
 
-if (length(args) <= 0) {
-  data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
-  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS validation batches.xlsx'
-  outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
-}
+
+#  data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
+#  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS validation batches.xlsx'
+
 
 sheets = readxl::excel_sheets(val.file)
 
