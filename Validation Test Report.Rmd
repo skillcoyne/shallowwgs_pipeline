@@ -25,14 +25,21 @@ options(knitr.table.format = "html")
 
 
 dirs = list(
-  training = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_plots_fitted_perPatient',
+  #training = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_plots_fitted_perPatient',
   val_1 = '~/Data/BarrettsProgressionRisk/Analysis/val_test/',
   protocol = '~/Data/BarrettsProgressionRisk/Analysis/protocol_test/',
   kit = '~/Data/BarrettsProgressionRisk/Analysis/kit_test/',
-  ci_protocol = '~/Data/BarrettsProgressionRisk/Analysis/ci_protocol/'
+  ci_protocol = '~/Data/BarrettsProgressionRisk/Analysis/ci_protocol/',
+  old_vs_new = '~/Data/BarrettsProgressionRisk/Analysis/sujath_oac/',
+  old_progressors = '~/Data/BarrettsProgressionRisk/Analysis/old_progressors/'
 )
 
+get.png<-function(n,dir) {
+  list.files(path=dir, pattern=n, full.names=T, recursive=T)
+}
+
 qc.cutoff = 0.011
+pass.fail = tibble()
 ```
 
 ## Training
@@ -47,10 +54,7 @@ We had no formal QC process when we initially used these to train.  We manually 
 
 One patient (AH0254) had a single 50X sequence performed from their final timepoint as well as 7 sWGS samples.  Of those samples 2 fail on manual inspection due to overdispersion of the data.  The remaining 5 samples are good quality.  All were sequenced in the same batch with 68 other samples.
 
-```{r}
-get.png<-function(n,dir) {
-  list.files(path=dir, pattern=n, full.names=T, recursive=T)
-}
+```{r, eval=F}
 
 plot.dir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_plots_fitted_perPatient/'
 
@@ -67,14 +71,14 @@ failed.tbl = failed %>% rowwise() %>% dplyr::mutate(varMAD_median = signif(varMA
    sample = text_spec(sample, link=paste0('file:///',get.png(sample, paste(plot.dir, pid, sep='/') ))), 
    varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= qc.cutoff, "green", "red"))) %>% dplyr::select(pid,sample,varMAD_median)
 
-
-```
-
-We later developed a computational cutoff. A cutoff was selected for the median variance across segments in a sample of 0.015.  Any sample above that is considered to have failed QC.  In the initial training set that results in `r nrow(failed)` samples failing QC.  A manual check confirms that these samples are overdispersed (especially the two from AH0254).  This is `r round(nrow(failed)/nrow(train)*100,2)`% of our samples.
+<!-- We later developed a computational cutoff. A cutoff was selected for the median variance across segments in a sample of 0.015.  Any sample above that is considered to have failed QC.  In the initial training set that results in `r nrow(failed)` samples failing QC.  A manual check confirms that these samples are overdispersed (especially the two from AH0254).  This is `r round(nrow(failed)/nrow(train)*100,2)`% of our samples.
 
 `r failed.tbl %>% kable(format = "html", escape = F) %>% kable_styling("striped", full_width = F)`
 
-`r kable(train %>% dplyr::summarise_at(vars(varMAD_median), funs(median,mean,sd,min,max)), caption='Summary statistics for the variance across all training samples') %>% kable_styling(bootstrap_options=c('bordered',full_width=F))`
+`r kable(train %>% dplyr::summarise_at(vars(varMAD_median), funs(median,mean,sd,min,max)), caption='Summary statistics for the variance across all training samples') %>% kable_styling(bootstrap_options=c('bordered',full_width=F))` -->
+
+
+```
 
 
 
@@ -116,7 +120,7 @@ val %>% group_by(`Sample Type`, `SLX-ID` ) %>% dplyr::summarise(
 
 By manual inspection I would say 66 of the intial 92 were poor quality data. Using that same cutoff in the intial validation cohort we would fail `r round(nrow(val.fail)/nrow(val)*100,2)`% of our `r nrow(val)` samples. However, a manual inspection fails many more and when we used our initial more stringent cutoff of 0.011 we failed `r round(nrow(val %>% filter(varMAD_median > 0.011))/nrow(val)*100,2)`% of samples which agreed closely with manual inspection.
 
-`r sval %>% kable(caption='Summary of variance per batch. Red rows are where the median value of the variance for the entire batch was greater than the cutoff') %>% kable_styling('striped') %>% row_spec(which(sval$median > cutoff), color='red')`
+`r sval %>% kable(caption='Summary of variance per batch. Red rows are where the median value of the variance for the entire batch was greater than the cutoff') %>% kable_styling('striped') %>% row_spec(which(sval$median > qc.cutoff), color='red')`
 
 ## Speedvac Test
 
@@ -267,12 +271,95 @@ ci.tbl %>%
 
 ```
 
+## Sujath - Old vs New (ish) sample tests
+
+Here we thought that we could see if the issue was older vs newer samples and we could compare that to the same patient with a frozen. These are all tumour samples (OAC) from OCCAMS.
+
+```{r}
+ci = do.call(bind_rows, lapply(list.files(dirs$old_vs_new, 'residuals', recursive = T, full.names = T), function(f) {
+  readr::read_tsv(f, col_types='cdddddl')
+})) %>% select(sample, varMAD_median) %>% dplyr::mutate( Pass = varMAD_median<=qc.cutoff)
+
+info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/sujath_oac/ffpe_frozen_samples.xlsx') %>%  
+  dplyr::select(-matches('Adrienne|Notes')) %>% rename(Samplename='sample')
+
+ci = left_join(ci, info, by='sample') %>% arrange(Pass)
+ 
+pass.fail = bind_rows(pass.fail, 
+  ci %>% dplyr::summarise( Pass= length(which(varMAD_median<=qc.cutoff))/nrow(ci), Fail=length(which(varMAD_median>qc.cutoff))/nrow(ci), group='Old.v.New'))
+
+plot.dir= '~/Data/BarrettsProgressionRisk/QDNAseq/sujath_oac/SLX-16753_16755_16758/'
+proc.dir = '~/Data/BarrettsProgressionRisk/Analysis/sujath_oac/'
+
+ci.tbl = ci %>% dplyr::mutate(varMAD_median = signif(varMAD_median,4)) %>% rowwise() %>%
+ dplyr::mutate(
+   Sample = text_spec(sample, link=sample),
+#   `Manual QC` = cell_spec(`Manual QC`, "html", background = ifelse(`Manual QC` == 'PASS', "green", "red"), color='white'),
+   `Computational QC` = cell_spec(Pass, "html", background = ifelse(Pass == T, "green", "red"), color='white'),
+   `Index Sequence` = text_spec(`Index Sequence`, tooltip=`sample`),   
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= qc.cutoff, "green", "red"))) %>%
+  dplyr::select(`Patient ID`,`Index Sequence`, `Sample Type`, `Computational QC`, varMAD_median) %>% arrange(`Sample Type`)
+
+rowsE = grep('FFPE',ci.tbl$`Sample Type`)
+rowsC = grep('FFPE MRC',ci.tbl$`Sample Type`)
+rowsN = grep('Frozen',ci.tbl$`Sample Type`)
+
+ci.tbl %>%
+  kable(format = "html", escape = F) %>% kable_styling("bordered", full_width = F) %>%
+  group_rows("Cohort: FFPE", rowsE[1], rowsE[length(rowsE)],label_row_css = "background-color: #666; color: #fff;") %>%
+  group_rows("Cohort: FFPE cut by AB", rowsC[1], rowsC[length(rowsC)],label_row_css = "background-color: #666; color: #fff;")  %>%
+  group_rows("Cohort: Frozen", rowsN[1], rowsN[length(rowsN)],label_row_css = "background-color: #666; color: #fff;") 
+
+```
+
+
+## Old progressors
+
+Sujath and Adrienne extracted the progressor scrolls that had been cut about 12 months ago and left in tubes. These are likely to have oxidation issues making them potentially poor samples for inclusion, but it was worth checking. We included a number from Sujath's successful OAC extractions as controls. 
+
+```{r}
+ci = do.call(bind_rows, lapply(list.files(dirs$old_progressors, 'residuals', recursive = T, full.names = T), function(f) {
+  readr::read_tsv(f, col_types='cdddddl')
+})) %>% select(sample, varMAD_median) %>% dplyr::mutate( Pass = varMAD_median<=qc.cutoff)
+
+info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/old_progressors/prog_val.xlsx') %>%  
+  dplyr::mutate( sample = paste0(`SLX-ID`, '.', `Index Sequence`) ) %>% select(-matches('DNA')) %>% filter(!is.na(`SLX-ID`)) %>% dplyr::rename('Number' = 'Extraction Sample #')
+
+ci = left_join(ci, info, by='sample') %>% arrange(Pass)
+ 
+
+pass.fail = bind_rows(pass.fail, 
+  ci %>% dplyr::summarise( Pass= length(which(varMAD_median<=qc.cutoff))/nrow(ci), Fail=length(which(varMAD_median>qc.cutoff))/nrow(ci), group='Old Progressors'))
+
+plot.dir= '~/Data/BarrettsProgressionRisk/QDNAseq/old_progressors/SLX-17965_17966/'
+proc.dir = '~/Data/BarrettsProgressionRisk/Analysis/old_progressors'
+
+ci.tbl = ci %>% dplyr::mutate(varMAD_median = signif(varMAD_median,4)) %>% rowwise() %>%
+ dplyr::mutate(
+   Sample = text_spec(sample, link=paste0('file:///',get.png('png',paste(proc.dir,as.character(Number),'plots',sep='/')))),
+   #`Manual QC` = cell_spec(`Manual QC`, "html", background = ifelse(`Manual QC` == 'PASS', "green", "red"), color='white'),
+   `Computational QC` = cell_spec(Pass, "html", background = ifelse(Pass == T, "green", "red"), color='white'),
+   `Index Sequence` = text_spec(`Index Sequence`, link=paste0('file:///',get.png('png',paste(proc.dir,as.character(Number),'plots',sep='/')))),   
+   varMAD_median  = cell_spec(varMAD_median, "html", color = ifelse(varMAD_median <= qc.cutoff, "green", "red"))) %>%
+  dplyr::select(`Patient ID`,`Index Sequence`, `Computational QC`, varMAD_median) 
+
+#rowsE = grep('Ellie',ci.tbl$Cohort)
+#rowsC = grep('Cass',ci.tbl$Cohort)
+#rowsN = grep('New', ci.tbl$Cohort)
+
+ci.tbl %>%
+  kable(format = "html", escape = F) %>% kable_styling("bordered", full_width = F) 
+
+```
+
+
 
 # Conclusion
 
 ???
 
-```{r}
-ggplot(melt(pass.fail, id.vars = 'group'), aes(group, value,group=group,fill=variable)) + geom_col(position = position_stack()) + labs(y='Ratio of samples', x='') + theme_bw()
+```{r, fig.height=6, fig.width=6}
+cols = RColorBrewer::brewer.pal(3,'Set1')[c(1,3)]
+ggplot(melt(pass.fail, id.vars = 'group'), aes(group, value,group=group,fill=variable)) + geom_col(position = position_stack()) + labs(y='Ratio of samples', x='') + theme_bw() + scale_fill_manual(values=c('Pass'=cols[2], 'Fail'=cols[1]), name='') 
 ```
 
