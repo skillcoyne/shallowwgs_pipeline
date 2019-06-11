@@ -6,8 +6,8 @@ if (length(args) < 3)
 
 
 suppressPackageStartupMessages(library(tidyverse))
-#suppressPackageStartupMessages(library(ggrepel))
-#suppressPackageStartupMessages(library(gridExtra))
+suppressPackageStartupMessages(library(ggrepel))
+suppressPackageStartupMessages(library(gridExtra))
 suppressPackageStartupMessages(library(BarrettsProgressionRisk))
 #source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
@@ -40,7 +40,7 @@ pastefun<-function(x) {
   return(x)
 }
 all.val = all.val %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup
-all.val = all.val %>% arrange(Batch, `Hospital Research ID`) %>% group_by(`Hospital Research ID`) %>% mutate(AID = group_indices()) %>% ungroup
+#all.val = all.val %>% arrange(Batch, `Hospital Research ID`) %>% group_by(`Hospital Research ID`) %>% mutate(AID = group_indices()) %>% ungroup
 all.val = all.val %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''))
 all.val = all.val %>% mutate(Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.'), RA = factor(RA))
 
