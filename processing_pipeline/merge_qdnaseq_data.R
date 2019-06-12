@@ -15,7 +15,7 @@ val.file = args[2]
 
 
 #  data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
-#  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS validation batches.xlsx'
+#  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 
 
 sheets = readxl::excel_sheets(val.file)

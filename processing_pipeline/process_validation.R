@@ -22,7 +22,8 @@ outdir = args[3]
 patients = NULL
 if (length(args) == 4) patients = args[4]
 
-#patients = 'AHM1253,AHM0277,JHESO-Generead'
+#patients = c('OCCAMS_AH_100','AHM0185','AHM0555','AHM0348','AHM0281','AHM0500','AHM0546','AHM0584','AHM1432','AHM1471','AHM0567','AHM0570')
+
 if (!is.null(patients)) {
   patients = str_replace( unlist(str_split(patients, ',| ')), ' ', '')
   patients = str_replace_all( patients, '/', '_')
@@ -52,7 +53,6 @@ load(file=paste0(data, '/merged_raw_fit.Rdata'))
 if (!is.null(patients))
   all.val = all.val %>% filter(`Hospital Research ID` %in% patients)
 
-
 #patients = (pts_slx %>% filter(`SLX-ID` == slx)) %>% select(`Patient ID`) %>% pull
 failedQC = tibble()
 
@@ -60,16 +60,18 @@ failedQC = tibble()
 
 
 for (ra in levels(all.val$RA) ) {
-  patients = all.val %>% filter(RA == ra) %>% select(`Hospital Research ID`) %>% unique() %>% pull  
-
-  for (pid in patients) {
+  pts = all.val %>% filter(RA == ra) %>% select(`Hospital Research ID`) %>% unique() %>% pull  
+  if (length(pts) <= 0) next
+  
+  for (pid in pts) {
     message(paste('Patient',pid))
     
-    si = all.val %>% filter(`Hospital Research ID` == pid) 
+    si = all.val %>% filter(`Hospital Research ID` == pid & RA == ra) 
     si$Sample = si$Samplename 
+    if (is.null(si[['Endoscopy']])) si = si %>% mutate(Endoscopy = '2019/01/01')
 
     plot.dir = paste(outdir, pid, 'plots',sep='/')
-    if (length(list.files(plot.dir)) >= nrow(si)) next  # skip patients I've already done
+    #if (length(list.files(plot.dir)) >= nrow( all.val %>% filter(`Hospital Research ID` == pid) )) next  # skip patients I've already done
 
     dir.create(plot.dir, showWarnings = F, recursive = T)
     #si = si %>% mutate(Sample = paste(`SLX-ID`, gsub('-','_',si$`Index Sequence`), sep='.'))
@@ -84,13 +86,11 @@ for (ra in levels(all.val$RA) ) {
       break
     }
     
-    rd = merged.raw %>% select(location,chrom,start,end,!!rcols)
-    fd = merged.fit %>% select(location,chrom,start,end,!!fcols)
+    rd = merged.raw %>% dplyr::select(location,chrom,start,end,!!rcols)
+    fd = merged.fit %>% dplyr::select(location,chrom,start,end,!!fcols)
 
     tryCatch({
       
-      if (is.null(si[['Endoscopy']])) si = si %>% mutate(Endoscopy = '2019/01/01')
-
       segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,cutoff=0.011, verbose=F)
       residuals = BarrettsProgressionRisk::sampleResiduals(segmented)
 
@@ -106,7 +106,8 @@ for (ra in levels(all.val$RA) ) {
 
       ggsave(paste(plot.dir, paste(pid, ra, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=do.call(grid.arrange, c(plots,ncol=1)), height=4*length(rcols), width=20, units='in')
       
-      readr::write_tsv(residuals, path=paste(dirname(plot.dir), 'residuals.txt',sep='/'), append=T)
+      file.remove( paste(dirname(plot.dir), 'residuals.txt',sep='/' ) )
+      readr::write_tsv(residuals, path=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra),'_residuals.txt'),sep='/'), col_names = F, append=F)
       save(segmented, file=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra), '_segObj.Rdata'),sep='/'))
       
       #if (nrow(subset(residuals, !Pass)) > 0)
