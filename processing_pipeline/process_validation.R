@@ -15,9 +15,9 @@ data = args[1]
 val.file = args[2]
 outdir = args[3]
 
-#data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
-#val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
-#outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
+# data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
+# val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
 
 patients = NULL
 if (length(args) == 4) patients = args[4]
@@ -30,7 +30,8 @@ if (!is.null(patients)) {
 }
 
 
-sheets = readxl::excel_sheets(val.file)
+sheets = readxl::excel_sheets(val.file)[1:10]
+
 
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
   readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% mutate_at(vars(`SLX-ID`), list(as.character))
@@ -60,6 +61,7 @@ failedQC = tibble()
 
 
 for (ra in levels(all.val$RA) ) {
+  print(ra)
   pts = all.val %>% filter(RA == ra) %>% select(`Hospital Research ID`) %>% unique() %>% pull  
   if (length(pts) <= 0) next
   
@@ -71,7 +73,8 @@ for (ra in levels(all.val$RA) ) {
     if (is.null(si[['Endoscopy']])) si = si %>% mutate(Endoscopy = '2019/01/01')
 
     plot.dir = paste(outdir, pid, 'plots',sep='/')
-    #if (length(list.files(plot.dir)) >= nrow( all.val %>% filter(`Hospital Research ID` == pid) )) next  # skip patients I've already done
+    #if (length(list.files(plot.dir)) >= nrow( all.val %>% filter(`Hospital Research ID` == pid) )) next  
+    if (file.exists(paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra), '_segObj.Rdata'),sep='/'))) next # skip patients I've already done
 
     dir.create(plot.dir, showWarnings = F, recursive = T)
     #si = si %>% mutate(Sample = paste(`SLX-ID`, gsub('-','_',si$`Index Sequence`), sep='.'))

@@ -20,6 +20,8 @@ val.file = args[2]
 
 sheets = readxl::excel_sheets(val.file)
 
+sheets = sheets[1:10]
+
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
   print(s)
   readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% mutate_at(vars(`SLX-ID`), list(as.character))

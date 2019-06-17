@@ -1,0 +1,363 @@
+---
+title: "sWGS validation report"
+author: "Sarah Killcoyne"
+date: "11 June 2019"
+output: 
+  html_document: 
+    toc: yes
+
+---
+
+```{r setup, include=FALSE}
+
+library(BarrettsProgressionRisk)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(gridExtra)
+library(reshape2)
+
+#source('lib/load_patient_metadata.R')
+
+knitr::opts_chunk$set(echo = F, warning = F, message=F)
+options(knitr.table.format = "html") 
+
+val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
+
+fncols <- function(data, cname, default=NA) {
+  add <-cname[!cname%in%names(data)]
+
+  if(length(add)!=0) data[add] <- default
+  data
+}
+
+sheets = readxl::excel_sheets(val.file)[1:10]
+all.val = do.call(bind_rows, lapply(sheets, function(s) {
+  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
+}))
+
+pastefun<-function(x) {
+  if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
+  return(x)
+}
+
+all.val = all.val %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup
+all.val = all.val %>% mutate(
+  `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), 
+  `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
+  Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
+  )
+
+get.png<-function(n,dir) {
+  list.files(path=dir, pattern=n, full.names=T, recursive=T)
+}
+
+val = do.call(bind_rows, lapply(list.files(analysis.dir, 'residuals', recursive = T, full.names = T), function(f) {
+  readr::read_tsv(f, col_types = 'cdddddl', col_names = F) %>% set_names('sample', 'varMAD_median', 'varMAD_sd', 'varMAD_Q1', 'varMAD_Q3', 'n.segs', 'Pass')  %>% 
+    mutate(`Patient ID` = as.character(basename(dirname(f))))
+})) %>% select(`Patient ID`, sample, varMAD_median, n.segs) %>% mutate(varMAD_median = round(varMAD_median, 3)) %>% mutate(sample = str_replace(sample, '_', '-'))
+
+
+all.val %>% filter(!Samplename %in% val$sample )
+
+
+val = val %>% filter(sample %in% (all.val %>% select(Samplename) %>% pull) ) %>% 
+          left_join( all.val, val %>% mutate(sample = str_replace(sample, '_', '-')), by=c('sample'='Samplename'))
+
+qc.cutoff = 0.011
+pass.fail = tibble()
+```
+
+
+# Quick Summary
+
+Effectively every batch C.K. ran failed at a rate of 70-90% of samples. None of the tests we ran showed any effect, with the possible exception of the extraction kit.  Frozen samples always do well, FFPE is clearly a little tricker.
+
+Even the old progressor scrolls that had been sitting for a year in tubes worked well enough to pass QC and provide predictions. To date those suggest a false negative rate of about 38% (by sample).  We have more progressors extracted and will sequence these shortly.
+
+We are now requesting and extracting all of the NP cohort that we had previously identified.  
+
+
+## By Batch
+
+```{r}
+
+pass.fail = bind_rows(pass.fail, 
+  val %>% group_by(Batch, Cohort) %>% dplyr::summarise( Pass= length(which(varMAD_median<=qc.cutoff))/nrow(val), Fail=length(which(varMAD_median>qc.cutoff))/nrow(val)))
+
+sval = val %>% group_by(Batch) %>% dplyr::mutate(Cohort = Cohort[1]) %>% group_by(Batch, Cohort) %>% dplyr::summarise_at(vars(varMAD_median), funs(min,mean,median,max),na.rm=T)
+
+vt = val %>% group_by(Batch) %>% dplyr::mutate(Cohort = Cohort[1]) %>% group_by(Batch, `Sample Type`, Cohort) %>% dplyr::summarise(
+  `Total Samples` = length(Batch),
+  Pass=length(which(varMAD_median<=qc.cutoff)), Fail=length(which(varMAD_median>qc.cutoff))
+) 
+
+vt %>% kable(caption='Pass/Fail by batch, red rows failed > 10% of samples') %>% kable_styling('striped') %>% row_spec(which(vt$Fail/vt$`Total Samples` >  0.1), color='red')
+
+sval %>% kable(caption='Summary of variance per batch. Red rows are where the median value of the variance for the entire batch was greater than the cutoff') %>% kable_styling('striped') %>% row_spec(which(sval$median > qc.cutoff), color='red')
+
+```
+
+## By Sample Type
+
+Frozen samples are typically very good, and our few Cytosponge samples pass as well.  
+
+```{r}
+val$RA = factor(val$RA)
+
+val %>% group_by(as.integer(RA),`Sample Type`, Collection) %>% dplyr::summarise(
+  `Total Samples` = length(Batch),
+  Pass=length(which(varMAD_median<=qc.cutoff)), Fail=length(which(varMAD_median>qc.cutoff))
+) %>% rename('as.integer(RA)' = 'Processing') %>% kable(caption='Pass/Fail by sample type') %>% kable_styling('striped')
+
+```
+
+
+# Initial Pilots
+
+The initial pilot results didn't look too bad.  But the problem was that the ones that failed were all FFPE and we only did 10.  
+
+```{r}
+
+val %>% ungroup %>% filter(Batch <= 2) %>% dplyr::group_by(Batch, `Sample Type`) %>% dplyr::summarise(
+  `Total Samples` = n(),
+  `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
+) %>% kable() %>% kable_styling('striped') 
+
+```
+
+
+## Initial NP Validation
+
+Here we should've done another, slightly larger pilot, before diving in.  We didn't, and more than 90% failed QC.  The question was why.
+
+```{r}
+val %>% ungroup %>% filter(Batch %in% c(3,4)) %>% dplyr::group_by(Batch, `Sample Type`, Collection) %>% dplyr::summarise(
+  Total = n(),
+  `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
+) %>% kable(caption='Total samples and QC results') %>% kable_styling('striped')
+```
+
+## Speedvac test
+
+* 16 samples, 12 samples from the training dataset and 4 from the validation set
+* 8 Speedvac'd
+* 8 were not
+
+There was some concern initially that the Speedvac itself was causing the difference as Ellie had used the one at the CI, while all of the validation dataset were run in the MRC. On both manual inspection and via the computational cutoff only the 4 samples that were not in the initial training dataset failed QC.
+
+```{r}
+
+speedvac = left_join(val %>% ungroup %>% filter(Batch %in% c(5)), readxl::read_xlsx(val.file, sheet='Batch 5') %>% select(`Hospital Research ID`, `Block ID`, `Original Cohort`, `Speedvac`))
+
+speedvac %>% dplyr::group_by(Batch, `Sample Type`, `Original Cohort`, Speedvac) %>% dplyr::summarise(
+  Total = n(),
+  `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
+) %>% kable() %>% kable_styling('striped')
+
+```
+
+All 4 that were not from Ellie's cohort failed QC. The difference in these data were only that the samples used from the training dataset (n=12) were already extracted while the 4 that were new had to be extracted from scratch. As the training samples had been extracted using GeneRead and the new samples used AllPrep we considered that the kit could be an issue.
+
+
+## Kit Test
+
+*	12 cell line FFPE samples 
+  + 10 cell lines
+  + 2 NP patients from an earlier set
+* 7 AllPrep
+* 5 GeneRead
+
+
+```{r}
+
+kit = left_join(val %>% ungroup %>% filter(Batch %in% c(6)), 
+          readxl::read_xlsx(val.file, sheet='Batch 6') %>% dplyr::select(`Block ID`, `Kit Extraction`, `Sample`) %>% mutate_at(vars(`Block ID`), list(as.character)))
+
+kit %>% dplyr::group_by(Batch, `Kit Extraction`) %>% dplyr::summarise(
+  Total = n(),
+  `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
+) %>% kable() %>% kable_styling('striped')
+
+
+```
+
+In the Generead vs Allprep kit test we were testing to see whether the specific kit used made the difference.  Ellie had used GeneRead for all of her samples, while we had started to use Allprep.  While it is not conclusive, the GeneRead's did perform better.  However, even here the failure rate was too high and most of the GeneRead's passed manual QC but would not have passed computational QC.
+
+I would not call this definitive simply because there were so few and that’s still a high rate of failure.  However, GeneRead appears to have a better rate overall.
+
+
+
+## CI Protocol
+
+At this point we were guessing that the extraction method itself may be at issue, and that there could be small protocol errors that we were unaware of.  We selected a set of samples that had been previously sequenced by Ellie and Cassandra, and then a number of new samples as well.  
+
+Cassandra worked with Anna Piskorz from the Brenton lab at the CI to do the extractions using their protocol and their kits, and Anna then did the library prep as well.  However, again a very high percentage failed.  Most concerning is that the samples from Ellie's cohort failed and the orginal ones done in 2017 by Ellie all looked fine.  
+
+
+```{r}
+ci = left_join(val %>% ungroup %>% filter(Batch %in% c(7)),
+          readxl::read_xlsx(val.file, sheet='Batch 7') %>% dplyr::select(`Hospital Research ID`, `Block ID`, `Original cohort`, `Sample Type`, Cohort))
+
+ci %>% dplyr::group_by(Batch, `Original cohort`) %>% dplyr::summarise(
+  Total = n(),
+  `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
+) %>% kable() %>% kable_styling('striped')
+```
+
+# New processing
+
+At this point Sujath and Adrienne took over.
+
+## FFPE vs Frozen (old vs new as well)
+
+Here we thought that we could see if the issue was older vs newer samples and we could compare that to the same patient with a frozen. These are all tumour samples (OAC) from OCCAMS. We also cut some of these in house to see if there might be an effect.
+
+```{r}
+
+on = left_join(val %>% ungroup %>% filter(Batch %in% c(8)),
+               readxl::read_xlsx(val.file, sheet='Batch 8') %>% dplyr::select(`Block ID`, `Sample Date`, `Sample Type`))
+
+m18 = seq(as.Date("2019/05/01"), length = 2, by = "-18 months")[2] 
+
+on = on %>% mutate( Age = ifelse( `Sample Date` < m18, '<18m', '>=18m') )
+
+on %>% dplyr::group_by(Batch, `Sample Type`, `Age`) %>% dplyr::summarise(
+  Total = n(),
+  `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
+) %>% kable() %>% kable_styling('striped')
+
+```
+
+All passed QC regardless of sample age or FFPE/Frozen.
+
+## Old progressors
+
+Sujath and Adrienne extracted the progressor scrolls that had been cut about 12 months ago and left in tubes. These are likely to have oxidation issues making them potentially poor samples for inclusion, but it was worth checking. We included a number from Sujath's successful OAC extractions as controls. 
+
+```{r}
+
+oldp = val %>% ungroup %>% filter(Batch %in% c(9))
+
+oldp %>% dplyr::group_by(Batch, `Sample Type`, `Cohort`) %>% dplyr::summarise(
+  Total = n(),
+  `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
+) %>% kable() %>% kable_styling('striped')
+
+
+```
+
+All samples passed QC, though by manual QC I might have failed 2 they weren't as extreme as earlier examples had been.
+
+### Predictions
+
+```{r}
+
+if (file.exists('oldp_preds.txt')) {
+  oldp.preds = read_tsv('oldp_preds.txt')
+} else {
+  segFiles = grep(paste(oldp$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', 'segObj',  full.names = T, recursive = T), value=T)
+
+  info = readxl::read_xlsx(val.file, 'Batch 9') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
+
+  oldp.preds = do.call(bind_rows, lapply(segFiles, function(f) {
+    load(f)  
+    segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
+    
+    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,F)
+    predictions(prr)
+  }))
+  write_tsv(oldp.preds, 'oldp_preds.txt')
+}
+
+oldp.preds = oldp.preds %>% filter(Sample %in% (oldp %>% filter(!grepl('OCCAMS',`Hospital Research ID`)) %>% select(sample) %>% pull))
+
+oldp.preds %>% dplyr::summarise(
+  'TPR'=length(which(Risk == 'High'))/n(),
+  'FNR'=length(which(Risk == 'Low'))/n()) %>% kable() %>% kable_styling(full_width = F)
+
+oldp.preds %>% group_by(`Risk`) %>% dplyr::summarise( 'n samples'=n() ) %>% 
+  kable(caption='Count sample predicted risks, P') %>% kable_styling(full_width = F)
+
+fnr.patients = oldp.preds %>% 
+  group_by(`Hospital Research ID`) %>% dplyr::summarise(
+  TPR = length(which(Risk == 'High'))/n()
+) %>% dplyr::summarise( 'Misclassified patients' = length(which(TPR < 0.5))/n() ) %>% pull
+
+oldp.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
+  `n samples` = n(), 
+  'High Risk' = length(which(Risk == 'High')),
+  'Mod. Risk' = length(which(Risk == 'Moderate')),
+  'Low Risk' =   length(which(Risk == 'Low')),
+  'Pathology Notes' = paste(`Path Notes`, collapse='; ')
+) %>% kable(caption = 'Classified predictions per patient (all P)') %>% kable_styling('striped')
+
+```
+
+For the old progressor samples to-date, the model failed to classify any samples as high risk for *`r fnr.patients*100`%* of patients.  None of these were the samples I might have said were poor quality via manual QC so taken at face value these patients/samples were incorrectly predicted.
+
+
+## New non-progressors
+
+```{r}
+
+new.np = val %>% ungroup %>% filter(Batch %in% c(10))
+               
+new.np %>% dplyr::group_by(Batch, `Sample Type`, `Cohort`) %>% dplyr::summarise(
+  Total = n(),
+  `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
+) %>% kable() %>% kable_styling('striped')
+
+```
+
+Again, all passed QC though on manual QC I might have failed 2-3.  There were 3 samples that just squeaked in under the cutoff threshold.  But they did.
+
+### Predictions
+
+```{r}
+
+if (file.exists('batch_10.txt')) {
+  new.np.preds = read_tsv('batch_10.txt')
+} else {
+
+  segFiles = grep(paste(unique(new.np$`Patient ID`),collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', '2_segObj',  full.names = T, recursive = T), value=T)
+
+  info = readxl::read_xlsx(val.file, 'Batch 10') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
+
+  new.np.preds = do.call(bind_rows, lapply(segFiles, function(f) {
+    load(f)  
+    segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
+
+    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,F)
+    predictions(prr)
+  }))
+  write_tsv(new.np.preds, 'batch_10.txt')
+}
+
+new.np.preds %>% dplyr::summarise(
+  'FPR'=length(which(Risk == 'High'))/n(),
+  'TPR'=length(which(Risk == 'Low'))/n()) %>% kable() %>% kable_styling(full_width = F)
+
+new.np.preds %>% group_by(`Risk`) %>% dplyr::summarise( 'n samples'=n() ) %>% 
+  kable(caption='Count sample predicted risks, NP') %>% kable_styling(full_width = F)
+
+fpr.patients = new.np.preds %>%  group_by(`Hospital Research ID`) %>% dplyr::summarise(
+  TPR = length(which(Risk == 'Low'))/n()
+) %>% dplyr::summarise( 'Misclassified patients' = length(which(TPR < 0.5))/n() ) %>% pull
+
+new.np.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
+  `n samples` = n(), 
+  'High Risk' = length(which(Risk == 'High')),
+  'Mod. Risk' = length(which(Risk == 'Moderate')),
+  'Low Risk' =   length(which(Risk == 'Low'))
+) %>% kable(caption = 'Classified predictions per patient (all NP)') %>% kable_styling('striped')
+
+```
+
+
+
+
+
+
+

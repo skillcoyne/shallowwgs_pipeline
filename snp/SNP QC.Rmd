@@ -1,0 +1,207 @@
+---
+title: "SNP QC"
+author: "Sarah Killcoyne"
+date: "11/5/2018"
+output: 
+  html_document: 
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = T)
+
+library(reshape2)
+library(readxl)
+library(tidyverse)
+library(pander)
+library(gridExtra)
+
+library(BarrettsProgressionRisk)
+
+chr.info = BarrettsProgressionRisk:::chrInfo(build='hg19')
+
+load('~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata', verbose=T)
+
+qcdata = qcdata %>% rowwise %>% dplyr::mutate(
+  PatientID = unlist(strsplit(Samplename, '_'))[1],
+  SampleID = unlist(strsplit(Samplename, '_'))[2],
+  EndoID = unlist(strsplit(Samplename, '_'))[3],
+  Level = unlist(strsplit(Samplename, '_'))[4]
+  )
+segments.list = lapply(segments.list, function(pt) {
+  pt$sample = sub('\\.LogR','',pt$sample)
+  pt
+})
+qcdata$Samplename = sub('_$','',qcdata$Samplename)
+
+
+qcdata$`ASCAT SCA Ratio` = apply(qcdata,1,function(s) {
+  smp = subset(segments.list[[ s[['PatientID']] ]], sample == s[['Samplename']] & chr %in% c(1:22))
+  smp = smp %>% rowwise %>% dplyr::mutate(
+      #'Total' = nAraw + nBraw,
+      'Total' = nMajor + nMinor,
+      'CNV' = round(Total) - round(as.numeric(s[['Ploidy']])) )
+
+  x = subset(smp, CNV != 0 & chr %in% c(1:22))
+  sum(x$endpos - x$startpos) / chr.info[22,'genome.length',drop=T]
+})
+
+qcdata$SampleType = 'BE'
+qcdata$SampleType[grep('BLD',qcdata$Level, ignore.case=T)] = 'Blood Normal'
+qcdata$SampleType[grep('gastric',qcdata$Level, ignore.case=T)] = 'Gastric Normal'
+
+
+patient.info = read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx', col_types=c('text'))
+patient.info = patient.info %>% dplyr::mutate( 
+  UniqueSampleID = paste(PatientID, `Timepoint Code`, sep='_'),
+  Status.by.Pathology = ifelse(Pathology %in% c('HGD','IMC'), 'P', Status)
+)
+qcdata = left_join(qcdata, patient.info, by=c('PatientID'='PatientID','EndoID'='Timepoint Code'))
+
+
+sample.list = read_xlsx('~/Data/BarrettsProgressionRisk//Analysis/SNP/20180604_Reid_1M_SampleList.xlsx', sheet = 2, col_types=c('text','text','numeric'))
+colnames(sample.list)[3] = 'Total.SCA'
+sample.list = sample.list %>% dplyr::mutate('Li SCA Ratio'=Total.SCA/max(chr.info$genome.length))
+
+message(paste(length(unique(qcdata$PatientID)), 'patients listed in metadata file'))
+message(paste(nrow(qcdata), 'samples available'))
+
+
+qcdata = left_join(qcdata, sample.list, by=c('PatientID'='PatientID','SampleID'='SampleNum'))
+qcdata = qcdata %>% rowwise() %>% dplyr::mutate( 
+  Endoscopy = ifelse(Timepoint == 'T1', 1, 2),
+  Status=ifelse(SampleType == 'BE', Status, 'Normal'))
+
+# There's one sample that doesn't fit any of the naming conventions.  I think it's a normal sample but I can't match it up '524_23035N_154P'
+qcdata = subset(qcdata, !is.na(Status))
+
+normal = subset(qcdata, SampleType != 'BE')
+qcdata = subset(qcdata, SampleType == 'BE')
+
+```
+
+`r nrow(patient.info)` total endoscopies, `r pander(table(patient.info$Status), caption="Split between P and NP")`
+
+`r nrow(qcdata)` total samples, `r pander(table(qcdata$Status), caption='NP vs P')`
+
+Histology breakdown:
+
+```{r, echo=F}
+sm = qcdata %>% group_by(Status, Endoscopy, Pathology) %>% dplyr::tally() %>% group_by(Status, Endoscopy) %>% dplyr::mutate(freq=n/sum(n) )
+sm$Pathology = factor(sm$Pathology, levels=c('NDBE','ID','LGD','HGD','IMC'), ordered = T)
+
+ggplot(sm, aes(Pathology, freq, group=Endoscopy, fill=factor(Endoscopy))) + facet_grid(~Status) + 
+  geom_col(position = position_dodge()) + ylim(0,1) + labs(title='Pathology frequency per timepoint')
+```
+
+# ASCAT Stats
+
+Purity, ploidy and goodnessoffit from single sample (not paired) ASCAT.
+
+
+## Ploidy
+
+Most samples regardless of status are likely diploid.  A small subset of NP samples may be tetraploid.  Progressor samples are more likely to show higher ploidies.
+
+```{r}
+ggplot(qcdata, aes(Ploidy, `ASCAT SCA Ratio`, color=Status)) + geom_point() + facet_grid(~Status)
+
+ggplot( bind_rows(qcdata, normal), aes(round(Ploidy,2), fill=SampleType)) + geom_histogram(show.legend = F) + 
+  facet_wrap(~SampleType, ncol=1) + labs(x='Ploidy', title='Ploidy, normal vs BE')
+
+```
+
+## Purity
+
+All of the samples were purified before SNP analysis and should show low contamination (i.e. high purity).  We can ignore this.
+
+```{r}
+ggplot(bind_rows(qcdata,normal), aes(round(Purity,2))) + geom_histogram() + 
+  facet_wrap(~SampleType, scales='free_y', ncol=1) + labs(x='Purity', title='Purity, normal vs BE')
+
+ggplot(bind_rows(qcdata,normal), aes(Purity)) + geom_histogram() +
+  facet_wrap(~SampleType, scales = 'free_y') + labs(title='Purity by sampletype')
+```
+
+## Goodnessoffit
+
+All were 80% or better fit.
+
+```{r}
+ggplot(bind_rows(qcdata,normal), aes(round(Goodnessoffit,2))) + geom_histogram() + 
+  facet_wrap(~SampleType, scales='free_y', ncol=1) + labs(x='Goodnessoffit', title='Goodnessoffit, normal vs BE')
+
+ggplot(qcdata, aes(Goodnessoffit)) + geom_histogram() +
+  facet_wrap(~Status, scales = 'free_y') + labs(title='Goodnessoffit by sampletype')
+
+ggplot(qcdata, aes(Goodnessoffit, `ASCAT SCA Ratio`, color=Status)) + geom_point() + facet_grid(~Status)
+```
+
+
+## SCA Ratio
+
+### Li 2014 SCA vs ASCAT SCA
+
+The % of the genome altered by SCA's is highly correlated between Li 2014 and ASCAT.
+
+```{r}
+ggplot(qcdata, aes(`ASCAT SCA Ratio`, `Li SCA Ratio`)) + geom_point() + facet_grid(~Status)
+```
+
+
+```{r} 
+pander(with(qcdata, cor.test(`ASCAT SCA Ratio`, `Li SCA Ratio`)))
+```
+
+With regards to the clear WGD samples (in this case only those with a ploidy of ≥4) the correlation is still very high. So there's not a good argument for adjusting for a whole genome doubling.
+
+```{r}
+pander(with(subset(qcdata, Ploidy >= 4, select=grep('SCA Ratio',colnames(qcdata))),
+     cor.test(`ASCAT SCA Ratio`, `Li SCA Ratio`)), caption='Samples with a ploidy ≥4')
+```
+
+
+```{r, echo=F, warning=F, message=F}
+ggplot(bind_rows(qcdata,normal), aes(`ASCAT SCA Ratio`, color=Status, fill=Status)) + facet_wrap(Status~SampleType, scales='free_y',nrow=2) +  
+  geom_density(alpha=0.5) + labs(title='SCA Ratio, NP vs P') 
+```
+
+
+```{r}
+pander(rbind('BE'=summary(qcdata$`ASCAT SCA Ratio`), 'Normal'=summary(normal$`ASCAT SCA Ratio`)), caption='Summary of ASCAT SCA ratio by tissue type')
+```
+
+
+```{r}
+ggplot(qcdata, aes(Status, `ASCAT SCA Ratio`, fill=Status, group=Status)) + geom_boxplot(outlier.color = NA) + geom_jitter(width=0.2) + labs(title='BE tissues only')
+```
+
+```{r}
+
+anno = cbind.data.frame(table(subset(qcdata, `ASCAT SCA Ratio` <= median(normal$`ASCAT SCA Ratio`))$Status)/table(qcdata$Status))
+colnames(anno) = c('Status','Ratio')
+anno$x = nrow(qcdata)/2
+anno$y = median(normal$`ASCAT SCA Ratio`)
+#anno$label=paste0('median(normal SCA)=',signif(anno$y,2)*100,'%')
+
+ggplot(qcdata, aes(Samplename,`ASCAT SCA Ratio`, color=Status)) + geom_point() + facet_grid(~Status) + ylim(0,0.01) + geom_hline(yintercept = anno$y[1], linetype='dashed', color='grey39') + geom_label(data=anno, aes(x, y, label=paste(round(Ratio,2)*100,'% samples',sep='')), nudge_y = -0.0001) + 
+  labs(title='BE Samples, zoomed to <1% SCA', subtitle=paste0('Median normal SCA=',signif(anno$y,2)*100,'%')) + theme(legend.position = 'none', axis.text.x=element_blank())
+
+```
+### Per Endoscopy
+
+```{r}
+m = median(normal$`ASCAT SCA Ratio`)
+
+perPt = qcdata %>% group_by(PatientID,Endoscopy,Status) %>% dplyr::summarise(n=length(PatientID), LowSCA = length(which(`ASCAT SCA Ratio` <= m)) ) %>% mutate( LowRatio = LowSCA/n, quant=ntile(LowRatio,2) ) 
+
+tb = perPt %>% group_by(Status) %>% 
+  dplyr::summarise( '<0.5'=length(which(LowRatio<0.5))/length(Status), 
+                    '≥0.5'=length(which(LowRatio>=0.5))/length(Status) )
+
+ggplot(melt(tb), aes(variable, value, group=Status,fill=Status)) + geom_col(position=position_dodge()) + labs(x='Ratio of low sca endoscopies',y='Ratio of patients',title='')
+
+```
+
+
+
