@@ -109,7 +109,7 @@ roc.plot <- function(roc,title="") {
   df = cbind.data.frame('specificity'=rev(roc$specificities), 'sensitivity'=rev(roc$sensitivities))
 
   ggplot(df, aes(specificity, sensitivity)) + geom_line() + scale_x_reverse() + 
-    geom_label(data=as.data.frame(t(round(pROC::coords(roc, "best"),2))), 
+    geom_label(data=as.data.frame(t(round(pROC::coords(roc, "best", transpose=T),2))), 
                aes(x=specificity, y=sensitivity, 
                    label=paste(' (FPR ', round((1-specificity),2),' TPR ', round(sensitivity,2),')\nAUC:',round(roc$auc, 2), sep='')), nudge_x=.25) +
     labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme
@@ -146,28 +146,29 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   return(p)
 }
 
-pred.tiles <- function(df, probs=F, OR=F, path=5, cols=c('green3','orange','red3'), ylim=NULL, ...) {
-  if (is.null(ylim)) ylim = 1:max(as.integer(levels(droplevels(df$Block))))
+pred.tiles <- function(df, probs=F, OR=F, path=5, colors=c('green3','orange','red3'), ylim=NULL, ...) {
+  #if (is.null(ylim)) ylim = 1:max(as.integer(levels(droplevels(df$Block))))
+  if (is.null(ylim)) ylim = 1:max(df$Block)
 
   df$months.before.final = factor(df$months.before.final, ordered = T)
   df$months.before.final = factor(df$months.before.final, levels=rev(levels(df$months.before.final)))
   
-  p = ggplot(df, aes(months.before.final, Block)) + scale_y_discrete(limits=ylim)
+  p = ggplot(df, aes(months.before.final, Block)) # + scale_y_discrete(limits=ylim)
 
   if (OR) {
     p = p + geom_tile(aes(fill=OR), color='white') + scale_fill_gradientn(colors = myPal, limits=c(-9.3,15), name='RR') 
   } else if (probs) {
     p = p + geom_tile(aes(fill=Prediction), color='white') + scale_fill_gradientn(colors = myPal, limits=c(0,1), name='P(P)') 
   } else {
-    p = p + geom_tile(aes(fill=Risk), color='white', size=2) + scale_fill_manual(values=cols, limits=levels(df$Risk), name='Progression')
+    p = p + geom_tile(aes(fill=Risk), color='white', size=2) + scale_fill_manual(values=colors, limits=levels(df$Risk), name='Progression')
   }
   
   if (!is.null(path)) {
     p = p + geom_point(aes(shape=Pathology), fill='white', color='white', size=path) + 
         scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), labels=c('NDBE','ID','LGD','HGD','IMC'), guide=guide_legend(override.aes=list(fill='white', color='white')))
   }
-  p + facet_grid(~Patient, ...) +
-    labs(y='Oesophageal Location (OGJ..)',x='Endoscopy (Base...End)', title='') +
+  p + facet_wrap(~Patient, ncol=1) +
+    labs(y='Oesophageal Location (OGJ..)',x='Endoscopy (Base...End)', title='') + scale_y_continuous(expand=c(0,0), breaks = ylim) + 
     plot.theme + theme(axis.text = element_blank(), legend.key=element_rect(fill='grey39'), panel.background=element_rect(colour = 'black'), panel.grid.major=element_blank(), panel.spacing = unit(0.2, 'lines'), panel.border = element_rect(color="black", fill=NA, size=0.5)  ) 
 }
 

@@ -32,9 +32,9 @@ fncols <- function(data, cname, default=NA) {
   data
 }
 
-sheets = readxl::excel_sheets(val.file)[1:10]
+sheets = readxl::excel_sheets(val.file)[1:12]
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
+  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
 }))
 
 pastefun<-function(x) {
@@ -86,9 +86,9 @@ We are now requesting and extracting all of the NP cohort that we had previously
 pass.fail = bind_rows(pass.fail, 
   val %>% group_by(Batch, Cohort) %>% dplyr::summarise( Pass= length(which(varMAD_median<=qc.cutoff))/nrow(val), Fail=length(which(varMAD_median>qc.cutoff))/nrow(val)))
 
-sval = val %>% group_by(Batch) %>% dplyr::mutate(Cohort = Cohort[1]) %>% group_by(Batch, Cohort) %>% dplyr::summarise_at(vars(varMAD_median), funs(min,mean,median,max),na.rm=T)
+sval = val %>% group_by(Batch) %>% dplyr::mutate(Cohort = paste(unique(Cohort), collapse=', ' )) %>% group_by(Batch, Cohort) %>% dplyr::summarise_at(vars(varMAD_median), funs(min,mean,median,max),na.rm=T)
 
-vt = val %>% group_by(Batch) %>% dplyr::mutate(Cohort = Cohort[1]) %>% group_by(Batch, `Sample Type`, Cohort) %>% dplyr::summarise(
+vt = val %>% group_by(Batch) %>% dplyr::mutate(Cohort =  paste(unique(Cohort), collapse=', ' )) %>% group_by(Batch, `Sample Type`, Cohort) %>% dplyr::summarise(
   `Total Samples` = length(Batch),
   Pass=length(which(varMAD_median<=qc.cutoff)), Fail=length(which(varMAD_median>qc.cutoff))
 ) 
@@ -109,7 +109,7 @@ val$RA = factor(val$RA)
 val %>% group_by(as.integer(RA),`Sample Type`, Collection) %>% dplyr::summarise(
   `Total Samples` = length(Batch),
   Pass=length(which(varMAD_median<=qc.cutoff)), Fail=length(which(varMAD_median>qc.cutoff))
-) %>% rename('as.integer(RA)' = 'Processing') %>% kable(caption='Pass/Fail by sample type') %>% kable_styling('striped')
+) %>% rename('as.integer(RA)' = 'Processing RA') %>% kable(caption='Pass/Fail by sample type') %>% kable_styling('striped')
 
 ```
 
@@ -238,10 +238,10 @@ Sujath and Adrienne extracted the progressor scrolls that had been cut about 12 
 
 ```{r}
 
-oldp = val %>% ungroup %>% filter(Batch %in% c(9))
+oldp = val %>% ungroup %>% filter(Batch %in% c(8:12) & Cohort == 'Old progressor scrolls')
 
 oldp %>% dplyr::group_by(Batch, `Sample Type`, `Cohort`) %>% dplyr::summarise(
-  Total = n(),
+  `n Samples` = n(),
   `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
 ) %>% kable() %>% kable_styling('striped')
 
@@ -254,12 +254,18 @@ All samples passed QC, though by manual QC I might have failed 2 they weren't as
 
 ```{r}
 
+sheets = readxl::excel_sheets(val.file)[9:12]
+info = do.call(bind_rows, lapply(sheets, function(s) {
+  readxl::read_xlsx(val.file, s, trim_ws = T) %>% 
+    dplyr::filter(Status == 'P') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
+}))
+
 if (file.exists('oldp_preds.txt')) {
   oldp.preds = read_tsv('oldp_preds.txt')
 } else {
   segFiles = grep(paste(oldp$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', 'segObj',  full.names = T, recursive = T), value=T)
 
-  info = readxl::read_xlsx(val.file, 'Batch 9') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
+#  info = readxl::read_xlsx(val.file, 'Batch 9') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 
   oldp.preds = do.call(bind_rows, lapply(segFiles, function(f) {
     load(f)  
@@ -302,7 +308,7 @@ For the old progressor samples to-date, the model failed to classify any samples
 
 ```{r}
 
-new.np = val %>% ungroup %>% filter(Batch %in% c(10))
+new.np = val %>% ungroup %>% filter(Batch %in% c(10:12) & Status == 'NP')
                
 new.np %>% dplyr::group_by(Batch, `Sample Type`, `Cohort`) %>% dplyr::summarise(
   Total = n(),
@@ -311,28 +317,33 @@ new.np %>% dplyr::group_by(Batch, `Sample Type`, `Cohort`) %>% dplyr::summarise(
 
 ```
 
-Again, all passed QC though on manual QC I might have failed 2-3.  There were 3 samples that just squeaked in under the cutoff threshold.  But they did.
+Again, most passed QC though on manual QC I might have failed 2-3 others.  There were 3 samples that just squeaked in under the cutoff threshold.  
 
 ### Predictions
 
 ```{r}
 
-if (file.exists('batch_10.txt')) {
-  new.np.preds = read_tsv('batch_10.txt')
+sheets = readxl::excel_sheets(val.file)[10:12]
+info = do.call(bind_rows, lapply(sheets, function(s) {
+  readxl::read_xlsx(val.file, s, trim_ws = T) %>% 
+    dplyr::filter(Status == 'NP' & !is.na(`SLX-ID`)) %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
+}))
+
+if (file.exists('val_np.txt')) {
+  new.np.preds = read_tsv('val_np.txt')
 } else {
-
-  segFiles = grep(paste(unique(new.np$`Patient ID`),collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', '2_segObj',  full.names = T, recursive = T), value=T)
-
-  info = readxl::read_xlsx(val.file, 'Batch 10') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
-
+  segFiles = grep(paste(new.np$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', '(2|3)_segObj',  full.names = T, recursive = T), value=T)
+  
   new.np.preds = do.call(bind_rows, lapply(segFiles, function(f) {
+    print(f)
     load(f)  
-    segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
+    if (nrow(BarrettsProgressionRisk::sampleResiduals(segmented) %>% dplyr::filter(Pass)) <= 0) return()
 
+    segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
     prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,F)
     predictions(prr)
   }))
-  write_tsv(new.np.preds, 'batch_10.txt')
+  write_tsv(new.np.preds, 'val_np.txt')
 }
 
 new.np.preds %>% dplyr::summarise(
@@ -346,11 +357,21 @@ fpr.patients = new.np.preds %>%  group_by(`Hospital Research ID`) %>% dplyr::sum
   TPR = length(which(Risk == 'Low'))/n()
 ) %>% dplyr::summarise( 'Misclassified patients' = length(which(TPR < 0.5))/n() ) %>% pull
 
-new.np.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
+
+val.new.np.preds = left_join(val %>% filter(sample %in% new.np.preds$Sample) %>% select(`Hospital Research ID`, sample, varMAD_median, n.segs, Status),
+          new.np.preds %>% select(Sample, Probability, matches('Risk')), by=c('sample'='Sample'))
+
+
+with(val.new.np.preds, cor.test(varMAD_median, Probability))
+
+
+
+val.new.np.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
   `n samples` = n(), 
   'High Risk' = length(which(Risk == 'High')),
   'Mod. Risk' = length(which(Risk == 'Moderate')),
-  'Low Risk' =   length(which(Risk == 'Low'))
+  'Low Risk' =   length(which(Risk == 'Low')),
+  'QC var' = signif( mean(varMAD_median), 2)
 ) %>% kable(caption = 'Classified predictions per patient (all NP)') %>% kable_styling('striped')
 
 ```

@@ -1,7 +1,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 3)
-  stop("Missing required params: <data dir> <outdir> <info file dir> <log transform DEF: FALSE>")
+  stop("Missing required params: <data dir> <outdir> <info file dir> <Set: All,Training>")
 
 
 suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
@@ -16,15 +16,21 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 data = args[1]
 # data = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/'
 outdir = args[2]
-# outdir = '~/Data/BarrettsProgressionRisk/Analysis'
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms_all'
 infodir = args[3]
-# infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
-logT = F
-if (length(args) == 4)
-  logT = as.logical(args[4])
 
-cache.dir = paste(outdir, '5e6_arms_all', sep='/')
+set = 'All'
+if (length(args) == 4) set = args[4]
+
+# infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
+# logT = F
+# if (length(args) == 4)
+#   logT = as.logical(args[4])
+
+cache.dir = outdir
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
+
+if (dir.exists(cache.dir)) stop(paste0("Output directory ",cache.dir," exists. Exiting."))
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 ## Hospital.Research.ID info file
@@ -35,7 +41,10 @@ if ( length(patient.file) != 1 | length(demo.file) != 1)
   stop("Missing files in info dir: All_patient_info.xlsx and Demographics_full.xlsx")
 
 patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% dplyr::arrange(Status, Patient, Endoscopy.Year, Pathology)
-sum.patient.data = summarise.patient.info(patient.info)
+
+if (set != 'All') patient.info = patient.info %>% filter(Set == set)
+
+sum.patient.data = as_tibble(summarise.patient.info(patient.info))
 
 cleaned = list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T)
 cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)

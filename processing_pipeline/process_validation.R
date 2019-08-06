@@ -30,11 +30,11 @@ if (!is.null(patients)) {
 }
 
 
-sheets = readxl::excel_sheets(val.file)[1:10]
+sheets = readxl::excel_sheets(val.file)[1:12]
 
 
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% mutate_at(vars(`SLX-ID`), list(as.character))
+  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% mutate_at(vars(`SLX-ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
 }))
 
 pastefun<-function(x) {
@@ -58,8 +58,6 @@ if (!is.null(patients))
 failedQC = tibble()
 
 # Need to process the batches from CK and SA separately even if the patients overlap
-
-
 for (ra in levels(all.val$RA) ) {
   print(ra)
   pts = all.val %>% filter(RA == ra) %>% select(`Hospital Research ID`) %>% unique() %>% pull  
