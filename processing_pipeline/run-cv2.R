@@ -23,7 +23,7 @@ set = 'All'
 if (length(args) == 4) set = args[4]
 
 # infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
-# logT = F
+ logT = F
 # if (length(args) == 4)
 #   logT = as.logical(args[4])
 
