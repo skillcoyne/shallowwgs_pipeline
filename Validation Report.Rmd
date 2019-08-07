@@ -34,7 +34,7 @@ fncols <- function(data, cname, default=NA) {
 
 sheets = readxl::excel_sheets(val.file)[1:12]
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
 }))
 
 pastefun<-function(x) {
@@ -56,13 +56,13 @@ get.png<-function(n,dir) {
 val = do.call(bind_rows, lapply(list.files(analysis.dir, 'residuals', recursive = T, full.names = T), function(f) {
   readr::read_tsv(f, col_types = 'cdddddl', col_names = F) %>% set_names('sample', 'varMAD_median', 'varMAD_sd', 'varMAD_Q1', 'varMAD_Q3', 'n.segs', 'Pass')  %>% 
     mutate(`Patient ID` = as.character(basename(dirname(f))))
-})) %>% select(`Patient ID`, sample, varMAD_median, n.segs) %>% mutate(varMAD_median = round(varMAD_median, 3)) %>% mutate(sample = str_replace(sample, '_', '-'))
+})) %>% dplyr::select(`Patient ID`, sample, varMAD_median, n.segs) %>% mutate(varMAD_median = round(varMAD_median, 3)) %>% mutate(sample = str_replace(sample, '_', '-'))
 
 
 all.val %>% filter(!Samplename %in% val$sample )
 
 
-val = val %>% filter(sample %in% (all.val %>% select(Samplename) %>% pull) ) %>% 
+val = val %>% filter(sample %in% (all.val %>% dplyr::select(Samplename) %>% pull) ) %>% 
           left_join( all.val, val %>% mutate(sample = str_replace(sample, '_', '-')), by=c('sample'='Samplename'))
 
 qc.cutoff = 0.011
@@ -149,7 +149,7 @@ There was some concern initially that the Speedvac itself was causing the differ
 
 ```{r}
 
-speedvac = left_join(val %>% ungroup %>% filter(Batch %in% c(5)), readxl::read_xlsx(val.file, sheet='Batch 5') %>% select(`Hospital Research ID`, `Block ID`, `Original Cohort`, `Speedvac`))
+speedvac = left_join(val %>% ungroup %>% filter(Batch %in% c(5)), readxl::read_xlsx(val.file, sheet='Batch 5') %>% dplyr::select(`Hospital Research ID`, `Block ID`, `Original Cohort`, `Speedvac`))
 
 speedvac %>% dplyr::group_by(Batch, `Sample Type`, `Original Cohort`, Speedvac) %>% dplyr::summarise(
   Total = n(),
@@ -228,6 +228,32 @@ on %>% dplyr::group_by(Batch, `Sample Type`, `Age`) %>% dplyr::summarise(
   `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
 ) %>% kable() %>% kable_styling('striped')
 
+if (file.exists('batch8_preds.txt')) {
+  batch8_preds = read_tsv('batch8_preds.txt')
+} else {
+  segFiles = grep(paste(on$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', 'segObj',  full.names = T, recursive = T), value=T)
+
+  batch8_preds = do.call(bind_rows, lapply(segFiles, function(f) {
+    print(f)
+    load(f)
+    if (nrow(sampleResiduals(segmented)) <= 0) return()
+    
+    segmented$sample.info = loadSampleInformation(  
+      on %>% filter(sample %in% segmented$sample.info$Sample) %>%
+        dplyr::rename('Endoscopy' = `Sample Date`, Sample = sample ) )
+
+    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, F)
+    BarrettsProgressionRisk::predictions(prr,'sample')
+  }))
+  batch8_preds = batch8_preds %>% filter(!is.na(`Patient ID`))
+  
+  write_tsv(batch8_preds, 'batch8_preds.txt')
+}
+
+batch8_preds %>% dplyr::select(`Patient ID`, Sample, everything(), -matches('Hospital|SLX|Index') ) %>% kable() %>% kable_styling('striped')
+
+batch8_preds %>% group_by(Risk) %>% dplyr::summarise('n Samples'= length(Risk)) %>% kable(caption='Predictions') %>% kable_styling(full_width = F)
+
 ```
 
 All passed QC regardless of sample age or FFPE/Frozen.
@@ -257,7 +283,7 @@ All samples passed QC, though by manual QC I might have failed 2 they weren't as
 sheets = readxl::excel_sheets(val.file)[9:12]
 info = do.call(bind_rows, lapply(sheets, function(s) {
   readxl::read_xlsx(val.file, s, trim_ws = T) %>% 
-    dplyr::filter(Status == 'P') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
+    dplyr::filter(Status == 'P') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% dplyr::mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
 
 if (file.exists('oldp_preds.txt')) {
@@ -277,7 +303,10 @@ if (file.exists('oldp_preds.txt')) {
   write_tsv(oldp.preds, 'oldp_preds.txt')
 }
 
-oldp.preds = oldp.preds %>% filter(Sample %in% (oldp %>% filter(!grepl('OCCAMS',`Hospital Research ID`)) %>% select(sample) %>% pull))
+oldp.preds = left_join(oldp.preds, val %>% dplyr::select(sample, varMAD_median, n.segs), by=c('Sample'='sample'))
+
+
+oldp.preds = oldp.preds %>% filter(Sample %in% (oldp %>% filter(!grepl('OCCAMS',`Hospital Research ID`)) %>% dplyr::select(sample) %>% pull))
 
 oldp.preds %>% dplyr::summarise(
   'TPR'=length(which(Risk == 'High'))/n(),
@@ -322,7 +351,6 @@ Again, most passed QC though on manual QC I might have failed 2-3 others.  There
 ### Predictions
 
 ```{r}
-
 sheets = readxl::excel_sheets(val.file)[10:12]
 info = do.call(bind_rows, lapply(sheets, function(s) {
   readxl::read_xlsx(val.file, s, trim_ws = T) %>% 
@@ -346,6 +374,10 @@ if (file.exists('val_np.txt')) {
   write_tsv(new.np.preds, 'val_np.txt')
 }
 
+new.np.preds = left_join(new.np.preds, val %>% dplyr::select(sample, varMAD_median, n.segs), by=c('Sample'='sample'))
+
+#cor.test(new.np.preds$n.segs, new.np.preds$varMAD_median)
+
 new.np.preds %>% dplyr::summarise(
   'FPR'=length(which(Risk == 'High'))/n(),
   'TPR'=length(which(Risk == 'Low'))/n()) %>% kable() %>% kable_styling(full_width = F)
@@ -358,8 +390,8 @@ fpr.patients = new.np.preds %>%  group_by(`Hospital Research ID`) %>% dplyr::sum
 ) %>% dplyr::summarise( 'Misclassified patients' = length(which(TPR < 0.5))/n() ) %>% pull
 
 
-val.new.np.preds = left_join(val %>% filter(sample %in% new.np.preds$Sample) %>% select(`Hospital Research ID`, sample, varMAD_median, n.segs, Status),
-          new.np.preds %>% select(Sample, Probability, matches('Risk')), by=c('sample'='Sample'))
+val.new.np.preds = left_join(val %>% filter(sample %in% new.np.preds$Sample) %>% dplyr::select(`Hospital Research ID`, sample, varMAD_median, n.segs, Status),
+          new.np.preds %>% dplyr::select(Sample, Probability, matches('Risk')), by=c('sample'='Sample'))
 
 
 with(val.new.np.preds, cor.test(varMAD_median, Probability))
