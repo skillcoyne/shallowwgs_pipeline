@@ -51,6 +51,11 @@ if (length(segFile) <= 0) {
 }
 
 prr = predictRiskFromSegments(segs, model = fit, s = s)
+
+pred.dir = paste0(outdir, '/predictions')
+dir.create(pred.dir, recursive = T)
+save(prr, paste0(pred.dir, '/', pt, '.Rdata'))
+
 predictions(prr, 'sample')
 
 #prr2 = predictRiskFromSegments(segs, verbose = T)
