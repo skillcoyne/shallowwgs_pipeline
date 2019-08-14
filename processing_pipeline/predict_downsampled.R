@@ -47,9 +47,9 @@ dir.create(pred.dir, showWarnings = F, recursive = T)
   
 segObj = BarrettsProgressionRisk::segmentRawData(info, rawFile, fittedFile, cutoff=0.011)
   
-p1 = BarrettsProgressionRisk::plotSegmentData(segObj) + labs(title=sample)
+p1 = BarrettsProgressionRisk::plotSegmentData(segObj, 'plot') 
 
-ggsave(paste0(pred.dir, '/', sample, '_segmentedCoverage.png'), plot=p1,  width=20, height=6, units='in', limitsize=F)
+ggsave(paste0(pred.dir, '/', sample, '_segmentedCoverage.png'), plot=grid.arrange(p1),  width=20, height=6, units='in', limitsize=F)
 
 prr = BarrettsProgressionRisk::predictRiskFromSegments(segObj, model = fit, s = s)
 
