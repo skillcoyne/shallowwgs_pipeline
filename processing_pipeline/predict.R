@@ -11,8 +11,8 @@ info = args[2]
 modeldir = args[3]
 outdir = args[4]
 
-datadir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/PR1_WSH_030/'
-info = '~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx'
+#datadir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/PR1_WSH_030/'
+#info = '~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx'
 
 pt = basename(datadir)
 

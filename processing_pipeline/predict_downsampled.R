@@ -1,54 +1,56 @@
 # predict downsampled
 args = commandArgs(trailingOnly=TRUE)
 
-if (length(args) < 1)
-  stop("Missing required params: <data dir> <model dir> <outdir>")
+if (length(args) < 4)
+  stop("Missing required params: <data dir> <model dir> <outdir> <info file path> <same name>")
 
+library(tidyverse)
 library(BarrettsProgressionRisk)
-source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
+#source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 dir = args[1]
 model.dir = args[2]
 outdir = args[3]
+info = args[4]
+sample = args[5]
 
-logT = F
+if (!file.exists(info)) stop(paste0("File does not exist or is not readable: ", info))
+all.ds.info = readxl::read_xlsx(info)
+
+x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
+load(x, verbose=F)
+fit = models$`0.9`
+s = performance.at.1se$`0.9`$lambda  
 
 #dir = '~/Data/Ellie/QDNAseq/all_downsampled/20180206_KillcoyneS_RF_BarrettsCN/qdnaseq'
 #outdir = '~/Data/Ellie/Analysis/downsampled'
 
-files = list.files(dir, '.txt', full.names=T)
+qndaseq.files = list.files(dir, pattern=sample, recursive = T, full.names = T)
 
-sampleNames = unique(sub('\\.binsize.*', '', basename(files), ignore.case = T))
-
-all.ds.info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/downsampled_ids.xlsx')
+#files = list.files(dir, '.txt', full.names=T)
+#sampleNames = unique(sub('\\.binsize.*', '', basename(files), ignore.case = T))
 
 all.preds = list(); dspred = tibble()
-for (name in sampleNames) {
-  print(name)
+#for (name in sampleNames) {
+#print(name)
   
-  info = loadSampleInformation(
-    all.ds.info %>% filter(`Illumina ID` == name) %>% dplyr::mutate(Endoscopy = "01/01/2001") %>% dplyr::rename(Sample = `Illumina ID`) )
+info = loadSampleInformation( all.ds.info %>% filter(`Illumina ID` == sample) %>% 
+                                dplyr::mutate(Endoscopy = "01/01/2001") %>% dplyr::rename(Sample = `Illumina ID`) )
 
-  rawFile = grep(paste(name,'.*raw', sep=''), files, value=T)
-  fittedFile = grep(paste(name,'.*fitted|corr', sep=''), files, value=T)
+rawFile = grep('*.raw', qndaseq.files, value=T)
+fittedFile = grep('.*fitted|corr', qndaseq.files, value=T)
   
-  pred.dir = paste(outdir, name, sep='/')
-  dir.create(pred.dir, showWarnings = F, recursive = T)
+if (length(rawFile) < 1 | length(fittedFile) < 1) stop(paste0("Missing raw or fitted counts file for ", sample))
   
-  if (length(rawFile) < 1 | length(fittedFile) < 1) {
-    message(paste("Missing raw or fitted file for ", name, " skipping.",sep=''))
-    next
-  }
-  segObj = BarrettsProgressionRisk::segmentRawData(info, rawFile, fittedFile,cutoff=0.011)
+pred.dir = paste(outdir, sample, sep='/')
+dir.create(pred.dir, showWarnings = F, recursive = T)
   
-  prr = BarrettsProgressionRisk::predictRiskFromSegments(segObj)
+segObj = BarrettsProgressionRisk::segmentRawData(info, rawFile, fittedFile, cutoff=0.011)
   
-  save(prr, file=paste0(pred.dir, '/predictions.Rdata'))
+prr = BarrettsProgressionRisk::predictRiskFromSegments(segObj, model = fit, s = s)
+  
+save(prr, file=paste0(pred.dir, '/predictions.Rdata'))
 
-  #all.preds[[name]] = prr
-    
-  #dspred = bind_rows(dspred, predictions(prr))
-}
 #save(dspred, all.preds, file=paste(model.dir, 'downsampled-predictions.Rdata', sep='/'))
 
 # dspred$Sample = rownames(dspred)
