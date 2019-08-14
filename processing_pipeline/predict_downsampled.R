@@ -5,6 +5,7 @@ if (length(args) < 4)
   stop("Missing required params: <data dir> <model dir> <outdir> <info file path> <same name>")
 
 library(tidyverse)
+library(gridExtra)
 library(BarrettsProgressionRisk)
 #source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
