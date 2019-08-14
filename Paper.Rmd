@@ -50,7 +50,9 @@ demo.file = list.files(info.dir, pattern='Demographics_full.xlsx', recursive=T, 
 if (length(patient.file) != 1 | length(demo.file) != 1)
   stop(paste("Missing/too many patient info file(s) in", info.dir))
 
-patient.info = read.patient.info(patient.file, demo.file, set='All')$info
+all.patient.info = read.patient.info(patient.file, demo.file, set='All')$info
+
+patient.info = all.patient.info %>% dplyr::filter(Set == 'Training')
 head(patient.info)
 
 # validation.patient.info =  subset(all.patient.info, Set == 'Test')
@@ -58,7 +60,7 @@ head(patient.info)
 # sum.validation.info = summarise.patient.info(validation.patient.info)
 
 patient.info = arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
-sum.patient.data = summarise.patient.info(patient.info)
+sum.patient.data = as_tibble(summarise.patient.info(patient.info))
 
 #pander(sum.patient.data[,c('Hospital.Research.ID', 'Status', 'start.year', 'end.year','total.samples','total.endos','highest.path')], justify='left', caption='Training patient set')
 
@@ -155,7 +157,7 @@ To use GLMs across the patients I merge all samples from all patients and overla
 The labels are split such that all samples from progressor patients are (1) and all samples from non-progressors are (0).
 
 ```{r labelsPNP, echo=F, message=F, include=T}
-cache.dir = paste(data, 'Analysis/5e6_arms_all', sep='/') # QC'd
+cache.dir = paste(data, 'Analysis/5e6_arms', sep='/') # QC'd
 
 file = paste(cache.dir, 'model_data.Rdata', sep='/')
 if (!file.exists(file))
@@ -181,10 +183,11 @@ Example subset of the data matrix:
 
 ```{r echo=F, warning=F, message=F, eval=T, fig.height=12, fig.width=20}
  
-chr.lengths = get.chr.lengths()
-chr.lengths$chrom = sub('chr','',chr.lengths$chrom)
-chr.lengths = subset(chr.lengths, chrom %in% c(1:22))
-chr.lengths$chrom = factor(chr.lengths$chrom, levels=c(1:22), ordered = T)
+chr.lengths = BarrettsProgressionRisk:::chrInfo(prefix = '') %>% dplyr::filter(chr %in% c(1:22)) %>%
+  dplyr::mutate(chrom = factor(sub('chr','', chrom), levels=c(1:22), ordered=T))
+#chr.lengths$chrom = sub('chr','',chr.lengths$chrom)
+#chr.lengths = subset(chr.lengths, chrom %in% c(1:22))
+#chr.lengths$chrom = factor(chr.lengths$chrom, levels=c(1:22), ordered = T)
 
 arm.loc = arrange(rbind(
   (chr.lengths %>% dplyr::group_by(chrom) %>% dplyr::mutate('start'=1, 'end'=chr.cent-cent.gap))[c('chrom','start','end')],
@@ -871,7 +874,6 @@ ggsave('plots/auc/multi_auc.png', plot=p, height=6, width=5, units='in',dpi=300)
 ```{r back, echo=F, message=F, warning=F}
 transform.by.time<-function(pt, info) {
   #pt = left_join(pt, info %>% dplyr::select(Hospital.Research.ID, Patient,Samplename,Block), by=c('Hospital.Research.ID','Patient','Samplename'))
-  
   pt = pt %>% dplyr::group_by(PID, Samplename) %>% dplyr::mutate( 'months.before.final' = (Final.Endoscopy - Endoscopy.Year)*12) %>% arrange(Pathology, PID, Endoscopy.Year) %>% ungroup
   
   tb = with(pt, table(Endoscopy.Year, PID))
@@ -926,7 +928,7 @@ cuts = seq(0,1,0.1)
 
 back = back %>% filter(!is.na(Prediction))
 
-back$quants = with(back, cut(Prediction, breaks=cuts))
+back$quants = with(back, cut(Prediction, breaks=cuts, include.lowest = T))
 qt = as.data.frame.matrix(table(back$quants, back$Status))
 qt$quant = rownames(qt)
 
@@ -954,7 +956,7 @@ pred.confidence = bind_cols(pred.confidence,
 pcfit = lm(perc~mn, data=pred.confidence)
 rsid = rstandard(pcfit)
 #pred.confidence[which( rsid >= 1 |  rsid <= -1 ), 'Risk'] = 'Moderate'
-pred.confidence = pred.confidence %>% mutate(Risk = as.character(ifelse(p.value > 0.05, 'Moderate', Risk)))
+pred.confidence = pred.confidence %>% mutate(Risk = as.character(ifelse(p.value > 0.05 & r1 < 0.6, 'Moderate', Risk)))
 
 annotation.table = arrange(pred.confidence %>% dplyr::group_by(Risk) %>% dplyr::summarise(
   'n(NP)'=sum(NP), 'n(P)'=sum(P), 'p.value'=format.pval(mean(p.value), 3), 
@@ -980,6 +982,23 @@ back = left_join(back, pred.confidence %>% dplyr::select(quants, Risk), by='quan
 pcal = BarrettsProgressionRisk::showPredictionCalibration(pred.confidence)
 pcal
 ggsave(filename='plots/pred_calib.png', plot=pcal, width=4, height=4, units='in', dpi=300)
+
+
+back.per.endo = back %>% group_by(Hospital.Research.ID, Status, Patient, PID) %>% 
+  dplyr::mutate('n.samples'=length(PID),'Samples'=paste(Samplename,collapse=',')) %>% 
+  dplyr::summarise_at(vars(matches('Pred|RR|Year')), list(max)) %>% dplyr::select(-matches('^Sample$')) %>% 
+  arrange(Patient, Endoscopy.Year, PID) 
+back.per.endo = back.per.endo %>% mutate(quants = cut(Prediction, breaks=cuts, include.lowest = T)) %>% left_join(pred.confidence %>% dplyr::select(quants, Risk), by='quants') %>% dplyr::select(-matches('quant')) %>% dplyr::mutate(Risk = as.character(Risk))
+
+
+back %>% group_by(Status, Risk)  %>% dplyr::summarise(n = length(Risk)) %>% spread(Risk, n) %>% rowwise %>% 
+  dplyr::mutate(n=sum(High,Low,Moderate), Low = Low/n, Moderate = Moderate/n, High = High/n) %>%
+  mutate_if(is.double, list(round),2) %>%
+  kableExtra::kable(caption='Training set per-sample predictions') %>% kableExtra::kable_styling(full_width = F)
+
+back.per.endo %>%  group_by(Status, Risk)  %>% dplyr::summarise(n = length(Risk)) %>% spread(Risk, n) %>% rowwise %>% 
+  dplyr::mutate(n = sum(High,Low,Moderate), Low = Low/n, Moderate = Moderate/n, High = High/n) %>% mutate_if(is.double, list(round),2) %>%
+  kableExtra::kable(caption='Training set per-endoscopy predictions') %>% kableExtra::kable_styling(full_width = F)
 ```
 
 ```{r probhist, echo=F, warning=F, message=F, fig.width=5, fig.height=5}
@@ -1160,7 +1179,7 @@ Could just as easily get a jacknife CI per patient
 
 ```{r jacknife, echo=T, warning=F, message=F, fig.height=10, fig.width=12}
 
-list.files(cache.dir)
+#list.files(cache.dir)
 
 load(paste0(cache.dir, '/all.pt.alpha.Rdata'), verbose=T)
 rm(plots, performance.at.1se, dysplasia.df, models, cvs, labels)
@@ -1381,12 +1400,10 @@ table.path.risk<-function(df) {
 
 summary.t = table.path.risk(back)
 
+summary.t %>% kableExtra::kable() %>% kableExtra::kable_styling('striped', full_width = F)
+
 write.table(summary.t, quote=F, sep='\t', row.names = F)
 ```
-
-
-`r pander(as.data.frame(summary.t))`
-
 
 ```{r, echo=F, message=F, warning=F}
 back = back %>% dplyr::group_by(Patient) %>% dplyr::mutate( 'pred.ratio'=round(sum(Prediction)/length(Prediction),2))
@@ -1646,71 +1663,86 @@ length(which(round((subset(distanceTSG, distanceToTSG > 0)$distanceToTSG/5e6)-0.
 `r pander(table(sum.validation.info$Status), caption='Validation cohort')`
 
 ```{r val_setup, echo=F, message=F, warning=F, include=F}
-validation.patient.info =  subset(all.patient.info, Set == 'Test')
-validation.patient.info = arrange(validation.patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
+validation.patient.info =  all.patient.info %>% filter(Set == 'Test') %>% arrange(Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
 
 file = paste(cache.dir, 'model_data.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
 
-cleaned = list.files(path=paste(data, 'Cleaned', sep='/'), pattern='tiled', full.names=T, recursive=T)
-cleaned = grep(paste(unique(validation.patient.info$Hospital.Research.ID), collapse='|'), cleaned, value=T)
+predicted = '~/Data/BarrettsProgressionRisk/Analysis/training/val_predictions'
 
-raw = list.files(path=paste(data, 'Cleaned', sep='/'), pattern='raw', full.names=T, recursive=T)
-raw = grep(paste(unique(validation.patient.info$Hospital.Research.ID), collapse='|'), raw, value=T)
+vpd = do.call(bind_rows, lapply(list.files(predicted, full.names = T), function(f) {
+  read_tsv(f, col_types = 'cddcccdccdc')
+})) %>% dplyr::select(Hospital.Research.ID, everything())
+
+vpd = left_join(vpd %>% dplyr::select(-Pathology, -matches('P53')), validation.patient.info %>% dplyr::select(Samplename, Patient, Pathology, p53.Status, Block, Initial.Endoscopy, Final.Endoscopy, Status ), by=c('Sample'='Samplename')) %>% 
+  dplyr::rename(Endoscopy.Year = Endoscopy, Samplename = Sample, RR = `Relative Risk`, Prediction = Probability)
+
+vpd.per.endo = vpd %>% group_by(Hospital.Research.ID, Status, Patient, PID) %>% 
+  dplyr::mutate('n.samples'=length(PID),'Samples'=paste(Samplename,collapse=',')) %>% 
+  dplyr::summarise_at(vars(matches('Pred|RR|Year')), list(max)) %>% dplyr::select(-matches('^Sample$')) %>% 
+  arrange(Patient, Endoscopy.Year, PID) 
+vpd.per.endo = vpd.per.endo %>% mutate(quants = cut(Prediction, breaks=cuts, include.lowest = T)) %>% left_join(pred.confidence %>% dplyr::select(quants, Risk), by='quants') %>% dplyr::select(-matches('quant')) %>% dplyr::mutate(Risk = as.character(Risk))
+  
+
+vpd %>% group_by(Status, Risk)  %>% dplyr::summarise(n = length(Risk)) %>% spread(Risk, n) %>% rowwise %>% 
+  dplyr::mutate(n=sum(High,Low,Moderate), Low = Low/n, Moderate = Moderate/n, High = High/n) %>%
+  mutate_if(is.double, list(round),2) %>%
+  kableExtra::kable(caption='Test set per-sample predictions') %>% kableExtra::kable_styling(full_width = F)
+
+vpd.per.endo %>%  group_by(Status, Risk)  %>% dplyr::summarise(n = length(Risk)) %>% spread(Risk, n) %>% rowwise %>% 
+  dplyr::mutate(n = sum(High,Low,Moderate), Low = Low/n, Moderate = Moderate/n, High = High/n) %>% mutate_if(is.double, list(round),2) %>%
+  kableExtra::kable(caption='Test set per-endoscopy predictions') %>% kableExtra::kable_styling(full_width = F)
+
 
 # Get the SD, mean, and variance(?) per sample
-v.sampleVar = do.call(rbind, lapply(raw, function(f) {
-  t = read.table(f, sep='\t', header=T)
-  sampleCols = grep('chr|arm|start|end|probes', colnames(t), invert = T)
-  x = do.call(rbind, lapply(sampleCols, function(i){
-    cbind('Sample.Mean'=mean(t[,i]),
-          'Sample.SD'=sd(t[,i]),
-          'Sample.Var'=var(t[,i]))
-  }))
-  rownames(x) = colnames(t)[sampleCols]
-  return(x)
-}))
+# v.sampleVar = do.call(rbind, lapply(raw, function(f) {
+#   t = read.table(f, sep='\t', header=T)
+#   sampleCols = grep('chr|arm|start|end|probes', colnames(t), invert = T)
+#   x = do.call(rbind, lapply(sampleCols, function(i){
+#     cbind('Sample.Mean'=mean(t[,i]),
+#           'Sample.SD'=sd(t[,i]),
+#           'Sample.Var'=var(t[,i]))
+#   }))
+#   rownames(x) = colnames(t)[sampleCols]
+#   return(x)
+# }))
 
-arms = grep('arms', cleaned, value=T)
-segs = grep('arms', cleaned, invert=T, value=T)
 
-length(segs) == length(arms)
-
-# Load segment files
-tiled.segs = do.call(rbind, lapply(segs, function(f) {
-  load.segment.matrix(f)
-}))
-dim(tiled.segs)
-
-tiled.arms = do.call(rbind, lapply(arms, function(f) {
-  load.segment.matrix(f)
-}))
-
-length(z.mean) == ncol(tiled.segs)
-
-for (i in 1:ncol(tiled.segs)) 
-  tiled.segs[,i] = unit.var(tiled.segs[,i], z.mean[i], z.sd[i])
-
-for (i in 1:ncol(tiled.arms)) 
-  tiled.arms[,i] = unit.var(tiled.arms[,i], z.arms.mean[i], z.arms.sd[i])
-
-dim(tiled.arms)
-dim(tiled.segs)
-
-cx.score = unit.var(score.cx(tiled.segs,1), mn.cx, sd.cx)
-
-validation.df = subtract.arms(tiled.segs, tiled.arms)
-validation.df = cbind(validation.df, 'cx'=cx.score)
-
-fauxlabel = rep(0, nrow(validation.df) )
-names(fauxlabel) = intersect(validation.patient.info$Samplename, rownames(validation.df))
+# # Load segment files
+# tiled.segs = do.call(rbind, lapply(segs, function(f) {
+#   load.segment.matrix(f)
+# }))
+# dim(tiled.segs)
+# 
+# tiled.arms = do.call(rbind, lapply(arms, function(f) {
+#   load.segment.matrix(f)
+# }))
+# 
+# length(z.mean) == ncol(tiled.segs)
+# 
+# for (i in 1:ncol(tiled.segs)) 
+#   tiled.segs[,i] = unit.var(tiled.segs[,i], z.mean[i], z.sd[i])
+# 
+# for (i in 1:ncol(tiled.arms)) 
+#   tiled.arms[,i] = unit.var(tiled.arms[,i], z.arms.mean[i], z.arms.sd[i])
+# 
+# dim(tiled.arms)
+# dim(tiled.segs)
+# 
+# cx.score = unit.var(score.cx(tiled.segs,1), mn.cx, sd.cx)
+# 
+# validation.df = subtract.arms(tiled.segs, tiled.arms)
+# validation.df = cbind(validation.df, 'cx'=cx.score)
+# 
+# fauxlabel = rep(0, nrow(validation.df) )
+# names(fauxlabel) = intersect(validation.patient.info$Samplename, rownames(validation.df))
 
 ```
 
 
-```{r validation_globalplot, message=F, warning=F, echo=F, fig.height=8, fig.width=8}
+```{r validation_globalplot, message=F, warning=F, echo=F, fig.height=8, fig.width=8, eval=F}
 valCNdf = t(validation.df[,grep('^\\d+:',colnames(validation.df))])
 
 locs = do.call(rbind.data.frame, lapply(rownames(valCNdf), function(x) unlist(strsplit(x,':|-'))))
@@ -1744,61 +1776,28 @@ ggsave('plots/validation_mtn.png', plot=p, width=10, height=5, units='in', dpi=3
 
 
 ```{r validation, message=F, warning=F, echo=F, fig.height=8, fig.width=8}
-file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
-message(paste("loading", file))
-load(file, verbose=T)
-
-fitV = models[[select.alpha]]
-lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
-
-pred = predict(fitV, newx=validation.df, s=lambda.opt, type='response')
-or = predict(fitV, newx=validation.df, s=lambda.opt, type='link')
-
-vpd = lapply(unique(validation.patient.info$Hospital.Research.ID), function(pt) {
-  info = subset(validation.patient.info, Hospital.Research.ID == pt)
-  info$Prediction = NA
-  info$OR = NA
-  info$PID = unlist(lapply(info$Path.ID, function(x) unlist(strsplit(x, 'B'))[1]))
-  
-  info = cbind(info, v.sampleVar[info$Samplename,])
-  
-  return(info)
-})
-names(vpd) = unique(validation.patient.info$Hospital.Research.ID)
-
 
 # for (s in rownames(pred)) {
 #   vpd[which(vpd$Samplename == s), 'Prediction'] = pred[s,]
 #   vpd[which(vpd$Samplename == s), 'OR'] = or[s,]
 # }
 
-for (pt in names(vpd)) {
-  vpd[[pt]]$Prediction[which(vpd[[pt]]$Samplename %in% rownames(pred))] = pred[ intersect(rownames(pred), vpd[[pt]]$Samplename), ]
-  vpd[[pt]]$OR[which(vpd[[pt]]$Samplename %in% rownames(or))] = or[ intersect(rownames(or), vpd[[pt]]$Samplename), ]
-}
-
-back.v = do.call(rbind.data.frame,lapply(vpd, transform.by.time, info=validation.patient.info))
-back.v = merge(back.v, validation.patient.info[,c('Samplename','p53.Status')])
+back.v = do.call(bind_rows, lapply(unique(vpd$Patient) %>% map( function(p) vpd %>% filter(Patient == p) ), transform.by.time, info=validation.patient.info)) %>% dplyr::mutate(Patient = factor(Patient))
 
 sq = c(0, seq(1,132,12),max(back$months.before.final))
 back.v$brks = cut(back.v$months.before.final, 
-                  breaks=sq, 
-                 labels=c(c('Endpoint',apply(cbind(sq[-1], sq[-1]+11), 1, function(x) paste(x, collapse='-')))[-c(length(sq)-1,length(sq))], '>120'),
-                  include.lowest = T, ordered_result = T)
+                  breaks=sq, labels=c(c('Endpoint',apply(cbind(sq[-1], sq[-1]+11), 1, function(x) paste(x,collapse='-')))[-c(length(sq)-1,length(sq))], '>120'), include.lowest = T, ordered_result = T)
+
 back.v$brks = with(back.v, factor(brks, rev(levels(brks))))
 
-back.v$Pathology = as.character(back.v$Pathology)
-
-back.v$Pathology = factor(back.v$Pathology, levels=c('BE','ID','LGD','HGD','IMC'), ordered = T)
+#back.v$Pathology = as.character(back.v$Pathology)
+#back.v$Pathology = factor(back.v$Pathology, levels=c('BE','ID','LGD','HGD','IMC'), ordered = T)
 
 ```
 
 
 ```{r echo=F, message=F, warning=F, fig.height=5, fig.width=8}
-back.v$quants = with(back.v, cut(Prediction, breaks=cuts))
-back.v = merge(back.v, pred.confidence[c('quant','perc','Risk')], by.x='quants', by.y='quant')
-back.v$Risk = factor(back.v$Risk, levels=c('High','Moderate','Low'))
-back.v$nl = factor(back.v$nl, ordered = T)
+back.v = back.v %>% dplyr::mutate(Risk = factor(Risk, levels=c('High','Moderate','Low')), nl = factor(nl, ordered = T))
 
 sq = c(0, seq(1, max(back.v$months.before.final), 12))
 back.v$brks = cut(back.v$months.before.final, 
@@ -1815,11 +1814,6 @@ m = melt(back.v %>% dplyr::group_by(Patient, Status) %>% dplyr::summarise( 'Low'
 ggplot(m, aes(Patient,  value*100, group=variable, fill=variable)) + geom_bar(stat='identity', position=position_stack()) +
   geom_text(aes(label=n.samples, y=101)) + scale_fill_manual(values=riskCols) +
   facet_grid(~Status, scales='free_x') + labs(y='Percent of samples', title='Validation patient set') + plot.theme
-
-back.v$Prediction
-
-table(subset(back.v, Status == 'P')$Prediction > 0.6)
-table(subset(back.v, Status == 'NP')$Prediction < 0.3)
 
 ```
 
@@ -2668,27 +2662,6 @@ survConcordance(surv ~ predict(rfx))
 ```
 
 
-
-```{r, eval=F}
-# TODO: Relative risk
-pred = predict(f, newx=dysplasia.df, s=performance.at.1se$`0.9`$lambda)
-?predict
-?predict.glm
-quantile(pred)
-p0 = predict(f, newx=dysplasia.df, s=performance.at.1se$`0.9`$lambda, type='response')
-p0
-p1 = 1/(1+exp(-pred+2.66))
-plot(p0,p1)
-hist(p1)
-hist(p0)
-hist(p1)
-plot(p0,p1)
-hist(p1, n=20)
-mean(p1>.5)
-mean(p0>.5)
-hist(pred)
-
-```
 
 
 

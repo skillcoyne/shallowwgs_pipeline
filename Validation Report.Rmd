@@ -10,20 +10,30 @@ output:
 
 ```{r setup, include=FALSE}
 
-library(BarrettsProgressionRisk)
-library(knitr)
-library(kableExtra)
 library(tidyverse)
+library(BarrettsProgressionRisk)
+library(kableExtra)
 library(gridExtra)
 library(reshape2)
 
-#source('lib/load_patient_metadata.R')
+source('lib/common_plots.R')
+
 
 knitr::opts_chunk$set(echo = F, warning = F, message=F)
 options(knitr.table.format = "html") 
 
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
+
+pred.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation/predictions'
+dir.create(pred.dir, showWarnings = F)
+
+model = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/all.pt.alpha.Rdata'
+load(model, verbose=T)
+
+fit = models$`0.9`
+lambda = performance.at.1se$`0.9`$lambda
+
 
 fncols <- function(data, cname, default=NA) {
   add <-cname[!cname%in%names(data)]
@@ -228,8 +238,8 @@ on %>% dplyr::group_by(Batch, `Sample Type`, `Age`) %>% dplyr::summarise(
   `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
 ) %>% kable() %>% kable_styling('striped')
 
-if (file.exists('batch8_preds.txt')) {
-  batch8_preds = read_tsv('batch8_preds.txt')
+if (file.exists(paste0(pred.dir, '/batch8_preds.txt'))) {
+  batch8_preds = read_tsv(paste0(pred.dir, '/batch8_preds.txt'))
 } else {
   segFiles = grep(paste(on$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', 'segObj',  full.names = T, recursive = T), value=T)
 
@@ -242,12 +252,12 @@ if (file.exists('batch8_preds.txt')) {
       on %>% filter(sample %in% segmented$sample.info$Sample) %>%
         dplyr::rename('Endoscopy' = `Sample Date`, Sample = sample ) )
 
-    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, F)
+    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model = fit, s = lambda, verbose = F)
     BarrettsProgressionRisk::predictions(prr,'sample')
   }))
   batch8_preds = batch8_preds %>% filter(!is.na(`Patient ID`))
   
-  write_tsv(batch8_preds, 'batch8_preds.txt')
+  write_tsv(batch8_preds, paste0(pred.dir, '/batch8_preds.txt'))
 }
 
 batch8_preds %>% dplyr::select(`Patient ID`, Sample, everything(), -matches('Hospital|SLX|Index') ) %>% kable() %>% kable_styling('striped')
@@ -278,6 +288,8 @@ All samples passed QC, though by manual QC I might have failed 2 they weren't as
 
 ### Predictions
 
+The predictions from these samples are not particularly good.
+
 ```{r}
 
 sheets = readxl::excel_sheets(val.file)[9:12]
@@ -286,8 +298,8 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
     dplyr::filter(Status == 'P') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% dplyr::mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
 
-if (file.exists('oldp_preds.txt')) {
-  oldp.preds = read_tsv('oldp_preds.txt')
+if (file.exists(paste0(pred.dir, '/oldp_preds.txt'))) {
+  oldp.preds = read_tsv(paste0(pred.dir, '/oldp_preds.txt'))
 } else {
   segFiles = grep(paste(oldp$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', 'segObj',  full.names = T, recursive = T), value=T)
 
@@ -297,10 +309,10 @@ if (file.exists('oldp_preds.txt')) {
     load(f)  
     segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
     
-    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,F)
+    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model = fit, s = lambda, verbose = F)
     predictions(prr)
   }))
-  write_tsv(oldp.preds, 'oldp_preds.txt')
+  write_tsv(oldp.preds, paste0(pred.dir, '/oldp_preds.txt'))
 }
 
 oldp.preds = left_join(oldp.preds, val %>% dplyr::select(sample, varMAD_median, n.segs), by=c('Sample'='sample'))
@@ -308,17 +320,9 @@ oldp.preds = left_join(oldp.preds, val %>% dplyr::select(sample, varMAD_median, 
 
 oldp.preds = oldp.preds %>% filter(Sample %in% (oldp %>% filter(!grepl('OCCAMS',`Hospital Research ID`)) %>% dplyr::select(sample) %>% pull))
 
-oldp.preds %>% dplyr::summarise(
-  'TPR'=length(which(Risk == 'High'))/n(),
-  'FNR'=length(which(Risk == 'Low'))/n()) %>% kable() %>% kable_styling(full_width = F)
+oldp.preds %>% group_by(`Risk`) %>% dplyr::summarise( 'n samples'=n() ) %>% spread(Risk, `n samples`) %>%
+  kable(caption='Progressor sample predicted risks') %>% kable_styling(full_width = F)
 
-oldp.preds %>% group_by(`Risk`) %>% dplyr::summarise( 'n samples'=n() ) %>% 
-  kable(caption='Count sample predicted risks, P') %>% kable_styling(full_width = F)
-
-fnr.patients = oldp.preds %>% 
-  group_by(`Hospital Research ID`) %>% dplyr::summarise(
-  TPR = length(which(Risk == 'High'))/n()
-) %>% dplyr::summarise( 'Misclassified patients' = length(which(TPR < 0.5))/n() ) %>% pull
 
 oldp.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
   `n samples` = n(), 
@@ -326,11 +330,33 @@ oldp.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
   'Mod. Risk' = length(which(Risk == 'Moderate')),
   'Low Risk' =   length(which(Risk == 'Low')),
   'Pathology Notes' = paste(`Path Notes`, collapse='; ')
-) %>% kable(caption = 'Classified predictions per patient (all P)') %>% kable_styling('striped')
+) %>% mutate(
+  `High Risk` = cell_spec(`High Risk`, "html", color = ifelse(`High Risk` > 0, "red", "grey39")),
+  `Mod. Risk` = cell_spec(`Mod. Risk`, "html", color = ifelse(`Mod. Risk` > 0, "orange", "grey39")),
+  `Low Risk` = cell_spec(`Low Risk`, "html", color = ifelse(`Low Risk` > 0, "blue", "grey39")),
+) %>% kable(format='html',escape = F,caption = 'Classified predictions per patient (all P)') %>% kable_styling('striped', full_width = F)
+
+
+oldp.preds = oldp.preds %>% rowwise %>% mutate(PID = unlist(strsplit(`Block ID`, '(-|\\s)\\w+$', perl = T))[1]) 
+
+ggplot(oldp.preds, aes(`Hospital Research ID`, Probability, color=Probability)) + geom_point() +
+  scale_color_distiller(palette = 'RdYlBu', name='P(P)') + plot.theme + theme(axis.text.x = element_text(angle=45,hjust=1))
+  
+
+oldp.per.endo = oldp.preds %>% group_by(`Hospital Research ID`, PID) %>% 
+  dplyr::mutate('n.samples'=length(PID),'Samples'=paste(Sample,collapse=',')) %>% 
+  dplyr::summarise_at(vars(matches('Prob|Relative|Endo')), list(max)) %>% dplyr::select(-matches('^Sample$')) %>% 
+  arrange(`Hospital Research ID`, Endoscopy, PID) 
+#back.per.endo = back.per.endo %>% mutate(quants = cut(Prediction, breaks=cuts, include.lowest = T)) %>% left_join(pred.confidence %>% dplyr::select(quants, Risk), by='quants') %>% dplyr::select(-matches('quant')) %>% dplyr::mutate(Risk = as.character(Risk))
+
+fnr.patients = oldp.preds %>% 
+  group_by(`Hospital Research ID`) %>% dplyr::summarise(
+  FNR = length(which(Risk == 'Low'))/n() ) %>% 
+  dplyr::summarise( 'Misclassified patients' = length(which(FNR > 0.5))/n() ) %>% pull %>% round(2)
 
 ```
 
-For the old progressor samples to-date, the model failed to classify any samples as high risk for *`r fnr.patients*100`%* of patients.  None of these were the samples I might have said were poor quality via manual QC so taken at face value these patients/samples were incorrectly predicted.
+For the old progressor samples to-date, the model failed to classify any samples as high or moderate risk for *`r fnr.patients*100`%* of patients.  None of these were the samples I might have said were poor quality via manual QC so taken at face value these patients/samples were incorrectly predicted.
 
 
 ## New non-progressors
@@ -357,10 +383,10 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
     dplyr::filter(Status == 'NP' & !is.na(`SLX-ID`)) %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
 
-if (file.exists('val_np.txt')) {
-  new.np.preds = read_tsv('val_np.txt')
+if (file.exists(paste0(pred.dir, '/val_np.txt'))) {
+  new.np.preds = read_tsv(paste0(pred.dir, '/val_np.txt'))
 } else {
-  segFiles = grep(paste(new.np$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', '(2|3)_segObj',  full.names = T, recursive = T), value=T)
+  segFiles = grep(paste(sub('\\(.*\\)','', new.np$`Patient ID`),collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', '(2|3)_segObj',  full.names = T, recursive = T), value=T)
   
   new.np.preds = do.call(bind_rows, lapply(segFiles, function(f) {
     print(f)
@@ -368,43 +394,56 @@ if (file.exists('val_np.txt')) {
     if (nrow(BarrettsProgressionRisk::sampleResiduals(segmented) %>% dplyr::filter(Pass)) <= 0) return()
 
     segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
-    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,F)
-    predictions(prr)
+    prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model = fit, s = lambda, verbose = F)
+    p = predictions(prr)
+    print(p)
+    return(p)
   }))
-  write_tsv(new.np.preds, 'val_np.txt')
+  write_tsv(new.np.preds, paste0(pred.dir, '/val_np.txt'))
 }
 
 new.np.preds = left_join(new.np.preds, val %>% dplyr::select(sample, varMAD_median, n.segs), by=c('Sample'='sample'))
 
 #cor.test(new.np.preds$n.segs, new.np.preds$varMAD_median)
+#with(val.new.np.preds, cor.test(varMAD_median, Probability))
 
-new.np.preds %>% dplyr::summarise(
-  'FPR'=length(which(Risk == 'High'))/n(),
-  'TPR'=length(which(Risk == 'Low'))/n()) %>% kable() %>% kable_styling(full_width = F)
-
-new.np.preds %>% group_by(`Risk`) %>% dplyr::summarise( 'n samples'=n() ) %>% 
+new.np.preds %>% group_by(`Risk`) %>% dplyr::summarise( 'n samples'=n() ) %>% spread(Risk, `n samples`) %>% 
   kable(caption='Count sample predicted risks, NP') %>% kable_styling(full_width = F)
-
-fpr.patients = new.np.preds %>%  group_by(`Hospital Research ID`) %>% dplyr::summarise(
-  TPR = length(which(Risk == 'Low'))/n()
-) %>% dplyr::summarise( 'Misclassified patients' = length(which(TPR < 0.5))/n() ) %>% pull
-
 
 val.new.np.preds = left_join(val %>% filter(sample %in% new.np.preds$Sample) %>% dplyr::select(`Hospital Research ID`, sample, varMAD_median, n.segs, Status),
           new.np.preds %>% dplyr::select(Sample, Probability, matches('Risk')), by=c('sample'='Sample'))
 
 
-with(val.new.np.preds, cor.test(varMAD_median, Probability))
+# val.new.np.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
+#   `n samples` = n(), 
+#   'High Risk' =  length(which(Risk == 'High')),
+#   'Mod. Risk' = length(which(Risk == 'Moderate')),
+#   'Low Risk' =   length(which(Risk == 'Low')),
+#   'QC var' = signif( mean(varMAD_median), 2)
+# ) %>% mutate(
+#   `High Risk` = cell_spec(`High Risk`, "html", color = ifelse(`High Risk` > 0, "red", "grey39")),
+#   `Mod. Risk` = cell_spec(`Mod. Risk`, "html", color = ifelse(`Mod. Risk` > 0, "orange", "grey39")),
+#   `Low Risk` = cell_spec(`Low Risk`, "html", color = ifelse(`Low Risk` > 0, "blue", "grey39")),
+# ) %>%
+#   kable(format='html',escape = F, caption = 'Classified predictions per patient (all NP)') %>% kable_styling('striped', full_width = F)
 
 
+ggplot(new.np.preds, aes(Probability)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1), show.legend = F) + scale_fill_distiller(palette = 'RdYlBu', name='P(P)') +
+    plot.theme + labs(title='Sample predictions for validation NP samples', y='n Samples', x='Probability') + theme(legend.position = 'none')
 
-val.new.np.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
-  `n samples` = n(), 
-  'High Risk' = length(which(Risk == 'High')),
-  'Mod. Risk' = length(which(Risk == 'Moderate')),
-  'Low Risk' =   length(which(Risk == 'Low')),
-  'QC var' = signif( mean(varMAD_median), 2)
-) %>% kable(caption = 'Classified predictions per patient (all NP)') %>% kable_styling('striped')
+new.np.preds = new.np.preds %>% rowwise %>% mutate(PID = unlist(strsplit(`Block ID`, '(-|\\s)\\w+$', perl = T))[1]) 
+
+ggplot(new.np.preds, aes(`Hospital Research ID`, Probability, color=Probability)) + geom_point() +
+  scale_color_distiller(palette = 'RdYlBu', name='P(P)') + plot.theme + theme(axis.text.x = element_text(angle=45,hjust=1))
+  
+
+np.per.endo = new.np.preds %>% group_by(`Hospital Research ID`, PID) %>% 
+  dplyr::mutate('n.samples'=length(PID),'Samples'=paste(Sample,collapse=',')) %>% 
+  dplyr::summarise_at(vars(matches('Prob|Relative|Endo')), list(max)) %>% dplyr::select(-matches('^Sample$')) %>% 
+  arrange(`Hospital Research ID`, Endoscopy, PID) 
+#back.per.endo = back.per.endo %>% mutate(quants = cut(Prediction, breaks=cuts, include.lowest = T)) %>% left_join(pred.confidence %>% dplyr::select(quants, Risk), by='quants') %>% dplyr::select(-matches('quant')) %>% dplyr::mutate(Risk = as.character(Risk))
+
+#np.per.endo %>% filter(`Relative Risk` > 0)
 
 ```
 

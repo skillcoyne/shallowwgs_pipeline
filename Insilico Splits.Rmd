@@ -32,7 +32,7 @@ all.patient.info = read.patient.info(patient.file, demo.file, set='all')$info
 
 sum.pt = summarise.patient.info(all.patient.info)
 
-cache.dir = paste(data, 'Analysis/5e6_arms_all', sep='/')
+cache.dir = paste(data, 'Analysis/5e6_arms', sep='/')
 split.dir = paste(data, 'Analysis/5e6_arms_splits', sep='/')
 
 performance = data.frame(); rocs = list()
@@ -91,9 +91,9 @@ rm(plots,coefs,performance.at.1se,models,cvs,dysplasia.df,labels)
 load(list.files(cache.dir,full.names = T, pattern='loo.Rdata'))
 rm(plots, performance.at.1se,coefs,nzcoefs,fits)
 
-predictions = do.call(rbind, pg.samp)
+predictions = pg.samp
 
-roc = pROC::roc(Status ~ Prediction, data=predictions, auc=T, ci=T, of='thresholds')
+roc = pROC::roc(Status ~ Prediction, data=predictions, auc=T, ci=T, of='thresholds', transpose = T)
 roc$model = 'discovery'
 roc$is = 'discovery'
 
@@ -128,19 +128,27 @@ Median performance `r median(performance$mean)`, SD `r sd(performance$mean)`
 rocs[['discovery']] = roc
 
 mrplot <- function(rocList) {
-  aucs = do.call(rbind, lapply(rocList,function(r) 
-    cbind.data.frame('AUC'=r$auc*100,'model'=r$model,'Specificity'=pROC::coords(r,'best')[['specificity']], 'Sensitivity'=pROC::coords(r,'best')[['sensitivity']])))
+  aucs = do.call(bind_rows, lapply(names(rocList),function(nm) { 
+    r = rocList[[nm]]
+    tibble( AUC = r$auc*100, model = r$model, 
+      'Specificity'= pROC::coords(r,'best', ret='specificity',transpose=T)[1],
+      'Sensitivity'= pROC::coords(r,'best', ret='sensitivity',transpose=T)[1] )
+  }))
+
   aucs$y = aucs$Sensitivity
   aucs$x = aucs$Specificity
 
-  df = do.call(rbind, lapply(rocList, function(r) 
-    cbind.data.frame('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'model'=r$model, 'is'=r$is) 
-  ))
-
-  ggplot(df, aes(Specificity, Sensitivity,color=is)) + geom_line(size=1) + 
+  
+  df = do.call(bind_rows, lapply(names(rocList),function(nm) { 
+  #  print(nm)
+    r = rocList[[nm]]
+    tibble('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'model'=r$model, 'is'=as.character(r$is) )
+  }))
+  
+  ggplot(df, aes(Specificity, Sensitivity,color=is)) + geom_line(color='lightblue') + 
     geom_line(data=subset(df, model == 'discovery'), color='red', size=1) +
     scale_x_reverse() +
-    scale_color_brewer(palette='Blues') +
+    #scale_color_brewer(palette='Blues') +
     labs(title='', x='Specificity (FPR)', y='Sensitivity (TPR)')  + plot.theme +
     theme(legend.position = 'none')
 }
