@@ -1,4 +1,11 @@
 
+myPal = rev(RColorBrewer::brewer.pal(11, 'RdYlBu'))
+
+plot.theme = theme(text=element_text(size=12), panel.background=element_blank(), strip.background =element_rect(fill="white"),  
+                   strip.text = element_text(size=12), 
+                   axis.line=element_line(color='black'), panel.grid.major=element_line(color='grey90'),
+                   panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing = unit(0.1, 'lines')  ) 
+
 
 get.legend<-function(a.gplot){
   tmp <- ggplot_gtable(ggplot_build(a.gplot))
@@ -6,11 +13,6 @@ get.legend<-function(a.gplot){
   legend <- tmp$grobs[[leg]]
   return(legend)
 }
-
-plot.theme = theme(text=element_text(size=12), panel.background=element_blank(), strip.background =element_rect(fill="white"),  
-                   strip.text = element_text(size=12), 
-                   axis.line=element_line(color='black'), panel.grid.major=element_line(color='grey90'),
-                   panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing = unit(0.1, 'lines')  ) 
 
 cn.mtn.plot<-function(df, label, type='bar') {
   df = arrange(df, chr, start)
@@ -117,7 +119,7 @@ roc.plot <- function(roc,title="") {
 
 multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   aucs = do.call(rbind, lapply(rocList,function(r) 
-    cbind.data.frame('AUC'=r$auc,'model'=r$model,'Specificity'=pROC::coords(r,'best')[['specificity']], 'Sensitivity'=pROC::coords(r,'best')[['sensitivity']])))
+    cbind.data.frame('AUC'=r$auc,'model'=r$model,'Specificity'=pROC::coords(r,'best',transpose=T)[['specificity']], 'Sensitivity'=pROC::coords(r,'best',transpose=T)[['sensitivity']])))
   aucs$y = aucs$Sensitivity
   aucs$x = aucs$Specificity
 

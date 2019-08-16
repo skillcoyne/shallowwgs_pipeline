@@ -2,7 +2,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 4)
-  stop("Missing required params: <data dir> <model dir> <outdir> <info file path> <same name>")
+  stop("Missing required params: <data dir> <model dir> <outdir> <info file path> <same name> <alpha=0.9 DEF")
 
 library(tidyverse)
 library(gridExtra)
@@ -15,13 +15,23 @@ outdir = args[3]
 info = args[4]
 sample = args[5]
 
+
+select.alpha = '0.9'
+if (length(args) == 6) {
+  select.alpha = args[6]
+  
+  if (!select.alpha %in% c(0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0))
+    stop("Alpha values available: 0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0")
+}
+outdir = paste0(outdir, '/', select.alpha)
+
 if (!file.exists(info)) stop(paste0("File does not exist or is not readable: ", info))
 all.ds.info = readxl::read_xlsx(info)
 
 x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
-fit = models$`0.9`
-s = performance.at.1se$`0.9`$lambda  
+fit = models[[seleect.alpha]]
+s = performance.at.1se[[select.alpha]]lambda  
 
 #dir = '~/Data/Ellie/QDNAseq/all_downsampled/20180206_KillcoyneS_RF_BarrettsCN/qdnaseq'
 #outdir = '~/Data/Ellie/Analysis/downsampled'

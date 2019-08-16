@@ -1,7 +1,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 1)
-  stop("Missing required params: <data dir> <sample info file> <model dir> <outdir> ")
+  stop("Missing required params: <data dir> <sample info file> <model dir> <outdir> <alpha=0.9 DEF>")
 
 library(BarrettsProgressionRisk)
 source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
@@ -10,6 +10,15 @@ datadir = args[1]
 info = args[2]
 modeldir = args[3]
 outdir = args[4]
+
+select.alpha = '0.9'
+if (length(args) == 5) {
+  select.alpha = args[5]
+ 
+  if (!select.alpha %in% c(0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0))
+    stop("Alpha values available: 0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0")
+}
+
 
 #datadir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/PR1_WSH_030/'
 #info = '~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx'
@@ -26,8 +35,8 @@ info = BarrettsProgressionRisk::loadSampleInformation(
 
 x = list.files(modeldir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
-fit = models$`0.9`
-s = performance.at.1se$`0.9`$lambda  
+fit = models[[select.alpha]]
+s = performance.at.1se[[select.alpha]]lambda  
 
 loadRData<-function(filename) {
   load(filename, verbose=F)
@@ -52,7 +61,7 @@ if (length(segFile) <= 0) {
 
 prr = predictRiskFromSegments(segs, model = fit, s = s)
 
-pred.dir = paste0(outdir, '/predictions')
+pred.dir = paste0(outdir, '/', select.alpha, '/predictions')
 dir.create(pred.dir, recursive = T)
 save(prr, paste0(pred.dir, '/', pt, '.Rdata'))
 
@@ -61,7 +70,7 @@ predictions(prr, 'sample')
 #prr2 = predictRiskFromSegments(segs, verbose = T)
 #predictions(prr2, 'sample')
 
-write_tsv(predictions(prr, 'sample'), paste0(outdir, '/', pt, '_preds.tsv'))
+write_tsv(predictions(prr, 'sample'), paste0(outdir, '/', select.alpha,'/', pt, '_preds.tsv'))
 
 
 print('Finished')
