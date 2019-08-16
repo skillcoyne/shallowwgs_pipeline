@@ -34,16 +34,15 @@ fit = models[[select.alpha]]
 s = performance.at.1se[[select.alpha]]$lambda  
 
 
-sheets = readxl::excel_sheets(info.file)[9:13]
+sheets = readxl::excel_sheets(info.file)[8:13]
 info = do.call(bind_rows, lapply(sheets, function(s) {
   print(s)
   readxl::read_xlsx(info.file, s, trim_ws = T) %>% 
     dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% dplyr::mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
 
-info = info %>% mutate(`Hospital Research ID` = gsub('/', '_', `Hospital Research ID`))
 
-segFiles = grep(paste(unique(info$`Hospital Research ID`),collapse='|'), list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T), value=T)
+segFiles = list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T)
 
 if (length(segFiles) <= 0) stop(paste0('No segmentation file found in ', datadir))
 
