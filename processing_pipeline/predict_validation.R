@@ -19,9 +19,14 @@ if (length(args) == 5) {
     stop("Alpha values available: 0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0")
 }
 
-outdir = paste0(outdir, '/', select.alpha)
+pt = basename(datadir)
+print(paste0('Patient ', pt))
+
+
+outdir = paste0(outdir, '/', select.alpha, '/', pt)
 dir.create(outdir, showWarnings = F, recursive = T)
 
+print(paste0("Output path:", outdir))
 
 x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
@@ -44,11 +49,10 @@ preds = do.call(bind_rows, lapply(segFiles, function(f) {
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
   prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model = fit, s = lambda, verbose = F)
+  save(prr, file = paste0(outdir, '/predictions.Rdata'))
   predictions(prr)
 }))
 
-outdir = paste0(outdir, '/', select.alpha, '/val_predictions.tsv')
-
-write_tsv(preds, path=file)
+write_tsv(preds, path=paste0(outdir, '/', pt, '_predictions.tsv'))
 
 print('Finished')
