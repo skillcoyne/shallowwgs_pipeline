@@ -31,8 +31,8 @@ all.ds.info = readxl::read_xlsx(info)
 
 x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
-fit = models[[seleect.alpha]]
-s = performance.at.1se[[select.alpha]]lambda  
+fit = models[[select.alpha]]
+s = performance.at.1se[[select.alpha]]$lambda  
 
 #dir = '~/Data/Ellie/QDNAseq/all_downsampled/20180206_KillcoyneS_RF_BarrettsCN/qdnaseq'
 #outdir = '~/Data/Ellie/Analysis/downsampled'

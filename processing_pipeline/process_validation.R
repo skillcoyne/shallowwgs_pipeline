@@ -30,7 +30,7 @@ if (!is.null(patients)) {
 }
 
 
-sheets = readxl::excel_sheets(val.file)[1:12]
+sheets = readxl::excel_sheets(val.file)[1:13]
 
 
 all.val = do.call(bind_rows, lapply(sheets, function(s) {

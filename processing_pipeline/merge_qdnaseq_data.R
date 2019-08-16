@@ -18,7 +18,7 @@ val.file = args[2]
 #  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 
 
-sheets = readxl::excel_sheets(val.file)[1:12]
+sheets = readxl::excel_sheets(val.file)[1:13]
 
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
   print(s)
@@ -35,9 +35,13 @@ all.val = all.val %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>%
 
 all.val = all.val %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''))
 
+print(unique(all.val$`SLX-ID`))
+
 data.dirs = grep( paste(sub('SLX-', '', unique(all.val$`SLX-ID`)), collapse='|'), list.dirs(data, full.names=T, recursive=F), value = T)
 if (length(data.dirs) <= 0)
   stop(paste("No directories in", data))
+
+print(data.dirs)
 
 merged.raw = NULL; merged.fit = NULL
 for (dir in data.dirs) {

@@ -42,7 +42,7 @@ all.patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>
 sum.patient.data = summarise.patient.info(all.patient.info)
 
 
-modeldir = paste0(outdir, '/5e6_arms_all')
+modeldir = paste0(outdir, '/5e6_arms')
 if (!dir.exists(modeldir))
   stop(paste0("Missing trained model in ", modeldir))
 load(paste0(modeldir, '/all.pt.alpha.Rdata'),verbose=T)

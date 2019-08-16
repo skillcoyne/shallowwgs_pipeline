@@ -22,7 +22,7 @@ if (length(args) == 5) {
 outdir = paste0(outdir, '/', select.alpha)
 dir.create(outdir, showWarnings = F, recursive = T)
 
-
+print(paste0("Output path:", outdir))
 
 #datadir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/PR1_WSH_030/'
 #info = '~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx'
@@ -40,7 +40,7 @@ info = BarrettsProgressionRisk::loadSampleInformation(
 x = list.files(modeldir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
 fit = models[[select.alpha]]
-s = performance.at.1se[[select.alpha]]lambda  
+s = performance.at.1se[[select.alpha]]$lambda  
 
 loadRData<-function(filename) {
   load(filename, verbose=F)
@@ -66,8 +66,9 @@ if (length(segFile) <= 0) {
 prr = predictRiskFromSegments(segs, model = fit, s = s)
 
 pred.dir = paste0(outdir, '/predictions')
-dir.create(pred.dir, recursive = T)
-save(prr, paste0(pred.dir, '/', pt, '.Rdata'))
+print(pred.dir)
+if (!dir.exists(pred.dir)) dir.create(pred.dir, showWarnings=F, recursive = T)
+save(prr, file=paste0(pred.dir, '/', pt, '.Rdata'))
 
 predictions(prr, 'sample')
 
