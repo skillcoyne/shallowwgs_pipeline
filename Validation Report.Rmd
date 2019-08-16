@@ -31,10 +31,6 @@ dir.create(pred.dir, showWarnings = F)
 model = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/all.pt.alpha.Rdata'
 load(model, verbose=T)
 
-fit = models$`0.9`
-lambda = performance.at.1se$`0.9`$lambda
-
-
 fncols <- function(data, cname, default=NA) {
   add <-cname[!cname%in%names(data)]
 
@@ -220,6 +216,14 @@ ci %>% dplyr::group_by(Batch, `Original cohort`) %>% dplyr::summarise(
 
 At this point Sujath and Adrienne took over.
 
+```{r echo=F}
+
+alpha = '0.9'
+fit = models[[alpha]]
+lambda = performance.at.1se[[alpha]]$lambda
+
+```
+
 ## FFPE vs Frozen (old vs new as well)
 
 Here we thought that we could see if the issue was older vs newer samples and we could compare that to the same patient with a frozen. These are all tumour samples (OAC) from OCCAMS. We also cut some of these in house to see if there might be an effect.
@@ -238,8 +242,10 @@ on %>% dplyr::group_by(Batch, `Sample Type`, `Age`) %>% dplyr::summarise(
   `% Passed QC` = round((length(which(varMAD_median<=qc.cutoff))/n())*100,1)
 ) %>% kable() %>% kable_styling('striped')
 
-if (file.exists(paste0(pred.dir, '/batch8_preds.txt'))) {
-  batch8_preds = read_tsv(paste0(pred.dir, '/batch8_preds.txt'))
+file = paste0(pred.dir, '/batch8_preds_alpha', alpha,'.txt')
+
+if (file.exists(file)) {
+  batch8_preds = read_tsv(file)
 } else {
   segFiles = grep(paste(on$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', 'segObj',  full.names = T, recursive = T), value=T)
 
@@ -257,7 +263,7 @@ if (file.exists(paste0(pred.dir, '/batch8_preds.txt'))) {
   }))
   batch8_preds = batch8_preds %>% filter(!is.na(`Patient ID`))
   
-  write_tsv(batch8_preds, paste0(pred.dir, '/batch8_preds.txt'))
+  write_tsv(batch8_preds, path=file)
 }
 
 batch8_preds %>% dplyr::select(`Patient ID`, Sample, everything(), -matches('Hospital|SLX|Index') ) %>% kable() %>% kable_styling('striped')
@@ -292,14 +298,15 @@ The predictions from these samples are not particularly good.
 
 ```{r}
 
-sheets = readxl::excel_sheets(val.file)[9:12]
+sheets = readxl::excel_sheets(val.file)[9:13]
 info = do.call(bind_rows, lapply(sheets, function(s) {
   readxl::read_xlsx(val.file, s, trim_ws = T) %>% 
     dplyr::filter(Status == 'P') %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% dplyr::mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
 
-if (file.exists(paste0(pred.dir, '/oldp_preds.txt'))) {
-  oldp.preds = read_tsv(paste0(pred.dir, '/oldp_preds.txt'))
+file = paste0(pred.dir, '/oldp_preds_alpha', alpha, '.txt')
+if (file.exists(file)) {
+  oldp.preds = read_tsv(file)
 } else {
   segFiles = grep(paste(oldp$`Patient ID`,collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', 'segObj',  full.names = T, recursive = T), value=T)
 
@@ -312,7 +319,7 @@ if (file.exists(paste0(pred.dir, '/oldp_preds.txt'))) {
     prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model = fit, s = lambda, verbose = F)
     predictions(prr)
   }))
-  write_tsv(oldp.preds, paste0(pred.dir, '/oldp_preds.txt'))
+  write_tsv(oldp.preds, path=file)
 }
 
 oldp.preds = left_join(oldp.preds, val %>% dplyr::select(sample, varMAD_median, n.segs), by=c('Sample'='sample'))
@@ -383,13 +390,14 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
     dplyr::filter(Status == 'NP' & !is.na(`SLX-ID`)) %>% dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
 
-if (file.exists(paste0(pred.dir, '/val_np.txt'))) {
-  new.np.preds = read_tsv(paste0(pred.dir, '/val_np.txt'))
+file = paste0(pred.dir, '/val_np_alpha', alpha, '.txt')
+if (file.exists(file)) {
+  new.np.preds = read_tsv(file)
 } else {
   segFiles = grep(paste(sub('\\(.*\\)','', new.np$`Patient ID`),collapse='|'), list.files('~/Data/BarrettsProgressionRisk/Analysis/validation', '(2|3)_segObj',  full.names = T, recursive = T), value=T)
   
   new.np.preds = do.call(bind_rows, lapply(segFiles, function(f) {
-    print(f)
+  #  print(f)
     load(f)  
     if (nrow(BarrettsProgressionRisk::sampleResiduals(segmented) %>% dplyr::filter(Pass)) <= 0) return()
 
@@ -399,7 +407,7 @@ if (file.exists(paste0(pred.dir, '/val_np.txt'))) {
     print(p)
     return(p)
   }))
-  write_tsv(new.np.preds, paste0(pred.dir, '/val_np.txt'))
+  write_tsv(new.np.preds, path=file)
 }
 
 new.np.preds = left_join(new.np.preds, val %>% dplyr::select(sample, varMAD_median, n.segs), by=c('Sample'='sample'))

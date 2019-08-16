@@ -1,0 +1,74 @@
+---
+title: "Downsampled"
+author: "Sarah Killcoyne"
+date: "14/08/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+
+library(tidyverse)
+library(BarrettsProgressionRisk)
+library(kableExtra)
+source('lib/common_plots.R')
+
+dir = '~/Data/BarrettsProgressionRisk/Analysis/downsampled/predictions'
+info = '~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/downsampled_ids.xlsx'
+
+info = readxl::read_xlsx(info) 
+
+files = list.files(dir, 'Rdata', recursive = T, full.names = T)
+
+pfile = paste0(dir, '/ds_preds.txt')
+if (file.exists(pfile)) {
+  ds.preds = read_tsv(pfile)
+} else {
+  ds.preds = do.call(bind_rows, lapply(files, function(f) {
+    load(f, verbose=T)
+    bind_cols(predictions(prr), adjustRisk(prr, 'mean', 'sample')$adj.predictions %>% dplyr::select(Probability, `Relative Risk`) %>% dplyr::rename_all(funs(paste0), ' Adjusted ') )
+  }))
+  write_tsv(ds.preds, pfile)
+}
+
+ds.preds = ds.preds %>% dplyr::select(-Status) %>% left_join(info %>% dplyr::select(`Illumina ID`, Status), by=c('Sample' = 'Illumina ID')) %>% dplyr::mutate(Type = factor(Type, levels=c('Normal','NDBE', 'LGD', 'Tumor Adjacent BE'))) %>% arrange(Probability)
+
+```
+
+## Downsampled Datasets
+
+These samples are from Annalise's cohort and the OCCAMS tumor-adjacent Barrett's cohort.  Additionally, I downsampled 40 normal blood WGS as a non-progressor test set. A total of `r nrow(info)` samples were downsampled from 30-50X WGS to an average 0.4X then run through the QDNAseq pipeline.
+
+```{r}
+info %>% dplyr::group_by(Status, Type) %>% summarise(n = length(Type)) %>% spread(Type,n) %>% kable() %>% kable_styling(full_width = F)
+```
+
+They were then predicted using the model trained on the initial training cohort.
+
+```{r echo=F, eval=T}
+myPal = rev(RColorBrewer::brewer.pal(11, 'RdYlBu'))
+
+ggplot(ds.preds, aes(`Relative Risk`)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1), show.legend = F) + scale_fill_distiller(palette = 'RdYlBu', name='P(P)') +
+    plot.theme + labs(title='Sample predictions', y='n Samples') + theme(legend.position = 'none')
+
+# roc = pROC::roc(Status ~ Probability, data=ds.preds, ci=T, of='thresholds', transpose=T)
+# pROC::coords(roc, 'best', ret='threshold', transpose=T)
+# roc.plot(roc)
+```
+
+```{r fig.height=12}
+m = reshape2::melt(ds.preds, measure.vars = c('Relative Risk','Relative Risk Adjusted'), id.vars = c('Type', 'Status', 'Risk'))
+
+ggplot(m, aes(variable, value)) + 
+  facet_wrap(~Type, ncol=2, scales = 'free_x') + 
+  geom_jitter(width=0.2, aes(shape=Status, color=Risk), size=2) + 
+  geom_boxplot(aes(group=variable, fill=Type), outlier.colour = NA, show.legend = F) + 
+  scale_color_manual(values =  BarrettsProgressionRisk::riskColors()) +
+  #scale_color_gradientn(colors = myPal,  name='') +
+  scale_fill_manual(values=rev(RColorBrewer::brewer.pal(5,'RdYlBu')[c(1,2,4,5)])) +
+  labs(x='', y='Relative Risk', title='Predictions on downsampled patients') + plot.theme +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+  
+ds.preds %>% group_by(Status, Risk) %>% summarise(n=length(Risk)) %>% spread(Risk, n) %>% kableExtra::kable(caption = 'Sample by risk and known status') %>% kableExtra::kable_styling(full_width = F)
+
+```
