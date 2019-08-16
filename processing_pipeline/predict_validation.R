@@ -41,8 +41,11 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
     dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% dplyr::mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
 
+info = info %>% mutate(`Hospital Research ID` = gsub('/', '_', `Hospital Research ID`))
 
 segFiles = grep(paste(unique(info$`Hospital Research ID`),collapse='|'), list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T), value=T)
+
+if (length(segFiles) <= 0) stop(paste0('No segmentation file found in ', datadir))
 
 preds = do.call(bind_rows, lapply(segFiles, function(f) {
   load(f)  
