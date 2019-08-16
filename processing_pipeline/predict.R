@@ -19,6 +19,10 @@ if (length(args) == 5) {
     stop("Alpha values available: 0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0")
 }
 
+outdir = paste0(outdir, '/', select.alpha)
+dir.create(outdir, showWarnings = F, recursive = T)
+
+
 
 #datadir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/PR1_WSH_030/'
 #info = '~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx'
@@ -61,7 +65,7 @@ if (length(segFile) <= 0) {
 
 prr = predictRiskFromSegments(segs, model = fit, s = s)
 
-pred.dir = paste0(outdir, '/', select.alpha, '/predictions')
+pred.dir = paste0(outdir, '/predictions')
 dir.create(pred.dir, recursive = T)
 save(prr, paste0(pred.dir, '/', pt, '.Rdata'))
 
@@ -70,7 +74,7 @@ predictions(prr, 'sample')
 #prr2 = predictRiskFromSegments(segs, verbose = T)
 #predictions(prr2, 'sample')
 
-write_tsv(predictions(prr, 'sample'), paste0(outdir, '/', select.alpha,'/', pt, '_preds.tsv'))
+write_tsv(predictions(prr, 'sample'), paste0(outdir, '/', pt, '_preds.tsv'))
 
 
 print('Finished')

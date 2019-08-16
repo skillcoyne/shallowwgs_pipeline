@@ -24,6 +24,7 @@ if (length(args) == 6) {
     stop("Alpha values available: 0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0")
 }
 outdir = paste0(outdir, '/', select.alpha)
+dir.create(outdir, showWarnings = F, recursive = T)
 
 if (!file.exists(info)) stop(paste0("File does not exist or is not readable: ", info))
 all.ds.info = readxl::read_xlsx(info)
