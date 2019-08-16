@@ -40,7 +40,7 @@ info = BarrettsProgressionRisk::loadSampleInformation(
 x = list.files(modeldir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
 fit = models[[select.alpha]]
-s = performance.at.1se[[select.alpha]]lambda  
+s = performance.at.1se[[select.alpha]]$lambda  
 
 loadRData<-function(filename) {
   load(filename, verbose=F)
