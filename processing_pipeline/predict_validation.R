@@ -29,7 +29,7 @@ dir.create(outdir, showWarnings = F, recursive = T)
 print(paste0("Output path:", outdir))
 
 x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
-load(x, verbose=T)
+load(x, verbose=F)
 rm(dysplasia.df, labels)
 
 x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
@@ -40,7 +40,6 @@ s = performance.at.1se[[select.alpha]]$lambda
 
 sheets = readxl::excel_sheets(info.file)[8:13]
 info = do.call(bind_rows, lapply(sheets, function(s) {
-  print(s)
   readxl::read_xlsx(info.file, s, trim_ws = T) %>% 
     dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% dplyr::mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
@@ -54,7 +53,7 @@ preds = do.call(bind_rows, lapply(segFiles, function(f) {
   load(f)  
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
-  prr = BarrettsProgressionRisk::predictRiskFromSegments(segObj, model=fit, s=s, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx, verbose = F)
+  prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=s, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx, verbose = F)
   save(prr, file = paste0(outdir, '/predictions.Rdata'))
   predictions(prr)
 }))
