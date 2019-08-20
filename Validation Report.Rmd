@@ -25,8 +25,6 @@ options(knitr.table.format = "html")
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
 
-pred.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation/predictions'
-
 fncols <- function(data, cname, default=NA) {
   add <-cname[!cname%in%names(data)]
 
@@ -61,18 +59,18 @@ val = do.call(bind_rows, lapply(list.files(analysis.dir, 'residuals', recursive 
 })) %>% dplyr::select(`Patient ID`, sample, varMAD_median, n.segs) %>% mutate(varMAD_median = round(varMAD_median, 3)) %>% mutate(sample = str_replace(sample, '_', '-'))
 
 
-all.val %>% filter(!Samplename %in% val$sample )
+#all.val %>% filter(!Samplename %in% val$sample )
 
 
 val = val %>% filter(sample %in% (all.val %>% dplyr::select(Samplename) %>% pull) ) %>% 
-          left_join( all.val, val %>% mutate(sample = str_replace(sample, '_', '-')), by=c('sample'='Samplename'))
+          left_join( all.val, val %>% mutate(sample = str_replace(sample, '_', '-')), by=c('sample'='Samplename')) %>% unique
 
 qc.cutoff = 0.011
 pass.fail = tibble()
 ```
 
 
-# Quick Summary
+# Quick QC Summary
 
 Effectively every batch C.K. ran failed at a rate of 70-90% of samples. None of the tests we ran showed any effect, with the possible exception of the extraction kit.  Frozen samples always do well, FFPE is clearly a little tricker.
 
@@ -101,8 +99,6 @@ vt %>% kable(caption='Pass/Fail by batch, red rows failed > 10% of samples') %>%
 sval %>% kable(caption='Summary of variance per batch. Red rows are where the median value of the variance for the entire batch was greater than the cutoff') %>% kable_styling('striped') %>% row_spec(which(sval$median > qc.cutoff), color='red')
 
 val %>% dplyr::group_by(Batch) %>% dplyr::summarise( Pass = length(which(varMAD_median <= qc.cutoff)), Fail = length(which(varMAD_median > qc.cutoff))  ) %>% kable(caption = 'Number of samples per batch that pass/fail') %>% kable_styling('striped', full_width = F)
-
-
 ```
 
 ## By Sample Type
@@ -212,7 +208,7 @@ ci %>% dplyr::group_by(Batch, `Original cohort`) %>% dplyr::summarise(
 ) %>% kable() %>% kable_styling('striped')
 ```
 
-# New processing
+# New Validation Cohorts
 
 At this point Sujath and Adrienne took over.
 
@@ -221,9 +217,10 @@ At this point Sujath and Adrienne took over.
 Here we thought that we could see if the issue was older vs newer samples and we could compare that to the same patient with a frozen. These are all tumour samples (OAC) from OCCAMS. We also cut some of these in house to see if there might be an effect.
 
 ```{r}
-
-on = left_join(val %>% ungroup %>% filter(Batch %in% c(8)),
-               readxl::read_xlsx(val.file, sheet='Batch 8') %>% dplyr::select(`Block ID`, `Endoscopy`, `Sample Type`))
+on = left_join(val %>% ungroup %>% filter(Batch == 8),
+               readxl::read_xlsx(val.file, sheet='Batch 8') %>% dplyr::select(`Block ID`, `Endoscopy`, `Sample Type`, `Index Sequence`),
+               by=c('Block ID','Sample Type', 'Index Sequence')) %>% 
+  arrange(`Patient ID`, sample) 
 
 m18 = seq(as.Date("2019/05/01"), length = 2, by = "-18 months")[2] 
 
@@ -260,11 +257,13 @@ batch8_preds = do.call(bind_rows,
                 Pathology = col_character(),
                 `SLX-ID` = col_character(),
                 `Index Sequence` = col_character(),
-                `Path Notes` = col_logical()
+                `Path Notes` = col_character()
       ))
 })) %>% dplyr::mutate_if(is.numeric, list(round), 2)
 
-batch8_preds %>% dplyr::select(`Hospital Research ID`, Sample, everything(), -matches('SLX|Index') ) %>% kable() %>% kable_styling('striped')
+batch8_preds = left_join(batch8_preds,on %>% dplyr::select(sample, `Sample Type`, Age), by=c('Sample'='sample'))
+
+batch8_preds %>% dplyr::select(`Hospital Research ID`, Sample, everything(), -matches('SLX|Index') ) %>% arrange(`Hospital Research ID`, `Sample Type`) %>% kable() %>% kable_styling('striped')
 
 batch8_preds %>% group_by(Risk) %>% dplyr::summarise('n Samples'= length(Risk)) %>% kable(caption='Predictions') %>% kable_styling(full_width = F)
 
@@ -429,8 +428,6 @@ Time since the endoscopy was performed doesn't appear to have any effect on the 
 ggplot(new.np.preds, aes(`Weeks Since Endoscopy`, Probability, color=Probability)) + geom_point(size=2) +
   scale_color_distiller(palette = 'RdYlBu', name='P(P)') + plot.theme + labs(title='Non-progressors', subtitle='Predictions vs time since the endoscopy')
 
-
-
 val.new.np.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
   `n samples` = n(),
   'High Risk' =  length(which(Risk == 'High')),
@@ -446,8 +443,6 @@ val.new.np.preds %>% group_by(`Hospital Research ID`) %>% dplyr::summarise(
   kable(format='html',escape = F, caption = 'Classified predictions per patient (all NP)') %>% kable_styling('striped', full_width = F)
 
 new.np.preds = new.np.preds %>% separate(`Block ID`, c('PID','Block'), '\\s?(-|\\s)', remove = F) 
-
-  
 
 np.per.endo = 
   new.np.preds %>% group_by(`Hospital Research ID`, PID) %>% 
@@ -475,7 +470,7 @@ roc.plot(roc)
 #pROC::coords(roc, 'best', transpose=T)
 ```
 
-```{r, fig.height=8}
+```{r, fig.height=8, eval=F}
 
 p1 = ggplot(all, aes(Probability)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1), show.legend = F) + 
   scale_fill_distiller(palette = 'RdYlBu', name='P(P)') +
@@ -490,5 +485,47 @@ grid.arrange(p1,p2)
 
 ```
 
+
+```{r echo=F, eval=F}
+dir = '~/Data/BarrettsProgressionRisk/Analysis/downsampled/predictions/0.9'
+info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/downsampled_ids.xlsx') 
+
+ds.preds = do.call(bind_rows, purrr::map(list.files(dir, 'predictions', recursive=T, full.names=T), function(f) {
+  read_tsv(f, col_types = cols(
+  Sample = col_character(),
+  Probability = col_double(),
+  `Relative Risk` = col_double(),
+  Risk = col_character(),
+  PatientID = col_character(),
+  Status = col_character(),
+  Tissue = col_character(),
+  `Expected Risk` = col_character(),
+  Grade_patient = col_character(),
+  Grade_biopsy = col_character(),
+  Study = col_character(),
+  Type = col_character(),
+  Endoscopy = col_date(format = "") ))
+}))
+
+## TODO merge in RR from 'back'
+
+ds.preds = ds.preds %>% dplyr::select(-Status) %>% left_join(info %>% dplyr::select(`Illumina ID`, Status), by=c('Sample' = 'Illumina ID')) %>% dplyr::mutate(Type = factor(Type, levels=c('Normal','NDBE', 'LGD', 'Tumor Adjacent BE'))) %>% arrange(Probability)
+
+ m = reshape2::melt(ds.preds, measure.vars = c('Relative Risk'), id.vars = c('Type', 'Status', 'Risk'))
+
+pr = ggplot(m, aes(variable, value)) + 
+  facet_grid(~Type, scales = 'free_x') + 
+  geom_boxplot(aes(group=variable, fill=Type), outlier.colour = NA, show.legend = F) + 
+  geom_jitter(width=0.2, aes(shape=Status, color=Risk), size=2, show.legend = F) + 
+  scale_color_manual(values =  BarrettsProgressionRisk::riskColors()) +
+  #scale_color_gradientn(colors = myPal,  name='') +
+  scale_fill_manual(values=rev(RColorBrewer::brewer.pal(5,'RdYlBu')[c(1,2,4,5)])) +
+  labs(x='', y='Relative Risk', title='Predictions on downsampled patients') + plot.theme +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+pr
+
+ds.preds %>% dplyr::group_by(Status, Risk) %>% dplyr::summarise(n=length(Risk)) %>% spread(Risk, n) %>% kableExtra::kable(caption = 'Sample by risk and known status') %>% kableExtra::kable_styling(full_width = F)
+
+```
 
 

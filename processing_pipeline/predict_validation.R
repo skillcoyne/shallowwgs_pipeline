@@ -3,7 +3,7 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 1)
   stop("Missing required params: <data dir> <sample info file> <model dir> <outdir> <alpha=0.9 DEF>")
 
-library(BarrettsProgressionRisk)
+suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 datadir = args[1]

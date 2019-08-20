@@ -37,6 +37,10 @@ info = BarrettsProgressionRisk::loadSampleInformation(
 )
 
 
+x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
+load(x, verbose=T)
+rm(dysplasia.df, labels)
+
 x = list.files(modeldir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
 fit = models[[select.alpha]]
@@ -62,8 +66,7 @@ if (length(segFile) <= 0) {
   
   segs$sample.info = info
 }
-
-prr = predictRiskFromSegments(segs, model = fit, s = s)
+prr = BarrettsProgressionRisk::predictRiskFromSegments(segs, model = fit, s = s, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx, verbose = F)
 
 pred.dir = paste0(outdir, '/predictions')
 print(pred.dir)

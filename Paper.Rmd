@@ -1756,7 +1756,8 @@ info = '~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/downsampled_ids.x
 
 info = readxl::read_xlsx(info) 
 
-ds.preds = read_tsv(paste0(dir, '/downsampled_preds.tsv'), col_types = cols(
+ds.preds = do.call(bind_rows, purrr::map(list.files(dir, 'predictions', recursive=T, full.names=T), function(f) {
+  read_tsv(f, col_types = cols(
   Sample = col_character(),
   Probability = col_double(),
   `Relative Risk` = col_double(),
@@ -1769,8 +1770,8 @@ ds.preds = read_tsv(paste0(dir, '/downsampled_preds.tsv'), col_types = cols(
   Grade_biopsy = col_character(),
   Study = col_character(),
   Type = col_character(),
-  Endoscopy = col_date(format = "")
-))
+  Endoscopy = col_date(format = "") ))
+}))
 
 ## TODO merge in RR from 'back'
 
