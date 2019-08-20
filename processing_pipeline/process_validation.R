@@ -64,6 +64,7 @@ for (ra in levels(all.val$RA) ) {
   if (length(pts) <= 0) next
   
   for (pid in pts) {
+if (pid != 'AHM1024') next
     message(paste('Patient',pid))
     
     si = all.val %>% filter(`Hospital Research ID` == pid & RA == ra) 
@@ -92,7 +93,7 @@ for (ra in levels(all.val$RA) ) {
 
     tryCatch({
       
-      segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,cutoff=0.011, verbose=F)
+      segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,cutoff=0.011, verbose=T)
       residuals = BarrettsProgressionRisk::sampleResiduals(segmented)
 
       failedQC = bind_rows(failedQC, residuals)

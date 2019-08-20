@@ -71,5 +71,7 @@ prr = BarrettsProgressionRisk::predictRiskFromSegments(segObj, model=fit, s=s, t
 
 save(prr, file=paste0(pred.dir, '/predictions.Rdata'))
 
+readr::write_tsv(predictions(prr), path=paste0(pred.dir,'/predictions.tsv'))
+
 print("Finished'")
 
