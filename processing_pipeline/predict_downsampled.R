@@ -29,6 +29,10 @@ dir.create(outdir, showWarnings = F, recursive = T)
 if (!file.exists(info)) stop(paste0("File does not exist or is not readable: ", info))
 all.ds.info = readxl::read_xlsx(info)
 
+x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
+load(x, verbose=T)
+rm(dysplasia.df, labels)
+
 x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
 fit = models[[select.alpha]]
@@ -63,7 +67,7 @@ p1 = BarrettsProgressionRisk::plotSegmentData(segObj, 'plot')
 
 ggsave(paste0(pred.dir, '/', sample, '_segmentedCoverage.png'), plot=grid.arrange(p1),  width=20, height=6, units='in', limitsize=F)
 
-prr = BarrettsProgressionRisk::predictRiskFromSegments(segObj, model = fit, s = s)
+prr = BarrettsProgressionRisk::predictRiskFromSegments(segObj, model=fit, s=s, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx)
 
 save(prr, file=paste0(pred.dir, '/predictions.Rdata'))
 

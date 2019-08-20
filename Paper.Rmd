@@ -646,7 +646,6 @@ roc.plot(p53roc, 'p53 IHC')
 ### Pathology ROC curve
 
 Based on HGD/IMC/LGD
-
 ```{r pathroc, echo=F, fig.height=4, fig.width=12 }
 #sum(table(subset(patient.info, Status == 'P')$Pathology)[c('IMC','HGD')])/sum(table(subset(patient.info, Status == 'P')$Pathology))
 
@@ -700,9 +699,7 @@ endo.thresholds = bind_cols('roc'=c('Max','Avg','Last','First'),
 ```
 
 ### Per Patient ROC
-
 ```{r echo=F, fig.height=4, fig.width=12}
-
 # Excluding the final endoscopy
 ptendo = do.call(bind_rows, lapply(unique(pg.samp$Hospital.Research.ID), function(pt) {
   x = pg.samp %>% filter(Hospital.Research.ID == pt)  
@@ -846,6 +843,16 @@ ggplot(back, aes(Status, Prediction, group=Status)) +
   geom_jitter(width=0.2, aes(color=Prediction)) + 
   plot.theme  + theme(legend.position = 'none')
 
+
+ggplot(back, aes(Status, RR, group=Status)) + 
+  facet_grid(~Pathology) + 
+  #scale_fill_manual(values=RColorBrewer::brewer.pal(4,"Paired")[c(1,3)]) + 
+  scale_color_gradientn(colours = myPal) +
+  geom_boxplot(outlier.shape = NA, fill='#BDBDBD') + 
+  geom_jitter(width=0.2, aes(color=Prediction)) + 
+  plot.theme  + theme(legend.position = 'none')
+
+
 ```
 
 The labels in each decile are the ratio of progessor samples that have probabilities within that region. The deciles that are greyed out show insigificant enrichment for the NP/P ratio.
@@ -854,8 +861,6 @@ The labels in each decile are the ratio of progessor samples that have probabili
 
 ```{r spacial, echo=F, warning=F, message=F, fig.width=8, fig.height=6}
 cuts = seq(0,1,0.1)
-
-#back = back %>% filter(!is.na(Prediction))
 
 back = back %>% mutate(quants = cut(Prediction, breaks=cuts, include.lowest = T))
 qt = back %>% group_by(quants, Status) %>% dplyr::summarise(n=length(Status) ) %>% spread(Status, n)
@@ -907,14 +912,12 @@ pcal = BarrettsProgressionRisk::showPredictionCalibration(pred.confidence %>% dp
 pcal
 ggsave(filename='plots/pred_calib.png', plot=pcal, width=4, height=4, units='in', dpi=300)
 
-
 back.per.endo = back %>% group_by(Hospital.Research.ID, Status, Patient, PID) %>% 
   dplyr::mutate('n.samples'=length(PID),'Samples'=paste(Samplename,collapse=',')) %>% 
   dplyr::summarise_at(vars(matches('Pred|RR|Year')), list(max)) %>% dplyr::select(-matches('^Sample$')) %>% 
   arrange(Patient, Endoscopy.Year, PID) 
 
 back.per.endo = back.per.endo %>% mutate(quants = cut(Prediction, breaks=cuts, include.lowest = T)) %>% left_join(pred.confidence %>% dplyr::select(quants, Risk), by='quants') %>% dplyr::select(-matches('quant')) %>% dplyr::mutate(Risk = as.character(Risk))
-
 
 back %>% group_by(Status, Risk)  %>% dplyr::summarise(n = length(Risk)) %>% spread(Risk, n) %>% rowwise %>% 
   dplyr::mutate(n=sum(High,Low,Moderate), Low = Low/n, Moderate = Moderate/n, High = High/n) %>%
@@ -1549,51 +1552,47 @@ mp$performance[17,'mean']
 
 Individually none of these show very good classification rates, all hovering around 65%. However, more importantly is that Chr17 is only marginally better than any of the others (unless you exclude HGD) and all are below the 72% classification rate we get with all of the data
 
-# Tumour Supressors
+# Validation Data
 
-```{r ts, eval=F}
-colnames(ccgenes)
+## Normals sWGS sequenced
 
-tsgs = ccgenes
-nrow(tsgs)
+These normal tissues came from some samples that had been mistakenly sequenced from a timepoint (path ID) that Barrett's samples were also sequenced.  These include:
 
-tsgs = makeGRangesFromDataFrame(tsgs[,c(colnames(loc), 'Gene.Symbol')], keep.extra.columns = T)
-tsgs = sort(tsgs)
+```{r, echo=F}
+normal.info = readxl::read_xlsx(patient.file, sheet='Normals')
 
-length(tsgs)
-
-# average 1 per 9MB
-avgTSGdist = mean(elementMetadata(distanceToNearest(tsgs))$distance)
-
-
-chh = arrange(chh, -hazards)
-features = makeGRangesFromDataFrame(chh, keep.extra.columns = T)
-
-distanceTSG = data.frame(matrix(nrow=0,ncol=3))
-for (i in 1:length(features)) {
-  f = features[i]
-  hits = nearest(f, tsgs, ignore.strand=T, select='all')
-  if (length(hits) > 0) {
-    distanceTSG = rbind(distanceTSG, cbind.data.frame(
-      'features'=i,
-      'nearestTSG'=elementMetadata(tsgs[subjectHits(hits)])$Gene.Symbol,
-      'distanceToTSG'=elementMetadata(distanceToNearest(f, tsgs, ignore.strand=T, select='all'))$distance)
-    )
-  }
-}
-
-features[unique(subset(distanceTSG, distanceToTSG == 0)$features)]
-
-# In our dataset we should see 1 TSG/onc per 10MB
-# But this is double the actual number we see
-ncol(dysplasia.df)/round(avgTSGdist/5e6)
-
-length(which(round((subset(distanceTSG, distanceToTSG > 0)$distanceToTSG/5e6)-0.5) == round((avgTSGdist/5e6)-0.5)))
+normal.info %>% dplyr::select(`Patient ID`, `Path ID`, `Pathology notes`) %>% kable(caption='Normals') %>% kable_styling('striped', full_width = F)
 ```
 
+These were excluded from the model building procedure, but were then predicted using the resulting model.  We would expect them to all be low risk and all but one are. All have a relative risk below 0 as well.
 
+```{r}
 
-# Validation Data
+normal.preds = read_tsv('~/Data/BarrettsProgressionRisk/Analysis/multipcf_plots_normals/normal_predictions.tsv', col_types = cols(
+  Sample = col_character(),
+  Probability = col_double(),
+  `Relative Risk` = col_double(),
+  Risk = col_character(),
+  Patient = col_character(),
+  Hospital.Research.ID = col_character(),
+  Path.ID = col_character(),
+  Status = col_character(),
+  Endoscopy = col_double(),
+  Pathology = col_logical(),
+  Plate.Index = col_character(),
+  SLX.ID = col_double(),
+  Barretts.Cellularity = col_logical(),
+  P53.Status = col_character(),
+  Total.Reads = col_double(),
+  Batch.Name = col_character(),
+  Set = col_character(),
+  Block = col_double()
+))
+
+ggplot(normal.preds, aes(Patient, Probability, color=Risk)) + ylim(0,1) + geom_point(size=2) +
+  scale_color_manual(values = BarrettsProgressionRisk::riskColors() ) + plot.theme
+
+```
 
 ## Test 'holdout' Set 
 
@@ -1701,7 +1700,7 @@ grid.arrange(p1, p2, nrow=2)
 
 ggsave(filename='plots/val_heatmap.png', plot=grid.arrange(p1, p2, nrow=2), width=18, height=6, units='in', dpi=300)
 
-ggsave(filename='plots/val_leg.png', plot=valLeg, width=4, height=2, units='in', dpi=300)
+#ggsave(filename='plots/val_leg.png', plot=valLeg, width=4, height=2, units='in', dpi=300)
 
 
 ```
@@ -1752,34 +1751,37 @@ ggsave(filename='plots/val_riskpath.png', plot=pr, width=7, height=7, units='in'
 These come from Annalise, adjacent Barrett's tissues, and normal blood that had all been initially WGS at 30-80x and downsampled to an average 0.4x
 
 ```{r echo=F, eval=T}
-dir = '~/Data/BarrettsProgressionRisk/Analysis/downsampled/predictions'
+dir = '~/Data/BarrettsProgressionRisk/Analysis/downsampled/predictions/0.9'
 info = '~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/downsampled_ids.xlsx'
 
 info = readxl::read_xlsx(info) 
 
-files = list.files(dir, 'Rdata', recursive = T, full.names = T)
-
-pfile = paste0(dir, '/ds_preds.txt')
-if (file.exists(pfile)) {
-  ds.preds = read_tsv(pfile)
-} else {
-  ds.preds = do.call(bind_rows, lapply(files, function(f) {
-    load(f, verbose=T)
-    bind_cols(predictions(prr), adjustRisk(prr, 'mean', 'sample')$adj.predictions %>% dplyr::select(Probability, `Relative Risk`) %>% dplyr::rename_all(funs(paste0), ' Adjusted ') )
-  }))
-  write_tsv(ds.preds, pfile)
-}
+ds.preds = read_tsv(paste0(dir, '/downsampled_preds.tsv'), col_types = cols(
+  Sample = col_character(),
+  Probability = col_double(),
+  `Relative Risk` = col_double(),
+  Risk = col_character(),
+  PatientID = col_character(),
+  Status = col_character(),
+  Tissue = col_character(),
+  `Expected Risk` = col_character(),
+  Grade_patient = col_character(),
+  Grade_biopsy = col_character(),
+  Study = col_character(),
+  Type = col_character(),
+  Endoscopy = col_date(format = "")
+))
 
 ## TODO merge in RR from 'back'
 
 ds.preds = ds.preds %>% dplyr::select(-Status) %>% left_join(info %>% dplyr::select(`Illumina ID`, Status), by=c('Sample' = 'Illumina ID')) %>% dplyr::mutate(Type = factor(Type, levels=c('Normal','NDBE', 'LGD', 'Tumor Adjacent BE'))) %>% arrange(Probability)
 
-m = reshape2::melt(ds.preds, measure.vars = c('Relative Risk','Relative Risk Adjusted'), id.vars = c('Type', 'Status', 'Risk'))
+m = reshape2::melt(ds.preds, measure.vars = c('Relative Risk'), id.vars = c('Type', 'Status', 'Risk'))
 
 pr = ggplot(m, aes(variable, value)) + 
   facet_grid(~Type, scales = 'free_x') + 
-  geom_jitter(width=0.2, aes(shape=Status, color=Risk), size=2, show.legend = F) + 
   geom_boxplot(aes(group=variable, fill=Type), outlier.colour = NA, show.legend = F) + 
+  geom_jitter(width=0.2, aes(shape=Status, color=Risk), size=2, show.legend = F) + 
   scale_color_manual(values =  BarrettsProgressionRisk::riskColors()) +
   #scale_color_gradientn(colors = myPal,  name='') +
   scale_fill_manual(values=rev(RColorBrewer::brewer.pal(5,'RdYlBu')[c(1,2,4,5)])) +
