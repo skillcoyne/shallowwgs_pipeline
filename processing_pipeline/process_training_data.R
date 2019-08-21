@@ -8,7 +8,7 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir> <patient name OPT>")
 
-library(BarrettsProgressionRisk)
+suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 data = args[1]
@@ -26,17 +26,16 @@ all.patient.info = read.patient.info(patient.file, set='All')$info
 if (is.null(all.patient.info))
   stop(paste("Failed to read patient file", patient.file))
 
-data.dirs = list.dirs(data, full.names=T, recursive=F)
-if (length(data.dirs) <= 0)
-  stop(paste("No directories in", data))
-
 pts_slx = arrange(unique(all.patient.info[c('SLX.ID','Hospital.Research.ID')]), Hospital.Research.ID)
-
-data.dirs = grep(paste(unique(pts_slx$SLX.ID), collapse='|'), data.dirs, value=T)
 
 #datafile = paste(data,'excluded_qdnaseq_output.Rdata',sep='/')
 datafile = paste(data,"merged_qdnaseq_output.Rdata", sep='/')
 if (!file.exists(datafile)) {
+  data.dirs = list.dirs(data, full.names=T, recursive=F)
+  if (length(data.dirs) <= 0)
+    stop(paste("No directories in", data))
+  data.dirs = grep(paste(unique(pts_slx$SLX.ID), collapse='|'), data.dirs, value=T)
+
   # Load the data, binding each new data file into single data table
   fit.data = NULL
   raw.data = NULL
@@ -119,13 +118,13 @@ if (!file.exists(datafile)) {
   load(datafile, verbose=T)
 }
 
-plot.dir = paste(outdir, "coverage_binned_fitted", sep='/')
-if ( !dir.exists(plot.dir) ) 
-  dir.create(plot.dir)
+# plot.dir = paste(outdir, "coverage_binned_fitted", sep='/')
+# if ( !dir.exists(plot.dir) ) 
+#   dir.create(plot.dir, recursive = T)
 
 multipcfdir = paste(outdir, "multipcf_perPatient", sep='/')
 if ( !dir.exists(multipcfdir) ) 
-  dir.create(multipcfdir)
+  dir.create(multipcfdir, recursive = T)
 
 if (!is.null(patient.name))
   pts_slx = subset(pts_slx, Hospital.Research.ID == patient.name)
@@ -138,41 +137,19 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   pd = paste(multipcfdir, pt,sep='/')
   dir.create(pd,showWarnings = F)
   
-  info = all.patient.info %>% filter(Hospital.Research.ID == pt) %>% select('Patient','Samplename','Endoscopy.Year','Block','Pathology','p53.Status') 
-  colnames(info) = c('Patient','Sample','Endoscopy','GEJ.Distance','Pathology','p53 IHC')
-  info = info %>% rowwise %>% dplyr::mutate( Endoscopy = paste(as.character(Endoscopy), '01', '01', sep='-')   )
+  info = all.patient.info %>% filter(Hospital.Research.ID == pt) %>% 
+    select('Patient','Hospital.Research.ID', 'Samplename','Endoscopy.Year','Block','Pathology','p53.Status') %>% 
+    dplyr::rename('Sample' = 'Samplename', 'GEJ.Distance' = 'Block', 'p53 IHC' = 'p53.Status', 'Endoscopy' = 'Endoscopy.Year') %>% rowwise %>% 
+    dplyr::mutate( Endoscopy = paste(as.character(Endoscopy), '01', '01', sep='-')   )
   info = BarrettsProgressionRisk::loadSampleInformation(info, path=c('BE','ID','LGD','HGD','IMC'))
 
   cols = which(colnames(fit.data) %in% subset(all.patient.info, Hospital.Research.ID == pt)$Samplename)
 
-  segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)])
+  segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)],verbose=T, cutoff=0.011)
   residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
-  
-  tile = BarrettsProgressionRisk::tileSegments(segmented, size=5e6)
-  arms = BarrettsProgressionRisk::tileSegments(segmented, size='arms')
 
-  write.table(tile$tiles, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/5e06_cleaned_tiled_segvals.txt'))
-  write.table(arms$tiles, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/arms_cleaned_tiled_segvals.txt'))
-
-  write.table(tile$error, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/5e06_tiled_MSE.txt'))
-  write.table(arms$error, sep='\t', col.names = NA, quote=F, file=paste0(pd,'/arms_tiled_MSE.txt'))
-
+  save(segmented, file=paste0(pd,'/segment.Rdata'), compress='bzip2')
   readr::write_tsv(residuals, path=paste0(pd,'/residuals.tsv'))
-    
-    
-  # if (is.null(tiled)) {
-  #   tiled = tile$tiles
-  #   arms.tiled = arms$tiles
-  #   tile.MSE = tile$error
-  #   arm.MSE = arms$error
-  # } else {
-  #   tiled = rbind(tiled, tile$tiles)
-  #   arms.tiled = rbind(arms.tiled, arms$tiles)
-  #   tile.MSE = rbind(tile.MSE, tile$error)
-  #   arm.MSE = rbind(arm.MSE, arms$error)
-  # }
-  
-  save(segmented,file=paste(pd, 'segment.Rdata', sep = '/'), compress='bzip2')
 
   message("Saving plots")
 
@@ -192,38 +169,7 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     ggsave(filename=paste0(plotdir, '/', sample, '_cvg_binned.png'), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize = F)
 
   ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
-  
-
-  # if (length(info$Sample) > 6) {
-  #   
-  #   dir.create(plotdir, showWarnings=F )
-  #   plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
-  #   for (sample in names(plots)) 
-  #     ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
-  #   
-  #   plotdir = paste0(pd,'/coverage_plots')
-  #   dir.create(plotdir, showWarnings=F )
-  #   plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list')
-  #   for (sample in names(plots))
-  #     ggsave(filename=paste(plotdir, '/', sample, '_cvg_binned_fitted.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=4, units='in', limitsize=F)
-  # } else {
-  # 
-  #   ggsave(filename=paste(pd, '/segmented.png',sep=''), plot=BarrettsProgressionRisk::plotSegmentData(segmented), width=20, height=4*length(info$Sample), units='in', limitsize=F)
-  #   
-  #   ggsave(filename=paste(pd, '/cvg_binned_fitted.png',sep=''), plot=BarrettsProgressionRisk::plotCorrectedCoverage(segmented) + labs(title=pt), width=20, height=4*length(info$Sample), units='in', limitsize = F)
-  #   
-  # }
-
 }
-
-# if (is.null(patient.name)) {
-#   write.table(tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled.txt', sep='/'))
-#   write.table(tile.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, '5e6_tiled_MSE.txt', sep='/'))
-# 
-#   write.table(arms.tiled, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled.txt', sep='/'))
-#   write.table(arm.MSE, sep='\t', quote=F, col.names=NA, row.names=T, file=paste(multipcfdir, 'arms_tiled_MSE.txt', sep='/'))
-# }
-
 
 message("Finished")
 q(save="no")
