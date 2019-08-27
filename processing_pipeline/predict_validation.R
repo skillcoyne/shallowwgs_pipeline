@@ -28,14 +28,25 @@ dir.create(outdir, showWarnings = F, recursive = T)
 
 print(paste0("Output path:", outdir))
 
-x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
+
+x = list.files(model.dir, 'loo.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
-rm(dysplasia.df, labels)
+rm(plots,performance.at.1se,fits,pg.samp,coefs)
 
 x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
-load(x, verbose=F)
+load(x, verbose=T)
 fit = models[[select.alpha]]
 s = performance.at.1se[[select.alpha]]$lambda  
+cvRR = BarrettsProgressionRisk:::cvRR(dysplasia.df, coefs[[select.alpha]])
+
+x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
+load(x, verbose=F)
+rm(dysplasia.df, coefs, labels)
+
+
+be.fit.obj = BarrettsProgressionRisk:::be.model.fit(model=fit, s=s, tile.size=5e6, 
+      tile.mean=z.mean, arms.mean=z.arms.mean, tile.sd=z.sd, arms.sd=z.arms.sd, 
+      cx.mean=mn.cx, cx.sd=sd.cx, per.pt.nzcoefs = nzcoefs, cvRR = cvRR)
 
 
 sheets = readxl::excel_sheets(info.file)[8:13]
@@ -46,17 +57,22 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
 
 
 segFiles = list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T)
-
+print(segFiles)
 if (length(segFiles) <= 0) stop(paste0('No segmentation file found in ', datadir))
 
 preds = do.call(bind_rows, lapply(segFiles, function(f) {
   load(f)  
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
-  prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=s, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx, verbose = F)
+  prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,be.model=be.fit.obj,verbose=F)
   save(prr, file = paste0(outdir, '/predictions.Rdata'))
   predictions(prr)
+cnPlot = BarrettsProgressionRisk::copyNumberMountainPlot(prr,T,F) 
+ht = nrow(segmented$sample.info)
+ggsave(file=paste0(outdir,'/copyNumberMtn.png'), plot=gridExtra::grid.arrange(cnPlot, top=pt), width=25, height=3*ht, dpi=300, units='in',limitsize=F)
 }))
+
+
 
 write_tsv(preds, path=paste0(outdir, '/', pt, '_predictions.tsv'))
 

@@ -37,7 +37,7 @@ info = BarrettsProgressionRisk::loadSampleInformation(
 )
 
 
-x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
+x = list.files(modeldir, 'model_data.Rdata', recursive = T, full.names = T)
 load(x, verbose=T)
 rm(dysplasia.df, labels)
 

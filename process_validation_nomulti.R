@@ -18,13 +18,16 @@ outdir = args[4]
 patient = args[5]
 
 
-patient = str_replace( unlist(str_split(patient, ',| ')), ' ', '')
+#patient = str_replace( unlist(str_split(patient, ',| ')), ' ', '')
 patient = str_replace_all( patient, '/', '_')
+patient = str_remove_all(patient, ' ')
 
-if (dir.exists(outdir))
-  stop(paste0("Directory already exists: ", outdir))
+print(patient)
 
-dir.create(outdir, recursive = T, showWarnings = F)
+#if (dir.exists(outdir))
+#  stop(paste0("Directory already exists: ", outdir))
+
+dir.create(outdir, recursive = T, showWarnings = T)
 
 
 
@@ -53,7 +56,7 @@ lambda = performance.at.1se[[select.alpha]]$lambda
 #patients = c('OCCAMS_AH_100','AHM0185','AHM0555','AHM0348','AHM0281','AHM0500','AHM0546','AHM0584','AHM1432','AHM1471','AHM0567','AHM0570')
 
 
-sheets = readxl::excel_sheets(val.file)[1:13]
+sheets = readxl::excel_sheets(val.file)[8:13]
 
 
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
@@ -74,29 +77,25 @@ if (!file.exists(  paste0(data, '/merged_raw_fit.Rdata')))
 
 load(file=paste0(data, '/merged_raw_fit.Rdata'))
 
-si = si %>% filter(`Hospital Research ID` == patient)
-
-if (nrow(si) <= 0)
+all.val = all.val %>% filter(`Hospital Research ID` == patient) %>% mutate(Sample = Samplename)
+if (nrow(all.val) <= 0)
   stop(paste0('No patient ', patient, ' found in spreadsheet.'))
 
 message(paste('Patient',patient))
 
-si$Sample = si$Samplename 
-if (is.null(si[['Endoscopy']])) si = si %>% mutate(Endoscopy = '2019/01/01')
 
 plot.dir = paste(outdir, patient, 'plots',sep='/')
 
 dir.create(plot.dir, showWarnings = F, recursive = T)
 
 residuals = tibble(); predictions = tibble()
-for (sample in si$Samplename) {
+for (sample in all.val$Samplename) {
+  print(sample)
+  si = all.val %>% filter(Sample == sample)
+
+  if (is.null(si[['Endoscopy']])) si = si %>% mutate(Endoscopy = '2019/01/01')
   rcols = grep(paste(sample,collapse='|'), colnames(merged.raw))
   fcols = grep(paste(sample,collapse='|'), colnames(merged.fit))
-  
-  if (length(rcols) != length(samples) | length(fcols) != length(samples)) {
-    warning(paste0(pid, ' from RA ', ra, ' samples do not match. Skipping'))
-    break
-  }
   
   rd = merged.raw %>% dplyr::select(location,chrom,start,end,!!rcols)
   fd = merged.fit %>% dplyr::select(location,chrom,start,end,!!fcols)
@@ -108,7 +107,6 @@ for (sample in si$Samplename) {
     plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
     for (s in names(plots))
       ggsave(paste(plot.dir, paste(s, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=plots[[s]], height=4, width=20, units='in')
-    readr::write_tsv(residuals, path=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra),'_residuals.txt'),sep='/'), col_names = F, append=F)
     
     save(segmented, file=paste(dirname(plot.dir), paste0(sample, '_segmented.Rdata'),sep='/'))
     
@@ -121,7 +119,7 @@ for (sample in si$Samplename) {
     }
     
   }, error = function(e) {
-    message(paste("Error in segmentation for patient",pid,'from RA:', ra, ', skipping:\n\t',e))
+    message(paste("Error in segmentation for patient",patient,'\n', e))
   })
   
   write_tsv(residuals, path=paste0(dirname(plot.dir), '/residuals.tsv')) 
