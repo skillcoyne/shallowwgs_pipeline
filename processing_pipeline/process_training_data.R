@@ -148,7 +148,7 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)],verbose=T, cutoff=0.011)
   residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
 
-  save(segmented, file=paste0(pd,'/segment.Rdata'), compress='bzip2')
+  save(segmented, file=paste0(pd,'/segment.Rdata'))
   readr::write_tsv(residuals, path=paste0(pd,'/residuals.tsv'))
 
   message("Saving plots")

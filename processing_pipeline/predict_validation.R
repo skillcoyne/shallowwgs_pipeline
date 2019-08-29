@@ -8,16 +8,11 @@ suppressPackageStartupMessages( library(mclust) )
 source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 smooth.EM.loess<-function(x, span=0.1, plot.dir = '.') {
-  bic = c()
-  for (i in 2:6)
-    bic = c(bic, densityMclust(x, G=i, modelNames='V', verbose=F)$bic)
-  names(bic) = c(2:6)
+
+  BIC = mclustBIC(x) 
+  ds = densityMclust(x, x=BIC) 
   
-  G = as.integer(names(which.max(bic)))
-  message(paste0('Clusters ', G))
-  
-  ds = densityMclust(x, G=G, verbose=F) 
-  
+  message(paste0('Clusters ', ds$G))
   png(filename=paste0(plot.dir,'/density.png'), width=800, height=600)
   plot(ds, what = "density", data = x, breaks = 50)
   dev.off()
@@ -62,22 +57,20 @@ print(paste0("Output path:", outdir))
 
 x = list.files(model.dir, 'loo.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
+nz = nzcoefs
 rm(plots,performance.at.1se,fits,pg.samp,coefs)
 
 x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
 load(x, verbose=T)
 fit = models[[select.alpha]]
-s = performance.at.1se[[select.alpha]]$lambda  
+lambda = performance.at.1se[[select.alpha]]$lambda  
 cvRR = BarrettsProgressionRisk:::cvRR(dysplasia.df, coefs[[select.alpha]])
 
 x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
 rm(dysplasia.df, coefs, labels)
 
-
-be.fit.obj = BarrettsProgressionRisk:::be.model.fit(model=fit, s=s, tile.size=5e6, 
-      tile.mean=z.mean, arms.mean=z.arms.mean, tile.sd=z.sd, arms.sd=z.arms.sd, 
-      cx.mean=mn.cx, cx.sd=sd.cx, per.pt.nzcoefs = nzcoefs, cvRR = cvRR)
+be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, z.mean, z.arms.mean, z.sd, z.arms.sd, mn.cx, sd.cx, nz, cvRR, NULL)
 
 
 sheets = readxl::excel_sheets(info.file)[8:13]
@@ -91,20 +84,24 @@ segFiles = list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T)
 print(segFiles)
 if (length(segFiles) <= 0) stop(paste0('No segmentation file found in ', datadir))
 
-preds = do.call(bind_rows, lapply(segFiles, function(f) {
-  load(f)  
+preds = tibble()
+for (f in segFiles) { 
+  load(f)
+  index = sub('_.*', '', basename(f))
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
   segmented$seg.vals = segmented$seg.vals %>% mutate_at(vars(matches(paste(segmented$sample.info$Sample, collapse='|'))), list(~smooth.EM.loess(.,plot.dir=outdir))  )
 
-  prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,be.model=be.fit.obj,verbose=F)
-  save(prr, file = paste0(outdir, '/predictions.Rdata'))
-  predictions(prr)
+  prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,be.model,verbose=T)
+print(predictions(prr))  
+save(prr, file = paste0(outdir, '/', index, '_predictions.Rdata'))
+  preds = bind_rows(preds, predictions(prr))
+print("generating mtn plot")
 cnPlot = BarrettsProgressionRisk::copyNumberMountainPlot(prr,T,F) 
+print('saving plot')
 ht = nrow(segmented$sample.info)
-ggsave(file=paste0(outdir,'/copyNumberMtn.png'), plot=gridExtra::grid.arrange(cnPlot, top=pt), width=25, height=3*ht, dpi=300, units='in',limitsize=F)
-}))
-
+ggsave(file=paste0(outdir,'/', index, '_copyNumberMtn.png'), plot=gridExtra::grid.arrange(cnPlot, top=pt), width=25, height=3*ht, dpi=300, units='in',limitsize=F)
+}
 
 write_tsv(preds, path=paste0(outdir, '/', pt, '_predictions.tsv'))
 
