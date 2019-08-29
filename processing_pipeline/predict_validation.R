@@ -22,7 +22,7 @@ smooth.EM.loess<-function(x, span=0.1, plot.dir = '.') {
   plot(ds, what = "density", data = x, breaks = 50)
   dev.off()
   
-  clusters = which(ds$parameters$mean < 1)
+  clusters = which(round(ds$parameters$mean,1) <= 1)
   #sG = which.max(table(ds$classification)[clusters])
   
   x[ds$classification %in% clusters] = loess( x[ds$classification %in% clusters]~c(1:sum(table(ds$classification)[clusters])), span=span )$fitted
