@@ -4,7 +4,38 @@ if (length(args) < 1)
   stop("Missing required params: <data dir> <sample info file> <model dir> <outdir> <alpha=0.9 DEF>")
 
 suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
+suppressPackageStartupMessages( library(mclust) )
 source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
+
+smooth.EM.loess<-function(x, span=0.1, plot.dir = '.') {
+  bic = c()
+  for (i in 2:6)
+    bic = c(bic, densityMclust(x, G=i, modelNames='V', verbose=F)$bic)
+  names(bic) = c(2:6)
+  
+  G = as.integer(names(which.max(bic)))
+  message(paste0('Clusters ', G))
+  
+  ds = densityMclust(x, G=G, verbose=F) 
+  
+  png(filename=paste0(plot.dir,'/density.png'), width=800, height=600)
+  plot(ds, what = "density", data = x, breaks = 50)
+  dev.off()
+  
+  clusters = which(ds$parameters$mean < 1)
+  #sG = which.max(table(ds$classification)[clusters])
+  
+  x[ds$classification %in% clusters] = loess( x[ds$classification %in% clusters]~c(1:sum(table(ds$classification)[clusters])), span=span )$fitted
+  
+  # for (i in 1:G) {
+  #   if (table(ds$classification)[i] < 10) next
+  #   x[ds$classification == i] = 
+  #     loess( x[ds$classification == i]~c(1:table(ds$classification)[i]), span=span )$fitted
+  # }
+  
+  return(x)  
+}
+
 
 datadir = args[1]
 info.file = args[2]
@@ -64,6 +95,8 @@ preds = do.call(bind_rows, lapply(segFiles, function(f) {
   load(f)  
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
+  segmented$seg.vals = segmented$seg.vals %>% mutate_at(vars(matches(paste(segmented$sample.info$Sample, collapse='|'))), list(~smooth.EM.loess(.,plot.dir=outdir))  )
+
   prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,be.model=be.fit.obj,verbose=F)
   save(prr, file = paste0(outdir, '/predictions.Rdata'))
   predictions(prr)
@@ -71,7 +104,6 @@ cnPlot = BarrettsProgressionRisk::copyNumberMountainPlot(prr,T,F)
 ht = nrow(segmented$sample.info)
 ggsave(file=paste0(outdir,'/copyNumberMtn.png'), plot=gridExtra::grid.arrange(cnPlot, top=pt), width=25, height=3*ht, dpi=300, units='in',limitsize=F)
 }))
-
 
 
 write_tsv(preds, path=paste0(outdir, '/', pt, '_predictions.tsv'))
