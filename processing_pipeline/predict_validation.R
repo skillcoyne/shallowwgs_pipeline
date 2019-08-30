@@ -32,6 +32,23 @@ smooth.EM.loess<-function(x, span=0.1, plot.dir = '.') {
 }
 
 
+fourier<-function(x, path='.') {
+  fx = fft(x)
+  #plot(Re(fx), type='l', xlim=c(0,20))
+  fx[20:length(fx)] = 0+0i # Other than looking at the plot manually, how woudl I determine this?
+  fxx = fft(fx, inverse = TRUE)/length(fx) 
+
+  png(filename=paste0(path, '/fourier_transform.png'), width=600, height=800, units='px')
+  layout(matrix(1:4,4,1)) 
+  plot(x, type="l", main="Original Data")
+  hist(x, breaks=50, main='')
+  plot(Re(fxx),type="l", main="Fourier Transform Filtering") 
+  hist(Re(fxx), breaks=50, main='')
+  dev.off()
+  
+  return(Re(fxx))
+}
+
 datadir = args[1]
 info.file = args[2]
 model.dir = args[3]
@@ -90,7 +107,7 @@ for (f in segFiles) {
   index = sub('_.*', '', basename(f))
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
-  segmented$seg.vals = segmented$seg.vals %>% mutate_at(vars(matches(paste(segmented$sample.info$Sample, collapse='|'))), list(~smooth.EM.loess(.,plot.dir=outdir))  )
+  segmented$seg.vals = segmented$seg.vals %>% mutate_at(vars(matches(paste(segmented$sample.info$Sample, collapse='|'))), list(~fourier(.,path=outdir))  )
 
   prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,be.model,verbose=T)
 print(predictions(prr))  

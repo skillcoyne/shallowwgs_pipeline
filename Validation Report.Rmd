@@ -17,13 +17,14 @@ library(gridExtra)
 library(reshape2)
 
 source('lib/common_plots.R')
+source('lib/load_patient_metadata.R')
 
 
 knitr::opts_chunk$set(echo = F, warning = F, message=F)
 options(knitr.table.format = "html") 
 
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
-analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
+analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf'
 
 fncols <- function(data, cname, default=NA) {
   add <-cname[!cname%in%names(data)]
@@ -245,7 +246,7 @@ val.info = do.call(bind_rows, lapply(sheets[8:13], function(s) {
 preds.dir = paste0(analysis.dir, '/predictions/0.9')
 
 batch8_preds = do.call(bind_rows,
-  purrr::map(grep( paste(unique(on$`Patient ID`), collapse='|'), list.files(preds.dir, full.names = T, recursive = T), value=T), function(f) {
+  purrr::map(grep( paste(unique(on$`Patient ID`), collapse='|'), list.files(preds.dir, 'predictions.tsv', full.names = T, recursive = T), value=T), function(f) {
              read_tsv(f, col_types = cols(
                 Sample = col_character(),
                 Probability = col_double(),
@@ -298,7 +299,7 @@ p.diag = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/pr
   dplyr::mutate(`Hospital Research ID` = gsub('/', '_', `Hospital Research ID`), `Weeks Follow Up` = as.double(difftime(`Diagnostic Endoscopy`, `Sequenced Endoscopy`, units='weeks')))
 
 oldp.preds = do.call(bind_rows,
-  purrr::map(grep( paste(unique(oldp$`Patient ID`), collapse='|'), list.files(preds.dir, full.names = T, recursive = T), value=T), function(f) {
+  purrr::map(grep( paste(unique(oldp$`Patient ID`), collapse='|'), list.files(preds.dir, 'predictions.tsv', full.names = T, recursive = T), value=T), function(f) {
              read_tsv(f,col_types = cols(
                 Sample = col_character(),
                 Probability = col_double(),
@@ -376,7 +377,7 @@ For the old progressor samples to-date, the model failed to classify any samples
 new.np = val %>% ungroup %>% filter(Batch %in% c(10:13) & Status == 'NP')
 
 new.np.preds = do.call(bind_rows,
-  purrr::map(grep( paste(unique(new.np$`Patient ID`), collapse='|'), list.files(preds.dir, full.names = T, recursive = T), value=T), function(f) {
+  purrr::map(grep( paste(unique(new.np$`Patient ID`), collapse='|'), list.files(preds.dir, 'predictions.tsv', full.names = T, recursive = T), value=T), function(f) {
              read_tsv(f,col_types = cols(
                 Sample = col_character(),
                 Probability = col_double(),
@@ -449,6 +450,13 @@ np.per.endo =
   dplyr::mutate('n.samples'=length(PID),'Samples'=paste(Sample,collapse=',')) %>% 
   dplyr::summarise_at(vars(matches('Prob|Relative|Endo|n.samples')), list(max)) %>% dplyr::select(-matches('^Sample$')) %>% 
   arrange(`Hospital Research ID`, Probability, PID) 
+
+
+fpr.patients = new.np.preds %>% 
+  group_by(`Hospital Research ID`) %>% dplyr::summarise(
+  FPR = length(which(Risk == 'High'))/n() ) %>% 
+  dplyr::summarise( 'Misclassified patients' = length(which(FPR > 0.5))/n() ) %>% pull %>% round(2)
+
 
 ```
 
@@ -527,5 +535,38 @@ pr
 ds.preds %>% dplyr::group_by(Status, Risk) %>% dplyr::summarise(n=length(Risk)) %>% spread(Risk, n) %>% kableExtra::kable(caption = 'Sample by risk and known status') %>% kableExtra::kable_styling(full_width = F)
 
 ```
+
+## Compared to the 'test' cohort
+
+These are the patients that Ellie and I randomly assigned as a test set.  They are not part of the model training (in this version) and so are a good comparison for the validation data. These are what we might have expected to see.
+
+```{r}
+
+predicted = '~/Data/BarrettsProgressionRisk/Analysis/training/val_predictions/0.9'
+
+info.dir = '~/Data/BarrettsProgressionRisk/QDNAseq'
+
+patient.file = list.files(info.dir, pattern='All_patient_info.xlsx', recursive=T, full.names=T)
+demo.file = list.files(info.dir, pattern='Demographics_full.xlsx', recursive=T, full.names=T)
+
+validation.patient.info = read.patient.info(patient.file, demo.file, set='Test')$info %>% 
+  dplyr::select(Hospital.Research.ID, Patient, Path.ID, Status, Endoscopy.Year, Pathology, Plate.Index, SLX.ID, Samplename)
+  
+vpd = do.call(bind_rows, lapply(list.files(predicted, full.names = T), function(f) {
+  read_tsv(f, col_types = 'cddcccdccdc')
+})) %>% dplyr::select(Hospital.Research.ID, everything()) 
+  
+vpd = left_join(vpd %>% dplyr::select(-Pathology, -matches('P53')), 
+                validation.patient.info %>% 
+                  dplyr::select(Hospital.Research.ID, Patient, Status) %>% unique, by=c('Hospital.Research.ID')) 
+
+
+vpd %>% dplyr::group_by(Status, Risk) %>% dplyr::summarise(n=length(Risk)) %>% spread(Risk, n) %>% kableExtra::kable(caption = "Test set samples (Ellie's)") %>% kableExtra::kable_styling(full_width = F)
+
+roc = pROC::roc(Status ~ Probability, data = vpd, auc=T, ci=T, of='thresholds',transpose=T)
+roc.plot(roc)
+
+```
+
 
 

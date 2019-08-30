@@ -31,8 +31,6 @@ if (!is.null(patients)) {
 
 
 sheets = readxl::excel_sheets(val.file)[1:13]
-
-
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
   readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% mutate_at(vars(`SLX-ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
 }))
@@ -64,7 +62,6 @@ for (ra in levels(all.val$RA) ) {
   if (length(pts) <= 0) next
   
   for (pid in pts) {
-if (pid != 'AHM1024') next
     message(paste('Patient',pid))
     
     si = all.val %>% filter(`Hospital Research ID` == pid & RA == ra) 
@@ -73,30 +70,33 @@ if (pid != 'AHM1024') next
 
     plot.dir = paste(outdir, pid, 'plots',sep='/')
     #if (length(list.files(plot.dir)) >= nrow( all.val %>% filter(`Hospital Research ID` == pid) )) next  
-    if (file.exists(paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra), '_segObj.Rdata'),sep='/'))) next # skip patients I've already done
+    #if (file.exists(paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra), '_segObj.Rdata'),sep='/'))) next # skip patients I've already done
 
     dir.create(plot.dir, showWarnings = F, recursive = T)
-    #si = si %>% mutate(Sample = paste(`SLX-ID`, gsub('-','_',si$`Index Sequence`), sep='.'))
-
-    samples = si %>% filter(RA == ra & `Hospital Research ID` == pid) %>% select(Samplename) %>% pull
-
-    rcols = grep(paste(samples,collapse='|'), colnames(merged.raw))
-    fcols = grep(paste(samples,collapse='|'), colnames(merged.fit))
     
-    if (length(rcols) != length(samples) | length(fcols) != length(samples)) {
-      warning(paste0(pid, ' from RA ', ra, ' samples do not match. Skipping'))
-      break
-    }
+    for (sample in si$Samplename) {
+      #samples = si %>% filter(RA == ra & `Hospital Research ID` == pid) %>% select(Samplename) %>% pull
+
+      rcols = grep(paste(sample,collapse='|'), colnames(merged.raw))
+      fcols = grep(paste(sample,collapse='|'), colnames(merged.fit))
     
-    rd = merged.raw %>% dplyr::select(location,chrom,start,end,!!rcols)
-    fd = merged.fit %>% dplyr::select(location,chrom,start,end,!!fcols)
+      if (length(rcols) != length(samples) | length(fcols) != length(samples)) {
+        warning(paste0(pid, ' from RA ', ra, ' samples do not match. Skipping'))
+        break
+      }
+    
+      rd = merged.raw %>% dplyr::select(location,chrom,start,end,!!rcols)
+      fd = merged.fit %>% dplyr::select(location,chrom,start,end,!!fcols)
 
     tryCatch({
       
       segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,cutoff=0.011, verbose=T)
+      
+      #prr2 = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=lambda, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx)
+      
       residuals = BarrettsProgressionRisk::sampleResiduals(segmented)
 
-      failedQC = bind_rows(failedQC, residuals)
+      #failedQC = bind_rows(failedQC, residuals)
       
       #prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented)
       #preds = bind_rows(preds, predictions(prr))

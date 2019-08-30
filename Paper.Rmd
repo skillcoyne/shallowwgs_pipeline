@@ -1068,16 +1068,16 @@ ggsave(filename='plots/hetero_initial.png', plot=p, width=6, height=4, units='in
 p2 = mtn.spatial(subset(globalCNdf, Patient == 20 & seg.type != 'arms'), back, ogjLimits,'Patient 20 (P)' )
 p6 = mtn.spatial(subset(globalCNdf, Patient == 51 & seg.type != 'arms'), back,ogjLimits,'Patient 51 (NP)' )
 
-# for (i in 1:nrow(sum.patient.data)) {
-#   print(i)
-#   pt = sum.patient.data[i, 'Patient']
-#   status = sum.patient.data[i, 'Status']
-# 
-#   pms = mtn.spatial(subset(globalCNdf, Patient == pt & seg.type != 'arms'), back, ogjLimits, paste('Patient', pt, '(', status, ')' ))
-#   
-#   fl = paste('patient_', pt, '.png', sep='')
-#   ggsave(paste('plots/spatial/', fl, sep=''), plot=grid.arrange(pms$grob), width=14, height=6, units='in', dpi=300)
-# }
+for (i in 1:nrow(sum.patient.data)) {
+  print(i)
+  pt = sum.patient.data[i, 'Patient']
+  status = sum.patient.data[i, 'Status']
+
+  pms = mtn.spatial(subset(globalCNdf, Patient == pt & seg.type != 'arms'), back, ogjLimits, paste('Patient', pt, '(', status, ')' ))
+
+  fl = paste('patient_', pt, '.png', sep='')
+  ggsave(paste('plots/spatial/', fl, sep=''), plot=grid.arrange(pms$grob), width=14, height=6, units='in', dpi=300)
+}
 
 back$ogj = NULL
 
@@ -1612,7 +1612,7 @@ if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=T)
 
-predicted = '~/Data/BarrettsProgressionRisk/Analysis/training/val_predictions'
+predicted = '~/Data/BarrettsProgressionRisk/Analysis/training/val_predictions/0.9'
 
 vpd = do.call(bind_rows, lapply(list.files(predicted, full.names = T), function(f) {
   read_tsv(f, col_types = 'cddcccdccdc')
