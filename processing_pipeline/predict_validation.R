@@ -96,19 +96,23 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
 
 ## Means!
 files = list.files(dirname(datadir), '5e06_tiles.tsv', recursive = T, full.names = T)
+head(files)
 tiles = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% rename(X1 = 'Sample')  %>% dplyr::filter(Sample %in% info$Sample)
+head(tiles)
 
 val.mean = apply(as.matrix(tiles[,-1]),2,mean,na.rm=T)
 val.sd = apply(as.matrix(tiles[,-1]),2,sd,na.rm=T)
 
 cx = BarrettsProgressionRisk:::scoreCX(as.matrix(tiles[,-1]),1)
 
-files = list.files(dirname(datadir), 'arms_tiles.tsv', recursive = T, full.names = T)
+files = list.files(dirname(datadir), 'arm_tiles.tsv', recursive = T, full.names = T)
+head(files)
 arms = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% rename(X1 = 'Sample') %>% dplyr::filter(Sample %in% info$Sample)
+head(arms)
 
 arm.mean = apply(as.matrix(arms[,-1]),2,mean,na.rm=T)
 arm.sd = apply(as.matrix(arms[,-1]),2,sd,na.rm=T)
@@ -125,7 +129,7 @@ for (f in segFiles) {
   index = sub('_.*', '', basename(f))
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
-  segmented$seg.vals = segmented$seg.vals %>% mutate_at(vars(matches(paste(segmented$sample.info$Sample, collapse='|'))), list(~fourier(.,path=outdir))  )
+  #segmented$seg.vals = segmented$seg.vals %>% mutate_at(vars(matches(paste(segmented$sample.info$Sample, collapse='|'))), list(~fourier(.,path=outdir))  )
 
   prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,be.model,verbose=T)
 print(predictions(prr))  
