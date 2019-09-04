@@ -25,6 +25,8 @@ options(knitr.table.format = "html")
 
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf'
+preds.dir = paste0(analysis.dir, '/predictions/fourier')
+
 
 fncols <- function(data, cname, default=NA) {
   add <-cname[!cname%in%names(data)]
@@ -58,9 +60,6 @@ val = do.call(bind_rows, lapply(list.files(analysis.dir, 'residuals', recursive 
   readr::read_tsv(f, col_types = 'cdddddl', col_names = F) %>% set_names('sample', 'varMAD_median', 'varMAD_sd', 'varMAD_Q1', 'varMAD_Q3', 'n.segs', 'Pass')  %>% 
     mutate(`Patient ID` = as.character(basename(dirname(f))))
 })) %>% dplyr::select(`Patient ID`, sample, varMAD_median, n.segs) %>% mutate(varMAD_median = round(varMAD_median, 3)) %>% mutate(sample = str_replace(sample, '_', '-'))
-
-
-#all.val %>% filter(!Samplename %in% val$sample )
 
 
 val = val %>% filter(sample %in% (all.val %>% dplyr::select(Samplename) %>% pull) ) %>% 
@@ -242,8 +241,6 @@ val.info = do.call(bind_rows, lapply(sheets[8:13], function(s) {
   Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
   )
 
-
-preds.dir = paste0(analysis.dir, '/predictions/0.9')
 
 batch8_preds = do.call(bind_rows,
   purrr::map(grep( paste(unique(on$`Patient ID`), collapse='|'), list.files(preds.dir, 'predictions.tsv', full.names = T, recursive = T), value=T), function(f) {
