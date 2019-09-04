@@ -111,7 +111,12 @@ for (ra in levels(all.val$RA) ) {
       file.remove( paste(dirname(plot.dir), 'residuals.txt',sep='/' ) )
       readr::write_tsv(residuals, path=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra),'_residuals.txt'),sep='/'), col_names = F, append=F)
       save(segmented, file=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra), '_segObj.Rdata'),sep='/'))
-      
+   
+  		failed = sampleResiduals(segmented) %>% dplyr::filter(!Pass)
+      if (nrow(failed) < nrow(sampleResiduals(segmented)) {
+				tiles = BarrettsProgressionRisk::tileSegments(segmented)
+				write_tsv(tiles, path=paste0(dirname(plot.dir), '/5e06_cleaned_tiled.tsv')
+  		} 
       #if (nrow(subset(residuals, !Pass)) > 0)
       #  failedQC = bind_rows(failedQC, residuals %>% filter(!Pass) %>% mutate(`Hospital Research ID` = pid) %>% select(`Patient ID`, everything()) )
       
