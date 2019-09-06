@@ -2,6 +2,7 @@
 ## Should NAs be replace by per-sample mean value instead??
 prep.matrix<-function(dt, na.replace=0) {
   output = list()
+  rows = rownames(dt)
   
   means = apply(dt,2, mean, na.rm=T)
   sd = apply(dt,2, sd, na.rm=T)
@@ -10,7 +11,9 @@ prep.matrix<-function(dt, na.replace=0) {
   output[['z.sd']] = sd
   
   dt = apply(dt, 2,  BarrettsProgressionRisk:::unit.var)
-  
+  #dt = apply(dt, 2,  scale, T, F)
+  #rownames(dt) = rows
+
   if (!is.null(na.replace))
     dt[is.na(dt)] = na.replace
 

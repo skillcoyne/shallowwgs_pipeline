@@ -1,5 +1,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
+set.seed(1234)
+
 if (length(args) < 3)
   stop("Missing required params: <data dir> <outdir> <info file dir> <Set: All,Training>")
 
@@ -17,13 +19,12 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 data = args[1]
 # data = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/'
 outdir = args[2]
-# outdir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms_all'
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis/model_no_norm'
 infodir = args[3]
-
+# infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 set = 'All'
 if (length(args) == 4) set = args[4]
 
-# infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
  logT = F
 # if (length(args) == 4)
 #   logT = as.logical(args[4])
@@ -45,66 +46,94 @@ patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% dp
 
 if (set != 'All') patient.info = patient.info %>% filter(Set == set)
 
-sum.patient.data = as_tibble(summarise.patient.info(patient.info))
+fncols <- function(data, cname, default=NA) {
+  add <-cname[!cname%in%names(data)]
+  
+  if(length(add)!=0) data[add] <- default
+  data
+}
+pastefun<-function(x) {
+  if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
+  return(x)
+}
 
-cleaned = list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T)
-cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
 
-arms = grep('arms', cleaned, value=T)
-segs = grep('arms', cleaned, invert=T, value=T)
+val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+sheets = readxl::excel_sheets(val.file)[8:13]
+all.val = do.call(bind_rows, lapply(sheets, function(s) {
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
+})) %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>% mutate(
+  `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), 
+  `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
+  Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
+)
 
-length(segs) == length(arms)
+patient.info = patient.info %>% dplyr::select(Hospital.Research.ID, Path.ID, Status, Samplename) %>% bind_rows(
+  all.val %>% dplyr::select(`Hospital Research ID`, `Block ID`, Status, Samplename ) %>% dplyr::rename(Hospital.Research.ID = `Hospital Research ID`, Path.ID = `Block ID`) )
 
-seg.tiles = do.call(bind_rows, lapply(segs, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+#sum.patient.data = as_tibble(summarise.patient.info(patient.info))
+
+cleaned = c(list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T),
+            grep('MSE|\\.R',list.files(path='~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/', pattern='tiles', full.names=T, recursive=T),invert=T,value=T ))
+
+#cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
+cleaned = grep(paste(unique(patient.info$Hospital.Research.ID), collapse = '|'), cleaned, value=T)
+
+arm.files = c(grep('arm', cleaned, value=T))
+seg.files = c(grep('arm', cleaned, value=T, invert=T))
+
+if (length(seg.files) != length(arm.files)) stop("Tiled files do not match between short segments and arms.")
+
+seg.tiles = do.call(bind_rows, lapply(seg.files, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
 colnames(seg.tiles)[1] = 'sample'
 samples = seg.tiles$sample
 
 seg.tiles = as.matrix(seg.tiles[,-1])
 rownames(seg.tiles) = samples
+dim(seg.tiles)
 
-if (logT) seg.tiles = t(apply(seg.tiles, 1, logTransform))
-
-segsList = prep.matrix(seg.tiles)
-
-z.mean = segsList$z.mean
-z.sd = segsList$z.sd
-segs = segsList$matrix
-
-# Complexity score
-cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
-mn.cx = mean(cx.score)
-sd.cx = sd(cx.score)
+#if (logT) seg.tiles = t(apply(seg.tiles, 1, BarrettsProgressionRisk:::.logTransform))
 
 # After mean centering set all NA values to 0
-segs = segsList$matrix
+segsList = prep.matrix(seg.tiles)
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
+segs = segsList$matrix
+dim(segs)
+
+#round(apply(logS, 2, mean),2)
+#round(apply(logS, 2, sd),2)
 
 # Complexity score
 cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
+#cx.score = as.matrix(scale(cx.score))
 mn.cx = mean(cx.score)
 sd.cx = sd(cx.score)
 
 # Load arm files  
-arm.tiles = do.call(bind_rows, lapply(arms, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+arm.tiles = do.call(bind_rows, lapply(arm.files, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character())) %>% dplyr::filter(X1!='')))
 colnames(arm.tiles)[1] = 'sample'
-
+dim(arm.tiles)
 samples = arm.tiles$sample
 arm.tiles = as.matrix(arm.tiles[,-1])
 rownames(arm.tiles) = samples
-if (logT) arm.tiles = t(apply(arm.tiles, 1, logTransform))
+#if (logT) arm.tiles = t(apply(arm.tiles, 1, logTransform))
 
 armsList = prep.matrix(arm.tiles)
 arms = armsList$matrix
-
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd
 
 allDf = BarrettsProgressionRisk::subtractArms(segs, arms)
+#allDf = cbind(allDf, 'cx'=cx.score)
 allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx))
 
+all.val = all.val %>% mutate(Status = ifelse(Status == 'OAC', 'P', Status)) %>% mutate(Status == factor(Status))
+
 ## labels: binomial: prog 1, np 0
-sampleStatus = subset(patient.info, Samplename %in% rownames(allDf), select=c('Samplename','Status'))
+sampleStatus = patient.info %>% filter(Samplename %in% rownames(allDf)) %>% dplyr::select(Samplename,Status) %>% 
+  mutate(Status = ifelse(Status == 'OAC', 'P', Status)) %>% mutate(Status = factor(Status)) 
+
 sampleStatus$Status = as.integer(sampleStatus$Status)-1
 labels = sampleStatus$Status
 names(labels) = sampleStatus$Samplename
@@ -135,6 +164,7 @@ if (file.exists(file)) {
   load(file, verbose=T)
 } else {
   for (a in alpha.values) {
+    print(a)
     fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)    
     l = fit0$lambda
 

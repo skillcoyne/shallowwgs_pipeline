@@ -53,14 +53,29 @@ datadir = args[1]
 info.file = args[2]
 model.dir = args[3]
 outdir = args[4]
+training.dir = args[5]
 
 select.alpha = '0.9'
-if (length(args) == 5) {
-  select.alpha = args[5]
+if (length(args) == 6) {
+  select.alpha = args[6]
   
   if (!select.alpha %in% c(0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0))
     stop("Alpha values available: 0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0")
 }
+
+files = list.files(training.dir, '5e06_cleaned_tiled', recursive=T, full.names = T)
+if (length(files) <= 0) stop(paste0("No tiled files in ", training.dir))
+training.tiles.5mb = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% rename(X1 = 'Sample')
+
+files = list.files(training.dir, 'arms_cleaned_tiled', recursive=T, full.names = T)
+if (length(files) <= 0) stop(paste0("No tiled arm files in ", training.dir))
+training.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% rename(X1 = 'Sample')
+
+if (nrow(training.tiles.5mb) != nrow(training.tiles.arms)) stop("5MB files don't match arm files in training directory.")
 
 
 pt = basename(datadir)
@@ -97,25 +112,60 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
 ## Means!
 files = list.files(dirname(datadir), '5e06_tiles.tsv', recursive = T, full.names = T)
 head(files)
-tiles = do.call(bind_rows, purrr::map(files, function(f) {
+val.tiles = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% rename(X1 = 'Sample')  %>% dplyr::filter(Sample %in% info$Sample)
-head(tiles)
+head(val.tiles)
 
-val.mean = apply(as.matrix(tiles[,-1]),2,mean,na.rm=T)
-val.sd = apply(as.matrix(tiles[,-1]),2,sd,na.rm=T)
+# Rank adjust
+find.rank<-function(r,x) {
+  if ( nrow(x %>% filter(rank == r)) > 0 ) return(x %>% filter(rank == r))
+  find.rank(r-1,x)
+}
 
-cx = BarrettsProgressionRisk:::scoreCX(as.matrix(tiles[,-1]),1)
+for (n in 2:ncol(training.tiles.5mb)) {
+  col = colnames(training.tiles.5mb)[n]
+  
+  rk = sapply(seq(1, length(training.tiles.5mb[[col]]), 4), function(s) mean(training.tiles.5mb[[col]][s:(s+4)], na.rm=T))
+  tt.rank = tibble(val=rk, rank=rank(rk)) %>% arrange(rank)
+  vt.rank = floor(rank(val.tiles[[col]]))
+  
+  for (i in 1:length(vt.rank)) {
+    r = vt.rank[i]
+    if (is.na(mean(find.rank(r,tt.rank)$val,na.rm=T))) stop(paste(col, r))
+    val.tiles[i, col] = mean(find.rank(r,tt.rank)$val,na.rm=T)
+  }
+}
+
+val.mean = apply(as.matrix(training.tiles.5mb[,-1]),2,mean,na.rm=T)
+val.sd = apply(as.matrix(training.tiles.5mb[,-1]),2,sd,na.rm=T)
+
+cx = BarrettsProgressionRisk:::scoreCX(as.matrix(val.tiles[,-1]),1)
 
 files = list.files(dirname(datadir), 'arm_tiles.tsv', recursive = T, full.names = T)
 head(files)
-arms = do.call(bind_rows, purrr::map(files, function(f) {
+val.arms = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% rename(X1 = 'Sample') %>% dplyr::filter(Sample %in% info$Sample)
 head(arms)
 
-arm.mean = apply(as.matrix(arms[,-1]),2,mean,na.rm=T)
-arm.sd = apply(as.matrix(arms[,-1]),2,sd,na.rm=T)
+
+for (n in 2:ncol(training.tiles.arms)) {
+  col = colnames(training.tiles.arms)[n]
+  
+  rk = sapply(seq(1, length(training.tiles.arms[[col]]), 4), function(s) mean(training.tiles.arms[[col]][s:(s+4)], na.rm=T))
+  tt.rank = tibble(val=rk, rank=rank(rk)) %>% arrange(rank)
+  vt.rank = floor(rank(val.arms[[col]]))
+  
+  for (i in 1:length(vt.rank)) {
+    r = vt.rank[i]
+    if (is.na(mean(find.rank(r,tt.rank)$val,na.rm=T))) stop(paste(col, r))
+    val.arms[i, col] = mean(find.rank(r,tt.rank)$val,na.rm=T)
+  }
+}
+
+arm.mean = apply(as.matrix(training.tiles.arms[,-1]),2,mean,na.rm=T)
+arm.sd = apply(as.matrix(training.tiles.arms[,-1][,-1]),2,sd,na.rm=T)
 
 be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, arm.mean, val.sd, arm.sd, mean(cx), sd(cx), nz, cvRR, NULL)
 

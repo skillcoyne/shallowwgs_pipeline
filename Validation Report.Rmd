@@ -25,7 +25,7 @@ options(knitr.table.format = "html")
 
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf'
-preds.dir = paste0(analysis.dir, '/predictions/fourier')
+preds.dir = paste0(analysis.dir, '/predictions/0.9')
 
 
 fncols <- function(data, cname, default=NA) {
@@ -418,6 +418,10 @@ new.np.preds = new.np.preds %>% dplyr::mutate( 'Weeks Since Endoscopy' = as.doub
 
 ggplot(new.np.preds, aes(`Hospital Research ID`, Probability, color=Probability)) + geom_point(size=2) +
   scale_color_distiller(palette = 'RdYlBu', name='P(P)') + plot.theme + theme(axis.text.x = element_text(angle=45,hjust=1))
+
+ggplot(new.np.preds, aes(`Hospital Research ID`, `Relative Risk`, color=Probability)) + geom_point(size=2) +
+  scale_color_distiller(palette = 'RdYlBu', name='RR') + plot.theme + theme(axis.text.x = element_text(angle=45,hjust=1))
+
 ```
 
 Time since the endoscopy was performed doesn't appear to have any effect on the non-progressor predictions
@@ -473,6 +477,9 @@ all = bind_rows(
 roc = pROC::roc(Status ~ Probability, data = all, auc=T, ci=T, of='thresholds',transpose=T)
 roc.plot(roc)
 #pROC::coords(roc, 'best', transpose=T)
+
+ggplot(all, aes(Status, `Relative Risk`, color=`Relative Risk`, group=Status)) + geom_boxplot() + geom_jitter(width=0.1)
+
 ```
 
 ```{r, fig.height=8, eval=F}
