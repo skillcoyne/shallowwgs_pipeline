@@ -147,7 +147,7 @@ head(files)
 val.arms = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% rename(X1 = 'Sample') %>% dplyr::filter(Sample %in% info$Sample)
-head(arms)
+head(val.arms)
 
 
 for (n in 2:ncol(training.tiles.arms)) {
