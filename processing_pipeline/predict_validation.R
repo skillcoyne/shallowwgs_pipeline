@@ -4,50 +4,8 @@ if (length(args) < 1)
   stop("Missing required params: <data dir> <sample info file> <model dir> <outdir> <alpha=0.9 DEF>")
 
 suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
-suppressPackageStartupMessages( library(mclust) )
-source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
-
-# smooth.EM.loess<-function(x, span=0.1, plot.dir = '.') {
-# 
-#   BIC = mclustBIC(x) 
-#   ds = densityMclust(x, x=BIC) 
-#   
-#   message(paste0('Clusters ', ds$G))
-#   png(filename=paste0(plot.dir,'/density.png'), width=800, height=600)
-#   plot(ds, what = "density", data = x, breaks = 50)
-#   dev.off()
-#   
-#   clusters = which(round(ds$parameters$mean,1) <= 1)
-#   #sG = which.max(table(ds$classification)[clusters])
-#   
-#   x[ds$classification %in% clusters] = loess( x[ds$classification %in% clusters]~c(1:sum(table(ds$classification)[clusters])), span=span )$fitted
-#   
-#   # for (i in 1:G) {
-#   #   if (table(ds$classification)[i] < 10) next
-#   #   x[ds$classification == i] = 
-#   #     loess( x[ds$classification == i]~c(1:table(ds$classification)[i]), span=span )$fitted
-#   # }
-#   
-#   return(x)  
-# }
-# 
-# 
-# fourier<-function(x, path='.') {
-#   fx = fft(x)
-#   #plot(Re(fx), type='l', xlim=c(0,20))
-#   fx[20:length(fx)] = 0+0i # Other than looking at the plot manually, how woudl I determine this?
-#   fxx = fft(fx, inverse = TRUE)/length(fx) 
-# 
-#   png(filename=paste0(path, '/fourier_transform.png'), width=600, height=800, units='px')
-#   layout(matrix(1:4,4,1)) 
-#   plot(x, type="l", main="Original Data")
-#   hist(x, breaks=50, main='')
-#   plot(Re(fxx),type="l", main="Fourier Transform Filtering") 
-#   hist(Re(fxx), breaks=50, main='')
-#   dev.off()
-#   
-#   return(Re(fxx))
-# }
+#suppressPackageStartupMessages( library(mclust) )
+#source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 datadir = args[1]
 info.file = args[2]
@@ -63,6 +21,8 @@ if (length(args) == 6) {
     stop("Alpha values available: 0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0")
 }
 
+# ----- Load ALL data
+
 files = list.files(training.dir, '5e06_cleaned_tiled', recursive=T, full.names = T)
 if (length(files) <= 0) stop(paste0("No tiled files in ", training.dir))
 training.tiles.5mb = do.call(bind_rows, purrr::map(files, function(f) {
@@ -77,10 +37,50 @@ training.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
 
 if (nrow(training.tiles.5mb) != nrow(training.tiles.arms)) stop("5MB files don't match arm files in training directory.")
 
+files = list.files(dirname(datadir), '5e06_tiles', recursive=T, full.names = T)
+val.tiles.5e6 = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% rename(X1 = 'Sample')
+
+files = list.files(dirname(datadir), 'arm_tiles', recursive=T, full.names = T)
+val.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double())) %>% dplyr::filter(X1 != '')
+})) %>% rename(X1 = 'Sample')
+
+if (nrow(val.tiles.5e6) != nrow(val.tiles.arms)) stop("5MB files don't match arm files in validation directory.")
+
+# Rank adjust validation
+find.rank<-function(r,x) {
+  if ( nrow(x %>% filter(rank == r)) > 0 ) return(x %>% filter(rank == r))
+  find.rank(r-1,x)
+}
+
+rank.adjust<-function(train,val) {
+  for (n in 2:ncol(train)) {
+    col = colnames(train)[n]
+    
+    rk = sapply(seq(1, length(train[[col]]), 4), function(s) mean(train[[col]][s:(s+4)], na.rm=T))
+    tt.rank = tibble(value=rk, rank=rank(rk)) %>% arrange(rank)
+    vt.rank = floor(rank(val[[col]]))
+    
+    for (i in 1:length(vt.rank)) {
+      r = vt.rank[i]
+      if (is.na(mean(find.rank(r,tt.rank)$value,na.rm=T))) stop(paste(col, r))
+      val[i, col] = mean(find.rank(r,tt.rank)$value,na.rm=T)
+    }
+  }
+return(val)
+}
+
+print("Rank adjusting validation cohort")
+val.tiles.5e6 = rank.adjust(training.tiles.5mb, val.tiles.5e6)
+val.tiles.arms = rank.adjust(training.tiles.arms, val.tiles.arms)
+
+
+# ------
 
 pt = basename(datadir)
 print(paste0('Patient ', pt))
-
 
 outdir = paste0(outdir, '/', select.alpha, '/', pt)
 dir.create(outdir, showWarnings = F, recursive = T)
@@ -110,65 +110,34 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
 }))
 
 ## Means!
-files = list.files(dirname(datadir), '5e06_tiles.tsv', recursive = T, full.names = T)
-head(files)
-val.tiles = do.call(bind_rows, purrr::map(files, function(f) {
-  read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample')  %>% dplyr::filter(Sample %in% info$Sample)
-head(val.tiles)
-
-# Rank adjust
-find.rank<-function(r,x) {
-  if ( nrow(x %>% filter(rank == r)) > 0 ) return(x %>% filter(rank == r))
-  find.rank(r-1,x)
-}
-
-for (n in 2:ncol(training.tiles.5mb)) {
-  col = colnames(training.tiles.5mb)[n]
-  
-  rk = sapply(seq(1, length(training.tiles.5mb[[col]]), 4), function(s) mean(training.tiles.5mb[[col]][s:(s+4)], na.rm=T))
-  tt.rank = tibble(val=rk, rank=rank(rk)) %>% arrange(rank)
-  vt.rank = floor(rank(val.tiles[[col]]))
-  
-  for (i in 1:length(vt.rank)) {
-    r = vt.rank[i]
-    if (is.na(mean(find.rank(r,tt.rank)$val,na.rm=T))) stop(paste(col, r))
-    val.tiles[i, col] = mean(find.rank(r,tt.rank)$val,na.rm=T)
-  }
-}
-
 val.mean = apply(as.matrix(training.tiles.5mb[,-1]),2,mean,na.rm=T)
 val.sd = apply(as.matrix(training.tiles.5mb[,-1]),2,sd,na.rm=T)
 
+arm.mean = apply(as.matrix(training.tiles.arms[,-1]),2,mean,na.rm=T)
+arm.sd = apply(as.matrix(training.tiles.arms[,-1]),2,sd,na.rm=T)
+
+
+info = info %>% dplyr::filter(`Hospital Research ID` == pt) %>% arrange(Sample)
+
+val.tiles = val.tiles.5e6 %>% filter(Sample %in% info$Sample) %>% arrange(Sample)
+val.tiles = as.matrix(val.tiles[,-1])
+rownames(val.tiles) = info$Sample
+for (i in 1:ncol(val.tiles))
+  val.tiles[,i] = BarrettsProgressionRisk:::unit.var(val.tiles[,i], val.mean[i], val.sd[i])
+
+val.arms = val.tiles.arms %>% filter(Sample %in% info$Sample) %>% arrange(Sample)
+val.arms = as.matrix(val.arms[,-1])
+rownames(val.arms) = info$Sample
+for (i in 1:ncol(val.arms))
+  val.arms[,i] = BarrettsProgressionRisk:::unit.var(val.arms[,i], arm.mean[i], arm.sd[i])
+
 cx = BarrettsProgressionRisk:::scoreCX(as.matrix(val.tiles[,-1]),1)
 
-files = list.files(dirname(datadir), 'arm_tiles.tsv', recursive = T, full.names = T)
-head(files)
-val.arms = do.call(bind_rows, purrr::map(files, function(f) {
-  read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample') %>% dplyr::filter(Sample %in% info$Sample)
-head(val.arms)
 
+val.df = cbind(BarrettsProgressionRisk::subtractArms(val.tiles, val.arms), 'cx'= BarrettsProgressionRisk:::unit.var(cx, mn.cx, sd.cx))
+be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, arm.mean, val.sd, arm.sd, mn.cx, sd.cx, nz, cvRR, NULL)
 
-for (n in 2:ncol(training.tiles.arms)) {
-  col = colnames(training.tiles.arms)[n]
-  
-  rk = sapply(seq(1, length(training.tiles.arms[[col]]), 4), function(s) mean(training.tiles.arms[[col]][s:(s+4)], na.rm=T))
-  tt.rank = tibble(val=rk, rank=rank(rk)) %>% arrange(rank)
-  vt.rank = floor(rank(val.arms[[col]]))
-  
-  for (i in 1:length(vt.rank)) {
-    r = vt.rank[i]
-    if (is.na(mean(find.rank(r,tt.rank)$val,na.rm=T))) stop(paste(col, r))
-    val.arms[i, col] = mean(find.rank(r,tt.rank)$val,na.rm=T)
-  }
-}
-
-arm.mean = apply(as.matrix(training.tiles.arms[,-1]),2,mean,na.rm=T)
-arm.sd = apply(as.matrix(training.tiles.arms[,-1][,-1]),2,sd,na.rm=T)
-
-be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, arm.mean, val.sd, arm.sd, mean(cx), sd(cx), nz, cvRR, NULL)
-
+print("Loading segment file")
 segFiles = list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T)
 print(segFiles)
 if (length(segFiles) <= 0) stop(paste0('No segmentation file found in ', datadir))
@@ -179,17 +148,22 @@ for (f in segFiles) {
   index = sub('_.*', '', basename(f))
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
-  #segmented$seg.vals = segmented$seg.vals %>% mutate_at(vars(matches(paste(segmented$sample.info$Sample, collapse='|'))), list(~fourier(.,path=outdir))  )
+  tiles = BarrettsProgressionRisk:::tileSamples(segmented, verbose=F)
+  tiles$tiles = val.df
+  
+  prr = BarrettsProgressionRisk:::predictRisk(segmented, tiles, be.model)
+  predictions(prr)
 
-  prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,be.model,verbose=T)
-print(predictions(prr))  
-save(prr, file = paste0(outdir, '/', index, '_predictions.Rdata'))
-  preds = bind_rows(preds, predictions(prr))
-print("generating mtn plot")
-cnPlot = BarrettsProgressionRisk::copyNumberMountainPlot(prr,T,F) 
-print('saving plot')
-ht = nrow(segmented$sample.info)
-ggsave(file=paste0(outdir,'/', index, '_copyNumberMtn.png'), plot=gridExtra::grid.arrange(cnPlot, top=pt), width=25, height=3*ht, dpi=300, units='in',limitsize=F)
+  #segmented$seg.vals = segmented$seg.vals %>% mutate_at(vars(matches(paste(segmented$sample.info$Sample, collapse='|'))), list(~fourier(.,path=outdir))  )
+  #prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented,be.model,verbose=T)
+  print(predictions(prr))  
+  save(prr, file = paste0(outdir, '/', index, '_predictions.Rdata'))
+    preds = bind_rows(preds, predictions(prr))
+  print("generating mtn plot")
+  cnPlot = BarrettsProgressionRisk::copyNumberMountainPlot(prr,T,F) 
+  print('saving plot')
+  ht = nrow(segmented$sample.info)
+  ggsave(file=paste0(outdir,'/', index, '_copyNumberMtn.png'), plot=gridExtra::grid.arrange(cnPlot, top=pt), width=25, height=3*ht, dpi=300, units='in',limitsize=F)
 }
 
 write_tsv(preds, path=paste0(outdir, '/', pt, '_predictions.tsv'))
