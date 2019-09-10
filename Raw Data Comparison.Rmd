@@ -6,6 +6,7 @@ output:
   html_document: 
     fig_height: 4
     fig_width: 6
+    toc: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -26,9 +27,26 @@ rm(fit.data, raw.data)
 
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 sheets = readxl::excel_sheets(val.file)[8:13]
+
+pastefun<-function(x) {
+  if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
+  return(x)
+}
+
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character))# %>% fncols('Collection', 'Biopsy')
-})) %>% mutate(Samplename = paste(`SLX-ID`,`Index Sequence`, sep='.'))
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% 
+    dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) 
+})) %>% mutate(Samplename = paste(`SLX-ID`,`Index Sequence`, sep='.')) %>% 
+  rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>% 
+  mutate(
+  `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), 
+  `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
+  Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
+  )
+
+
+
+
 
 load('~/Data/BarrettsProgressionRisk/QDNAseq/validation/merged_raw_fit.Rdata',verbose=T)
 vfit.data = merged.fit %>% as_tibble %>% mutate(chrom = factor(chrom, levels = chr.lengths$chr, ordered=T)) %>% 
@@ -45,7 +63,7 @@ dim(tfit.data)
 
 This is the raw data that gets segmented (after some processing).  It looks like there may be a slight shift in the distribution (per patient) of these values but it's not extremely high.
 
-```{r, fig.width=12, fig.height=12}
+```{r}
 
 summarise.per.pt<-function(df) {
   means = df %>% dplyr::select(-matches('location|chrom|start|end')) %>% summarise_all( list(~mean(.,na.rm=T))  ) 
@@ -398,7 +416,7 @@ gridExtra::grid.arrange(
 
 This strongly suggests that I need to try re-evaluate how to normalize bins.
 
-## Normalize Validation to itself
+## Normalize validation cohort within itself
 
 Instead scaling using z-values from the trianing data, I can do it from within the validation cohort. This looks better here, but when I use this for predictions it doesn't significantly change the results.
 
@@ -424,17 +442,18 @@ gridExtra::grid.arrange(
 ```
 
 ### Predictions
+
 ```{r}
 preds = do.call(bind_rows, purrr::map(
   list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions_scale_within_cohort/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
-  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`)
+  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`) %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'))
 
-preds = left_join(all.val, preds, by=c('Samplename'='Sample', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
+preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
 
 # Non progressors
 preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
 
-# FPR is nearly 40% still
+# FPR is ~40% still
 nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP'))
 
 # Progressors
@@ -443,8 +462,6 @@ preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`))
 # FNR is still over 50% in the old progressors as well
 nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`)))
 ```
-
-
 
 ## Rank adjust validation values then scale?
 
@@ -509,7 +526,7 @@ preds = do.call(bind_rows, purrr::map(
   list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions-rankadj/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
   function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`)
 
-preds = left_join(all.val, preds, by=c('Samplename'='Sample', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
+preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
 
 # Non progressors
 preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
@@ -525,31 +542,39 @@ nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital 
 ```
 
 
-
 ## Distributions
    
-How does it change if I use a global variance, or a rolling-bin variance (to preserve some local info) to adjust?   
+How does it change if I use a global variance learned from both cohorts, or a rolling-bin variance (to preserve some local info) to adjust?   
+   
+I think a weight-adjusted global~local variance isn't going to help.  The variance is consistently and stubbornly greater in the validation cohort no matter which direction I weight the scale factor.
    
 ```{r}
+wt = c(0.5,0.5)
+
 # global variance
 all.tiles = bind_rows(training.tiles, val.tiles)
-
-means = apply(all.tiles[,-1], 2, mean)
-sds = apply(all.tiles[,-1], 2, sd)
 global.sd = sd(as.matrix(all.tiles[,-1]))
 
-wt.sds = sapply(sds, function(x) weighted.mean(c(x,global.sd),w=c(0.5,0.5)))
-
-plot(wt.sds, sds)
+means = apply(training.tiles[,-1], 2, mean)
+sds = apply(training.tiles[,-1], 2, sd)
+wt.sds = sapply(sds, function(x) weighted.mean(c(x,global.sd),w=wt))
 
 tt.norm.gv = as.matrix(training.tiles[-1])
 for (i in 1:ncol(tt.norm.gv))
   tt.norm.gv[,i] = BarrettsProgressionRisk:::unit.var(tt.norm.gv[,i], means[i], wt.sds[i])
 
+
+means = apply(val.tiles[,-1], 2, mean)
+sds = apply(val.tiles[,-1], 2, sd)
+wt.sds = sapply(sds, function(x) weighted.mean(c(x,global.sd),w=wt))
+
 val.norm.gv = as.matrix(val.tiles[-1])
 for (i in 1:ncol(tt.norm.gv))
   val.norm.gv[,i] = BarrettsProgressionRisk:::unit.var(val.norm.gv[,i], means[i], wt.sds[i])
 
+means = apply(all.tiles[,-1], 2, mean)
+sds = apply(all.tiles[,-1], 2, sd)
+wt.sds = sapply(sds, function(x) weighted.mean(c(x,global.sd),w=wt))
 
 all.norm.gv = as.matrix(all.tiles[-1])
 for (i in 1:ncol(all.norm.gv))
@@ -579,10 +604,7 @@ gridExtra::grid.arrange(
 
 ```
    
-   
-   
-   
-```{r}
+```{r eval=F}
 
 tx = melt(training.tiles)
 vx = melt(val.tiles)
@@ -598,20 +620,14 @@ vx = vx %>% filter(Sample %in% (all.val %>% filter( !grepl('OCCAMS',`Hospital Re
 tx.normal = fitdistrplus::fitdist(tx$value, 'norm')
 vx.normal = fitdistrplus::fitdist(vx$value, 'norm')
 
-
-```
-
-From training data
-```{r}
+#From training data
 plot(tx.normal)
-```
 
-From validation data
-```{r}
+#From validation data
 plot(vx.normal)
 ```
 
-```{r}
+```{r eval=F}
 
 train.P = round(pnorm(tx$value,mean=tx.normal$estimate['mean'], sd=tx.normal$estimate['sd']),4)
 val.P = round(pnorm(as.matrix(val.tiles[-1]),mean=tx.normal$estimate['mean'], sd=tx.normal$estimate['sd']),4)

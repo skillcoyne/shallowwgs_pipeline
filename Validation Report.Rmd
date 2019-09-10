@@ -25,7 +25,7 @@ options(knitr.table.format = "html")
 
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf'
-preds.dir = paste0(analysis.dir, '/predictions/0.9')
+preds.dir = paste0(analysis.dir, '/predictions_model_5e6/0.9')
 
 
 fncols <- function(data, cname, default=NA) {
