@@ -4,7 +4,8 @@ author: "Sarah Killcoyne"
 date: "23/08/2019"
 output: 
   html_document: 
-    fig_width: 5
+    fig_height: 4
+    fig_width: 6
 ---
 
 ```{r setup, include=FALSE}
@@ -12,6 +13,8 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(BarrettsProgressionRisk)
 library(reshape2)
+library(gridExtra)
+library(e1071)
 
 chr.lengths = BarrettsProgressionRisk:::chrInfo()
 blacklist = readr::read_tsv(system.file("extdata", "qDNAseq_blacklistedRegions.txt", package="BarrettsProgressionRisk"), col_names=T, col_types='cii')  
@@ -43,19 +46,6 @@ dim(tfit.data)
 This is the raw data that gets segmented (after some processing).  It looks like there may be a slight shift in the distribution (per patient) of these values but it's not extremely high.
 
 ```{r, fig.width=12, fig.height=12}
-# par(mfrow=c(4,2))
-# qqnorm( na.omit(tfit.data$D701_D501_10722_11823), main='Training sample' ) 
-# qqnorm( na.omit(vfit.data$`SLX-17976.N705-S508`), main='Validation sample' )
-# 
-# qqnorm( na.omit(tfit.data$D701_D505_10722_11823), main='Training sample' ) 
-# qqnorm( na.omit(vfit.data$`SLX-17977.N706-S510`), main='Validation sample' )
-# 
-# qqnorm(na.omit(tfit.data$D706_D502_13696), main='Training sample')
-# qqnorm(na.omit(vfit.data$`SLX-16758.N703-S511`), main='Validation sample') # this was one of the OAC samples
-# 
-# qqnorm(na.omit(tfit.data$D712_D504_13692), main='Training sample') # P sample, correctly predicted
-# qqnorm(na.omit(vfit.data$`SLX-16783.N715-S505`), main='Validation sample') # P sample, correctly predicted
-
 
 summarise.per.pt<-function(df) {
   means = df %>% dplyr::select(-matches('location|chrom|start|end')) %>% summarise_all( list(~mean(.,na.rm=T))  ) 
@@ -153,12 +143,6 @@ gridExtra::grid.arrange(
   ggplot(x, aes(y=var,x=cohort,group=cohort,fill=cohort)) + geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') + labs(main='var', x=''),
   ggplot(x, aes(y=IQR,x=cohort,group=cohort,fill=cohort)) + geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') + labs(main='IQR', x=''),
 ncol=2, top='Segmented data distribution disp')
-
-# x %>% dplyr::filter(mean >= 1.05)
-# x %>% dplyr::filter(sd >= 0.2) 
-# 
-# x %>% dplyr::filter(var > 0.05)
-# x %>% dplyr::filter(IQR >= 0.2) 
 
 wilcox.test(t.disp$mean, v.disp$mean)
 wilcox.test(t.disp$sd, v.disp$sd)
@@ -270,8 +254,6 @@ nrow(seg500$seg.vals)
 # rhs
 print( sum(pd500$freq[pd500$freq > 0.25]) )
 
-
-
 predictions(prr250)
 predictions(prr500)
 
@@ -285,34 +267,33 @@ all.val %>% dplyr::filter(Samplename == samples$Sample[2])
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/', '5e06_cleaned_tiled', recursive=T, full.names = T)
 training.tiles = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample')
+})) %>% dplyr::rename('Sample' = 'X1')
 
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/', '5e06.*MSE', recursive=T, full.names = T)
 training.resids = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample')
+})) %>% dplyr::rename('Sample' = 'X1')
 
 
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/', '5e06_tiles', recursive=T, full.names = T)
 val.tiles = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample')
+})) %>% dplyr::rename('Sample' = 'X1')
 
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/', '5e06_MSE', recursive=T, full.names = T)
 val.resids = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample')
-
+})) %>% dplyr::rename('Sample' = 'X1')
 
 ```
 
 Per patient after tiling which merges the segments using a weighted mean.  Again, there's an upwards shift per-patient. 
 ```{r, fig.width=10}
 per.pt.tile<-function(df) {
-  means = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~mean(.,na.rm=T))) %>% t %>% as_tibble %>% rename(V1='mean')
-  sds = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~sd(.,na.rm=T))) %>% t %>% as_tibble %>% rename(V1='sd')
-  vars = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~var(.,na.rm=T))) %>% t %>% as_tibble %>% rename(V1='var')
-  iqrs = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~IQR(.,na.rm=T))) %>% t %>% as_tibble %>% rename(V1='IQR')
+  means = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~mean(.,na.rm=T))) %>% t %>% as_tibble %>% dplyr::rename('mean' = 'V1')
+  sds = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~sd(.,na.rm=T))) %>% t %>% as_tibble %>% dplyr::rename('sd' = 'V1')
+  vars = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~var(.,na.rm=T))) %>% t %>% as_tibble %>% dplyr::rename('var' = 'V1')
+  iqrs = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~IQR(.,na.rm=T))) %>% t %>% as_tibble %>% dplyr::rename('IQR' = 'V1')
   
   return(add_column(bind_cols(means,sds,vars,iqrs), 'Sample'=df$Sample, .before=1))
 }
@@ -336,13 +317,16 @@ Per 5MB bin (across patients).  There's a lot more variation in the means per bi
 
 ```{r}
 tile.dist.measure<-function(df) {
-  means = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~mean(.,na.rm=T))) %>% t, rownames='bin')  %>% rename(V1='mean') 
-  sds = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~mean(.,na.rm=T))) %>% t, rownames='bin')  %>% rename(V1='mean') 
-  means = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~sd(.,na.rm=T))) %>% t, rownames='bin')  %>% rename(V1='sd') 
-  iqrs = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~IQR(.,na.rm=T))) %>% t, rownames='bin')  %>% rename(V1='IQR') 
-  vars = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~var(.,na.rm=T))) %>% t, rownames='bin')  %>% rename(V1='var') 
+  means = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~mean(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('mean' = 'V1')
+  sds = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~sd(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('sd' = 'V1')
+  iqrs = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~IQR(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('iqrs' = 'V1')
+  vars = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~var(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('var' = 'V1')
   
-  dist = means %>% full_join(sds, by='bin') %>% full_join(iqrs, by='bin') %>% full_join(vars, by='bin')
+  skew = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~skewness(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('skew' = 'V1')
+  kurt = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~kurtosis(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('kurtosis' = 'V1')
+  
+  
+  dist = means %>% full_join(sds, by='bin') %>% full_join(iqrs, by='bin') %>% full_join(vars, by='bin') %>% full_join(skew, by='bin') %>% full_join(kurt, by='bin')
   return(dist)
 }
 
@@ -358,18 +342,28 @@ gridExtra::grid.arrange(
     labs(title='SD'), 
   ncol=2, top='Per bin tiled values')
 
-ggplot(full_join(t.dist, v.dist, by='bin'), aes(mean.x,mean.y)) + geom_point() + labs(x='train', y='val', title='mean')
 
-ggplot(full_join(t.dist, v.dist, by='bin'), aes(sd.x,sd.y)) + geom_point() + labs(x='train', y='val', title='SD')
+gridExtra::grid.arrange(
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, skew, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Skew'),
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, kurtosis, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Kurtosis'), 
+  ncol=2, top='Per bin tiled values')
 
-#dens.obs = density(training.tiles$`1:1-4985012`)
 
-#resample.obs = sample(dens.obs$x, nrow(val.tiles), replace=TRUE, prob=dens.obs$y)
+grid.arrange(
+  ggplot(full_join(t.dist, v.dist, by='bin'), aes(mean.x,mean.y)) + geom_point() + labs(x='train', y='val', title='mean'),
+  ggplot(full_join(t.dist, v.dist, by='bin'), aes(sd.x,sd.y)) + geom_point() + labs(x='train', y='val', title='SD'),
+  ggplot(full_join(t.dist, v.dist, by='bin'), aes(var.x,var.y)) + geom_point() + labs(x='train', y='val', title='var'),
+  ggplot(full_join(t.dist, v.dist, by='bin'), aes(skew.x,skew.y)) + geom_point() + labs(x='train', y='val', title='Skew'),
+ncol=2)
 
 
 ```
 
-After mean normalization per-bin using the z scores from the training data. And sure enough, it spreads the values out considerably for the validation data.  So the question is if the validation data were adjusted would it do this?
+After scaling and centering per-bin using the z scores from the training data. And sure enough, it spreads the values out considerably for the validation data.  So the question is if the validation data were adjusted would it do this?
 
 ```{r}
 #load('~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/model_data.Rdata')
@@ -404,10 +398,9 @@ gridExtra::grid.arrange(
 
 This strongly suggests that I need to try re-evaluate how to normalize bins.
 
-But what if I, as a quick test, normalize the validation cohort with itself?
+But what if I, as a quick test, normalize the validation cohort with itself? This looks better here, but when I use this for predictions it doesn't significantly change the results.
 
 ```{r}
-
 v.means = apply(as.matrix(val.tiles[,-1]),2, mean, na.rm=T)
 v.sd = apply(as.matrix(val.tiles[,-1]),2, sd, na.rm=T)
 
@@ -430,24 +423,17 @@ gridExtra::grid.arrange(
 
 ## Rank adjust validation values then scale?
 
+This moved the non-progressors the right direction with the predictions, but there was still a 30% FPR for non-progressors.  The age-bias reappeared for the progressors though.
+
 ```{r}
 
 find.rank<-function(r,x) {
   if ( nrow(x %>% filter(rank == r)) > 0 ) return(x %>% filter(rank == r))
   find.rank(r-1,x)
-  # if (nrow(x) <= 4) return(x)
-  # (median(x$rank))
-  # nrow(x)
-  # if (r <= floor(median(x$rank)) ) {
-  #   find.rank(r, x %>% filter(rank <= median(rank)))
-  # } else {
-  #   find.rank(r, x %>% filter(rank >= median(rank)))
-  # }
 }
 
 adj.v = val.tiles
 for (n in 2:ncol(training.tiles)) {
-  print(n)
   col = colnames(training.tiles)[n]
   
   rk = sapply(seq(1, length(training.tiles[[col]]), 4), function(s) mean(training.tiles[[col]][s:(s+4)], na.rm=T))
@@ -462,11 +448,6 @@ for (n in 2:ncol(training.tiles)) {
   }
 }
   
-j = 100
-hist(adj.v[[j]], breaks=20, xlim=c(0.84,1.1))
-hist(val.tiles[[j]], breaks=20, xlim=c(0.84,1.1))
-hist(training.tiles[[j]], breaks=20, xlim=c(0.84,1.1))
-
 
 plot( training.tiles %>% dplyr::select(-Sample) %>% dplyr::summarise_each(funs(sd)) %>% unlist,
       val.tiles %>% dplyr::select(-Sample) %>% dplyr::summarise_each(funs(sd)) %>% unlist, main='SD', xlab='train', ylab='val tiles')
@@ -496,148 +477,149 @@ gridExtra::grid.arrange(
 ```
 
 
+### Predictions
 
-## Adjusted by directly altering validation values for the nearest training value?
+```{r}
+preds = do.call(bind_rows, purrr::map(
+  list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions-rankadj/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
+  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`)
 
-Just a quick try, but could directly altering the values of the validation data to the nearest training value alter these?  The answer appears to be 'no'.
+preds = left_join(all.val, preds, by=c('Samplename'='Sample', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
 
-```{r, eval=F}
+# Non progressors
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
+
+# FPR is nearly 40% still
+nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP'))
+
+# Progressors
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
+
+# FNR is still over 50% in the old progressors as well
+nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`)))
+```
+
+
+
+## Distributions
+   
+How does it change if I use a global variance, or a rolling-bin variance (to preserve some local info) to adjust?   
+   
+```{r}
+# global variance
+all.tiles = bind_rows(training.tiles, val.tiles)
+
+means = apply(all.tiles[,-1], 2, mean)
+sds = apply(all.tiles[,-1], 2, sd)
+global.sd = sd(as.matrix(all.tiles[,-1]))
+
+wt.sds = sapply(sds, function(x) weighted.mean(x,global.sd,w=c(0.2)))
+
+plot(wt.sds, sds)
+
+tt.norm.gv = as.matrix(training.tiles[-1])
+for (i in 1:ncol(tt.norm.gv))
+  tt.norm.gv[,i] = BarrettsProgressionRisk:::unit.var(tt.norm.gv[,i], means[i], wt.sds[i])
+
+val.norm.gv = as.matrix(val.tiles[-1])
+for (i in 1:ncol(tt.norm.gv))
+  val.norm.gv[,i] = BarrettsProgressionRisk:::unit.var(val.norm.gv[,i], means[i], wt.sds[i])
+
+
+all.norm.gv = as.matrix(all.tiles[-1])
+for (i in 1:ncol(all.norm.gv))
+  all.norm.gv[,i] = BarrettsProgressionRisk:::unit.var(all.norm.gv[,i], means[i], wt.sds[i])
+
+
+tt.norm.gv = as_tibble(tt.norm.gv) %>% add_column('Sample'=training.tiles$Sample,.before=T)
+val.norm.gv = as_tibble(val.norm.gv) %>% add_column('Sample'=val.tiles$Sample,.before=T)
+all.norm.gv = as_tibble(all.norm.gv) %>% add_column('Sample'=all.tiles$Sample,.before=T)
+
+tt.norm.dist = tile.dist.measure(tt.norm.gv) %>% mutate(cohort='train, wt var')
+vp.norm.dist = tile.dist.measure(val.norm.gv) %>% mutate(cohort='val, wt var')
+all.norm.dist = tile.dist.measure(val.norm.gv) %>% mutate(cohort='all, wt var')
+
+gridExtra::grid.arrange(
+  ggplot(bind_rows(tt.norm.dist, vp.norm.dist, all.norm.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Mean'),
+  ggplot(bind_rows(tt.norm.dist, vp.norm.dist, all.norm.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='SD'),
+  ncol=2, top='Per bin wt var scale values')
 
 
 
 
 
+```
+   
+   
+   
+   
+```{r}
 
-adj.val.tiles = val.norm
-for (i in 1:nrow(adj.val.tiles)) {
-#  print(i)
-  for (j in 2:ncol(adj.val.tiles[i,])) {
-    bin = tt.norm[,j,drop=T]
-    bq = quantile(bin, probs=seq(0,1,0.2))
-    
-    iqr = range(quantile(bin,0.25), quantile(bin,0.75))
-    
-    if (adj.val.tiles[i,j,drop=T] >= min(iqr) & adj.val.tiles[i,j,drop=T] <= max(iqr)) {
-      mn = min(iqr); mx = max(iqr)
-    } else {
-      mn = max(bq[which(bq <= adj.val.tiles[i,j,drop=T] )])
-      mx = min(bq[which(bq >= adj.val.tiles[i,j,drop=T] )])
-    }
+tx = melt(training.tiles)
+vx = melt(val.tiles)
 
-    adj.val.tiles[i,j] = sample(bin[bin >= mn & bin <= mx],1)
+grid.arrange(ggplot(tx, aes(value)) + xlim(0.4, 1.5) + geom_histogram(bins=50, color='lightblue') + labs(title='Training'),
+             ggplot(vx, aes(value)) + xlim(0.4,1.5) + geom_histogram(bins=50, color='lightblue') + labs(title='Validation'))
 
-    #adj.val.tiles[i,j] = bin[which.min((bin-adj.val.tiles[i,j,drop=T])^2)]
+# The extreme values in the validation set come from the OACs
+all.val %>% filter(Samplename %in% unique(vx[which(vx$value > 1.5),'Sample']))
+
+vx = vx %>% filter(Sample %in% (all.val %>% filter( !grepl('OCCAMS',`Hospital Research ID`)) %>% dplyr::select(Samplename) %>% pull) )
+
+tx.normal = fitdistrplus::fitdist(tx$value, 'norm')
+vx.normal = fitdistrplus::fitdist(vx$value, 'norm')
+
+
+```
+
+From training data
+```{r}
+plot(tx.normal)
+```
+
+From validation data
+```{r}
+plot(vx.normal)
+```
+
+```{r}
+
+train.P = round(pnorm(tx$value,mean=tx.normal$estimate['mean'], sd=tx.normal$estimate['sd']),4)
+val.P = round(pnorm(as.matrix(val.tiles[-1]),mean=tx.normal$estimate['mean'], sd=tx.normal$estimate['sd']),4)
+#val.P = round(pnorm(as.matrix(val.tiles[-1]),mean=vx.normal$estimate['mean'], sd=vx.normal$estimate['sd']),4)
+
+
+p.transform = as.matrix(val.tiles[,-1])
+for (i in 1:nrow(p.transform)) {
+  for (j in 1:ncol(p.transform)) {
+    p.transform[i,j] = mean(tx[which(train.P == val.P[i,j]),'value'])
   }
 }
 
-hist(tt.norm$`1:1-4985012`, breaks=20)
-hist(adj.val.tiles$`1:1-4985012`, breaks=20)
-hist(val.norm$`1:1-4985012`, breaks=20)
-
-adj.v.pt = per.pt.tile(adj.val.tiles) %>% mutate(cohort='adj.val')
-
-ggplot(bind_rows(t.pt, v.pt, adj.v.pt), aes(cohort, mean, group=cohort, fill=cohort)) + 
-  geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-  labs(title='Mean per patient')
-
-v.adj.dist = tile.dist.measure(adj.val.tiles) %>% mutate(cohort='adj val')
-
-ggplot(bind_rows(t.dist, v.dist,v.adj.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
-  geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-  labs(title='Mean per bin')
+n = 20
+hist(as.matrix(training.tiles[,-1])[,n] ,breaks=20)
+hist(as.matrix(val.tiles[,-1])[,n] ,breaks=20)
+hist(p.transform[,n], breaks=20)
 
 
-adj.val.norm = as.matrix(adj.val.tiles[-1])
-for (i in 1:ncol(adj.val.norm))
-  adj.val.norm[,i] = BarrettsProgressionRisk:::unit.var(adj.val.norm[,i], z.mean[i], z.sd[i])
+# so now if I scale...
 
+vp.norm = p.transform
+for (i in 1:ncol(vp.norm))
+  vp.norm[,i] = BarrettsProgressionRisk:::unit.var(vp.norm[,i], means[i], sd[i])
+vp.norm = as_tibble(vp.norm) %>% add_column('Sample'=val.tiles$Sample,.before=T)
 
-adj.val.norm = as_tibble(adj.val.norm) %>% add_column('Sample'=adj.val.tiles$Sample,.before=T)
-vadj.norm.dist = tile.dist.measure(adj.val.norm) %>% mutate(cohort='adj val')
-
-ggplot(bind_rows(tnorm.dist, vnorm.dist,vadj.norm.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
-  geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-  labs(title='Mean per bin after norm')
-```
-
-## Normalize per patient instead?
-
-```{r}
-t.pt
-v.pt 
-
-
-median(v.pt$var)
-
-median(t.pt$var)
-median(t.pt$sd)
-median(t.pt$mean)
-
-summary(unlist(val.tiles[1,-1]))
-var(unlist(val.tiles[1,-1]))
-
-fourier<-function(x) {
-  fx = fft(x)
-  plot(Re(fx), type='l', xlim=c(0,20))
-  fx[20:length(fx)] = 0+0i
-  fxx = fft(fx, inverse = TRUE)/length(fx) 
-
-#  layout(matrix(1:2,2,1)) 
-#  plot(x, type="l", main="Original Data")
-#  plot(Re(fxx),type="l", main="Fourier Transform Filtering") 
-
-#  hist(x, breaks=50)
-#  hist(Re(fxx), breaks=50)
-  Re(fxx) 
-}
-
-
-fourier.tiles = val.tiles
-
-for (i in 1:nrow(fourier.tiles))
-  fourier.tiles[i,-1] = fourier(unlist(fourier.tiles[i,-1]))
-
-
-ft.disp = per.pt.tile(fourier.tiles) %>% mutate(cohort='fourier transform')
+vp.norm.dist = tile.dist.measure(vp.norm) %>% mutate(cohort='val p')
 
 gridExtra::grid.arrange(
-  ggplot(bind_rows(t.pt, v.pt, ft.disp), aes(cohort, mean, group=cohort, fill=cohort)) + 
-    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-    labs(title='Mean per patient'),
-  ggplot(bind_rows(t.pt, v.pt, ft.disp), aes(cohort, sd, group=cohort, fill=cohort)) + 
-    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-    labs(title='StdDev per patient'),
-  ncol=2, top='Per patient tiled values')
-
-
-
-f.dist = tile.dist.measure(fourier.tiles) %>% mutate(cohort='fourier transform')
-
-gridExtra::grid.arrange(
-  ggplot(bind_rows(t.dist, v.dist, f.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
+  ggplot(bind_rows(tnorm.dist, vnorm.dist, vp.norm.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
     geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
     labs(title='Mean'),
-  ggplot(bind_rows(t.dist, v.dist, f.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
-    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-    labs(title='SD'), 
-ncol=2, top='Per bin tiled values')
-
-
-fourier.norm = as.matrix(fourier.tiles[-1])
-for (i in 1:ncol(fourier.norm))
-  fourier.norm[,i] = BarrettsProgressionRisk:::unit.var(fourier.norm[,i], z.mean[i], z.sd[i])
-
-
-ft.norm = as_tibble(fourier.norm) %>% add_column('Sample'=fourier.tiles$Sample,.before=T)
-
-ftnorm.dist = tile.dist.measure(ft.norm) %>% mutate(cohort='fourier')
-
-
-gridExtra::grid.arrange(
-  ggplot(bind_rows(tnorm.dist, vnorm.dist, ftnorm.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
-    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-    labs(title='Mean'),
-  ggplot(bind_rows(tnorm.dist, vnorm.dist, ftnorm.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
+  ggplot(bind_rows(tnorm.dist, vnorm.dist,vp.norm.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
     geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
     labs(title='SD'),
   ncol=2, top='Per bin normalized tile values')
@@ -646,26 +628,6 @@ gridExtra::grid.arrange(
 ```
 
 
-
-
-
-```{r cosigndiff, eval=F}
-## What about finding the nearest patient via cosine diff?
-
-cos.sim=function(ma, mb){
-  mat=tcrossprod(ma, mb)
-  t1=sqrt(apply(ma, 1, crossprod))
-  t2=sqrt(apply(mb, 1, crossprod))
-  mat / outer(t1,t2)
-}
-
-cs.pt = do.call(rbind, lapply(1:nrow(val.tiles), function(j) {
-  sapply(1:nrow(training.tiles), function(i) {
-    cos.sim(as.matrix(val.tiles[j,-1]), as.matrix(training.tiles[i,-1]))
-  })
-}))
-
-```
 
 
 
