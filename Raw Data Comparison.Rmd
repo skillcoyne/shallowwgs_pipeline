@@ -398,7 +398,9 @@ gridExtra::grid.arrange(
 
 This strongly suggests that I need to try re-evaluate how to normalize bins.
 
-But what if I, as a quick test, normalize the validation cohort with itself? This looks better here, but when I use this for predictions it doesn't significantly change the results.
+## Normalize Validation to itself
+
+Instead scaling using z-values from the trianing data, I can do it from within the validation cohort. This looks better here, but when I use this for predictions it doesn't significantly change the results.
 
 ```{r}
 v.means = apply(as.matrix(val.tiles[,-1]),2, mean, na.rm=T)
@@ -420,6 +422,29 @@ gridExtra::grid.arrange(
     labs(title='SD'),
   ncol=2, top='Per bin normalized tile values', bottom='Val int = validation bins normalized using internal z-scores')
 ```
+
+### Predictions
+```{r}
+preds = do.call(bind_rows, purrr::map(
+  list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions_scale_within_cohort/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
+  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`)
+
+preds = left_join(all.val, preds, by=c('Samplename'='Sample', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
+
+# Non progressors
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
+
+# FPR is nearly 40% still
+nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP'))
+
+# Progressors
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
+
+# FNR is still over 50% in the old progressors as well
+nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`)))
+```
+
+
 
 ## Rank adjust validation values then scale?
 
@@ -513,7 +538,7 @@ means = apply(all.tiles[,-1], 2, mean)
 sds = apply(all.tiles[,-1], 2, sd)
 global.sd = sd(as.matrix(all.tiles[,-1]))
 
-wt.sds = sapply(sds, function(x) weighted.mean(x,global.sd,w=c(0.2)))
+wt.sds = sapply(sds, function(x) weighted.mean(c(x,global.sd),w=c(0.5,0.5)))
 
 plot(wt.sds, sds)
 

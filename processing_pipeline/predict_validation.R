@@ -8,10 +8,15 @@ suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 #source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 datadir = args[1]
+# datadir = '~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/AHM1400'
 info.file = args[2]
+# info.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 model.dir = args[3]
+# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms'
 outdir = args[4]
+# outdir = '/tmp'
 training.dir = args[5]
+# training.dir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient'
 
 select.alpha = '0.9'
 if (length(args) == 6) {
@@ -27,25 +32,26 @@ files = list.files(training.dir, '5e06_cleaned_tiled', recursive=T, full.names =
 if (length(files) <= 0) stop(paste0("No tiled files in ", training.dir))
 training.tiles.5mb = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample')
+})) %>% dplyr::rename('Sample' = 'X1')
 
 files = list.files(training.dir, 'arms_cleaned_tiled', recursive=T, full.names = T)
 if (length(files) <= 0) stop(paste0("No tiled arm files in ", training.dir))
 training.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample')
+})) %>% dplyr::rename('Sample' = 'X1')
 
 if (nrow(training.tiles.5mb) != nrow(training.tiles.arms)) stop("5MB files don't match arm files in training directory.")
 
+## Val
 files = list.files(dirname(datadir), '5e06_tiles', recursive=T, full.names = T)
 val.tiles.5e6 = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
-})) %>% rename(X1 = 'Sample')
+})) %>% dplyr::rename('Sample' = 'X1')
 
 files = list.files(dirname(datadir), 'arm_tiles', recursive=T, full.names = T)
 val.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double())) %>% dplyr::filter(X1 != '')
-})) %>% rename(X1 = 'Sample')
+})) %>% dplyr::rename('Sample' = 'X1')
 
 if (nrow(val.tiles.5e6) != nrow(val.tiles.arms)) stop("5MB files don't match arm files in validation directory.")
 
@@ -116,22 +122,16 @@ val.sd = apply(as.matrix(val.tiles.5e6[,-1]),2,sd,na.rm=T)
 arm.mean = apply(as.matrix(val.tiles.arms[,-1]),2,mean,na.rm=T)
 arm.sd = apply(as.matrix(val.tiles.arms[,-1]),2,sd,na.rm=T)
 
-
 info = info %>% dplyr::filter(`Hospital Research ID` == pt) %>% arrange(Sample)
-print(info)
 
-print(dim(val.tiles.5e6))
-#print(head(val.tiles.5e6))
 val.tiles = val.tiles.5e6 %>% filter(Sample %in% info$Sample) %>% arrange(Sample)
 val.tiles = as.matrix(val.tiles[,-1])
 rownames(val.tiles) = info$Sample
-print(head(val.tiles))
 
 for (i in 1:ncol(val.tiles))
   val.tiles[,i] = BarrettsProgressionRisk:::unit.var(val.tiles[,i], val.mean[i], val.sd[i])
 print('val unit.var done')
 
-print(head(val.tiles.arms))
 val.arms = val.tiles.arms %>% filter(Sample %in% info$Sample) %>% arrange(Sample)
 val.arms = as.matrix(val.arms[,-1])
 rownames(val.arms) = info$Sample
