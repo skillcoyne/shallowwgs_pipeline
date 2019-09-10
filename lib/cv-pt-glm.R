@@ -376,7 +376,7 @@ more.l<-function(lambda) {
     lambda = c(lambda, seq( min(lambda), exp(-5), 1e-3))
                
   l = unique(sort(c(lambda, seq(exp(-5), exp(-10), -1e-6),
-             seq(exp(-10), exp(-15), -1e-8)#,  seq(exp(-15), exp(-20), -1e-9)
+             seq(exp(-10), exp(-15), -1e-8),  seq(exp(-15), exp(-20), -1e-9)
              ), decreasing=T))
   return(l)
 }
