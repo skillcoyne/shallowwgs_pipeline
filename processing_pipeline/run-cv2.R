@@ -32,7 +32,7 @@ logT = F
 cache.dir = outdir
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
 
-if (dir.exists(cache.dir)) stop(paste0("Output directory ",cache.dir," exists. Exiting."))
+#if (dir.exists(cache.dir)) stop(paste0("Output directory ",cache.dir," exists. Exiting."))
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 ## Hospital.Research.ID info file
@@ -171,7 +171,7 @@ if (file.exists(file)) {
     print(a)
     fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)    
     l = fit0$lambda
-    l = more.l(l)
+    if (a > 0.5)  l = more.l(l)
     
     cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
