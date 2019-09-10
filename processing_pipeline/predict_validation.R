@@ -72,9 +72,9 @@ rank.adjust<-function(train,val) {
 return(val)
 }
 
-print("Rank adjusting validation cohort")
-val.tiles.5e6 = rank.adjust(training.tiles.5mb, val.tiles.5e6)
-val.tiles.arms = rank.adjust(training.tiles.arms, val.tiles.arms)
+#print("Rank adjusting validation cohort")
+#val.tiles.5e6 = rank.adjust(training.tiles.5mb, val.tiles.5e6)
+#val.tiles.arms = rank.adjust(training.tiles.arms, val.tiles.arms)
 
 
 # ------
@@ -110,29 +110,38 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
 }))
 
 ## Means!
-val.mean = apply(as.matrix(training.tiles.5mb[,-1]),2,mean,na.rm=T)
-val.sd = apply(as.matrix(training.tiles.5mb[,-1]),2,sd,na.rm=T)
+val.mean = apply(as.matrix(val.tiles.5e6[,-1]),2,mean,na.rm=T)
+val.sd = apply(as.matrix(val.tiles.5e6[,-1]),2,sd,na.rm=T)
 
-arm.mean = apply(as.matrix(training.tiles.arms[,-1]),2,mean,na.rm=T)
-arm.sd = apply(as.matrix(training.tiles.arms[,-1]),2,sd,na.rm=T)
+arm.mean = apply(as.matrix(val.tiles.arms[,-1]),2,mean,na.rm=T)
+arm.sd = apply(as.matrix(val.tiles.arms[,-1]),2,sd,na.rm=T)
 
 
 info = info %>% dplyr::filter(`Hospital Research ID` == pt) %>% arrange(Sample)
+print(info)
 
+print(dim(val.tiles.5e6))
+#print(head(val.tiles.5e6))
 val.tiles = val.tiles.5e6 %>% filter(Sample %in% info$Sample) %>% arrange(Sample)
 val.tiles = as.matrix(val.tiles[,-1])
 rownames(val.tiles) = info$Sample
+print(head(val.tiles))
+
 for (i in 1:ncol(val.tiles))
   val.tiles[,i] = BarrettsProgressionRisk:::unit.var(val.tiles[,i], val.mean[i], val.sd[i])
+print('val unit.var done')
 
+print(head(val.tiles.arms))
 val.arms = val.tiles.arms %>% filter(Sample %in% info$Sample) %>% arrange(Sample)
 val.arms = as.matrix(val.arms[,-1])
 rownames(val.arms) = info$Sample
+
 for (i in 1:ncol(val.arms))
   val.arms[,i] = BarrettsProgressionRisk:::unit.var(val.arms[,i], arm.mean[i], arm.sd[i])
+print('val arm unit.var done')
 
 cx = BarrettsProgressionRisk:::scoreCX(as.matrix(val.tiles[,-1]),1)
-
+print(paste('cx', cx))
 
 val.df = cbind(BarrettsProgressionRisk::subtractArms(val.tiles, val.arms), 'cx'= BarrettsProgressionRisk:::unit.var(cx, mn.cx, sd.cx))
 be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, arm.mean, val.sd, arm.sd, mn.cx, sd.cx, nz, cvRR, NULL)
