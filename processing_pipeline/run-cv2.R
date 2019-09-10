@@ -32,7 +32,7 @@ logT = F
 cache.dir = outdir
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
 
-#if (dir.exists(cache.dir)) stop(paste0("Output directory ",cache.dir," exists. Exiting."))
+if (dir.exists(cache.dir)) stop(paste0("Output directory ",cache.dir," exists. Exiting."))
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 ## Hospital.Research.ID info file
@@ -129,7 +129,8 @@ z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd
 
 allDf = BarrettsProgressionRisk::subtractArms(segs, arms)
-#allDf = cbind(allDf, 'cx'=cx.score/sqrt(mean(cx.score^2)))
+mn.cx = sqrt(mean(cx.score^2))
+allDf = cbind(allDf, 'cx'=cx.score/sqrt(mean(cx.score^2)))
 #allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx), 'sd'=per.samp.sd*10, 'mn'=per.samp.mean)
 
 #all.val = all.val %>% mutate(Status = ifelse(Status == 'OAC', 'P', Status)) %>% mutate(Status == factor(Status))
@@ -171,7 +172,7 @@ if (file.exists(file)) {
     print(a)
     fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)    
     l = fit0$lambda
-    if (a > 0.5)  l = more.l(l)
+    if (a > 0.5) l = more.l(l)
     
     cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
@@ -211,6 +212,7 @@ if (file.exists(file)) {
     fitNoHGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl, standardize = F) 
     
     l = fitNoHGD$lambda
+    if (a > 0.5) l = more.l(l)
     #if (a == 0)
     #  l = more.l(fitNoHGD$lambda)
     
@@ -246,6 +248,7 @@ if (file.exists(file)) {
     fitNoLGD <- glmnet(dysplasia.df[samples,], labels[samples], alpha=a, family='binomial', nlambda=nl, standardize = F) # all patients
     
     l = fitNoLGD$lambda
+    if (a > 0.5) l = more.l(l)
 
     cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(sets, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD, standardize = F)
     
