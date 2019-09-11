@@ -10,11 +10,14 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = F, warning = F)
+
 library(tidyverse)
 library(BarrettsProgressionRisk)
 library(reshape2)
 library(gridExtra)
+library(kableExtra)
+library(pander)
 library(e1071)
 
 chr.lengths = BarrettsProgressionRisk:::chrInfo()
@@ -45,9 +48,6 @@ all.val = do.call(bind_rows, lapply(sheets, function(s) {
   )
 
 
-
-
-
 load('~/Data/BarrettsProgressionRisk/QDNAseq/validation/merged_raw_fit.Rdata',verbose=T)
 vfit.data = merged.fit %>% as_tibble %>% mutate(chrom = factor(chrom, levels = chr.lengths$chr, ordered=T)) %>% 
   arrange(chrom, start) %>% dplyr::select(location,chrom,start,end, all.val$Samplename)
@@ -55,8 +55,8 @@ vraw.data = merged.raw %>% as_tibble %>% mutate(chrom = factor(chrom, levels = c
   arrange(chrom, start) %>% dplyr::select(location,chrom,start,end, all.val$Samplename)
 rm(merged.fit, merged.raw)
 
-dim(vfit.data)
-dim(tfit.data)
+##dim(vfit.data)
+##dim(tfit.data)
 ```
 
 # Raw counts & fitted values
@@ -83,7 +83,16 @@ summarise.per.pt<-function(df) {
 t.fit.disp = summarise.per.pt(tfit.data) %>% mutate(cohort='train')
 v.fit.disp = summarise.per.pt(vfit.data) %>% mutate(cohort='val')
 
-wilcox.test(t.fit.disp$mean, v.fit.disp$mean)
+pander(wilcox.test(t.fit.disp$mean, v.fit.disp$mean), caption='Per pt mean comparison (fitted values)')
+
+# Within the cohorts they're comparable
+x = t.fit.disp$mean[sample(500,replace = F)]
+pander(wilcox.test(x[1:250], x[251:500]),caption='Within training (sampled)') 
+
+y = v.fit.disp$mean[sample(100,replace = F)]
+pander(wilcox.test(y[1:50], y[51:50]), caption='Within validation (sampled')
+
+pander(wilcox.test(t.fit.disp$var, v.fit.disp$var), catpion='Per pt var comparison (fitted values)')
 
 fit.disp = bind_rows(t.fit.disp, v.fit.disp)
 
@@ -95,7 +104,7 @@ gridExtra::grid.arrange(
 t.raw.disp = summarise.per.pt(traw.data) %>% mutate(cohort='train')
 v.raw.disp = summarise.per.pt(vraw.data) %>% mutate(cohort='val')
 
-wilcox.test(t.raw.disp$mean, v.raw.disp$mean)
+pander(wilcox.test(t.raw.disp))
 
 raw.disp = bind_rows(t.raw.disp, v.raw.disp)
 
@@ -108,8 +117,13 @@ gridExtra::grid.arrange(
 rm(tfit.data,traw.data,vfit.data,vraw.data)
 ```
 
+The samples from the training cohort that have a mean>300 (outliers) are progressors, but did not all predict high risk in LOO.
+
 
 # First processing steps
+
+In the initial processing the raw counts are adjusted using the fitted values. 
+
 ```{r}
 if (file.exists('prepped.Rdata')) {
   load('prepped.Rdata')
@@ -276,10 +290,14 @@ predictions(prr250)
 predictions(prr500)
 
 all.val %>% dplyr::filter(Samplename == samples$Sample[2])
+
+rm(prr500, prr250, pd500, pd250, seg500, seg250)
 ```
 
 
 # Binned Data
+
+5MB bins.  For most bins this involves a weight average of 2 segments that overlap the bin.
 
 ```{r, echo=F, message=F, warning=F}
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/', '5e06_cleaned_tiled', recursive=T, full.names = T)
@@ -291,7 +309,6 @@ files = list.files('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/
 training.resids = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% dplyr::rename('Sample' = 'X1')
-
 
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/', '5e06_tiles', recursive=T, full.names = T)
 val.tiles = do.call(bind_rows, purrr::map(files, function(f) {
@@ -305,8 +322,11 @@ val.resids = do.call(bind_rows, purrr::map(files, function(f) {
 
 ```
 
+## Per patient
+
 Per patient after tiling which merges the segments using a weighted mean.  Again, there's an upwards shift per-patient. 
 ```{r, fig.width=10}
+
 per.pt.tile<-function(df) {
   means = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~mean(.,na.rm=T))) %>% t %>% as_tibble %>% dplyr::rename('mean' = 'V1')
   sds = df [,-1] %>% t %>% as_tibble %>% summarise_all(list(~sd(.,na.rm=T))) %>% t %>% as_tibble %>% dplyr::rename('sd' = 'V1')
@@ -328,8 +348,27 @@ gridExtra::grid.arrange(
     labs(title='StdDev per patient'),
   ncol=2, top='Per patient tiled values')
 
+t.per.pt.scale = as_tibble(t(apply(as.matrix(training.tiles[,-1]), 1, scale, center=T, scale=T))) %>% add_column('sample'=training.tiles$Sample, .before=1)
+colnames(t.per.pt.scale) = colnames(training.tiles)
+
+v.per.pt.scale = as_tibble(t(apply(as.matrix(val.tiles[,-1]), 1, scale, center=T, scale=T))) %>% add_column('sample'=val.tiles$Sample, .before=1)
+colnames(v.per.pt.scale) = colnames(val.tiles)
+
+t.pt = per.pt.tile(t.per.pt.scale) %>% mutate(cohort='train')
+v.pt = per.pt.tile(v.per.pt.scale) %>% mutate(cohort='val')
+
+gridExtra::grid.arrange(
+  ggplot(bind_rows(t.pt, v.pt), aes(cohort, mean, group=cohort, fill=cohort)) + ylim(-.5,.5) +
+    geom_jitter(width=0.1) + geom_boxplot(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Mean per patient'),
+  ggplot(bind_rows(t.pt, v.pt), aes(x=cohort, y=sd, group=cohort, fill=cohort)) + 
+    geom_point() + geom_boxplot(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='StdDev per patient'),
+  ncol=2, top='Per patient tiled values, after scaling per patient')
+
 ```
 
+## Per bin
 
 Per 5MB bin (across patients).  There's a lot more variation in the means per bin in the validation data. This is before unit normalization, which is based on the training data mean/sd, so where the variance causes issues is starting to become more clear.
 
@@ -378,7 +417,6 @@ grid.arrange(
   ggplot(full_join(t.dist, v.dist, by='bin'), aes(skew.x,skew.y)) + geom_point() + labs(x='train', y='val', title='Skew'),
 ncol=2)
 
-
 ```
 
 After scaling and centering per-bin using the z scores from the training data. And sure enough, it spreads the values out considerably for the validation data.  So the question is if the validation data were adjusted would it do this?
@@ -415,6 +453,28 @@ gridExtra::grid.arrange(
 ```
 
 This strongly suggests that I need to try re-evaluate how to normalize bins.
+
+### Per bin, after scaling per-pt
+
+```{r}
+
+t.dist = tile.dist.measure(t.per.pt.scale) %>% mutate(cohort='train')
+v.dist = tile.dist.measure(v.per.pt.scale) %>% mutate(cohort='val')
+
+gridExtra::grid.arrange(
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Mean'),
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='SD'), 
+  ncol=2, top='Per bin tiled values on per-pt scaled')
+
+
+```
+
+
+
 
 ## Normalize validation cohort within itself
 

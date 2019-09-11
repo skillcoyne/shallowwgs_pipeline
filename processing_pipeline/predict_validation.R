@@ -12,7 +12,7 @@ datadir = args[1]
 info.file = args[2]
 # info.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 model.dir = args[3]
-# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms'
+# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/model_per_pt_scaling/'
 outdir = args[4]
 # outdir = '/tmp'
 training.dir = args[5]
@@ -93,7 +93,6 @@ dir.create(outdir, showWarnings = F, recursive = T)
 
 print(paste0("Output path:", outdir))
 
-
 x = list.files(model.dir, 'loo.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
 nz = nzcoefs
@@ -144,7 +143,8 @@ arm.sd = apply(as.matrix(val.tiles.arms[,-1]),2,sd,na.rm=T)
 # print(paste('cx', cx))
 
 #val.df = cbind(BarrettsProgressionRisk::subtractArms(val.tiles, val.arms), 'cx'= BarrettsProgressionRisk:::unit.var(cx, mn.cx, sd.cx))
-be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, arm.mean, val.sd, arm.sd, mn.cx, sd.cx, nz, cvRR, NULL)
+#be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, arm.mean, val.sd, arm.sd, mn.cx, sd.cx, nz, cvRR, NULL)
+be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, NULL, NULL, NULL, NULL, mn.cx, sd.cx, nz, cvRR, NULL)
 
 print("Loading segment file")
 segFiles = list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T)
@@ -157,7 +157,7 @@ for (f in segFiles) {
   index = sub('_.*', '', basename(f))
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
-  tiles = BarrettsProgressionRisk:::tileSamples(segmented, scale=F, verbose=F)
+  tiles = BarrettsProgressionRisk:::tileSamples(segmented, scale=T, MARGIN = 1, verbose=T)
   #tiles$tiles = val.df
   
   prr = BarrettsProgressionRisk:::predictRisk(segmented, tiles, be.model)
