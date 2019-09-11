@@ -305,6 +305,11 @@ training.tiles = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% dplyr::rename('Sample' = 'X1')
 
+files = list.files('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/', 'arms_cleaned', recursive=T, full.names = T)
+training.arms = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% dplyr::rename('Sample' = 'X1')
+
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/', '5e06.*MSE', recursive=T, full.names = T)
 training.resids = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
@@ -314,6 +319,12 @@ files = list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/
 val.tiles = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% dplyr::rename('Sample' = 'X1')
+
+files = list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/', 'arm_tiles', recursive=T, full.names = T)
+val.arms = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% dplyr::rename('Sample' = 'X1')
+
 
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/', '5e06_MSE', recursive=T, full.names = T)
 val.resids = do.call(bind_rows, purrr::map(files, function(f) {
@@ -350,9 +361,13 @@ gridExtra::grid.arrange(
 
 t.per.pt.scale = as_tibble(t(apply(as.matrix(training.tiles[,-1]), 1, scale, center=T, scale=T))) %>% add_column('sample'=training.tiles$Sample, .before=1)
 colnames(t.per.pt.scale) = colnames(training.tiles)
+t.arm.pp.scale = as_tibble(t(apply(as.matrix(training.arms[,-1]), 1, scale, center=T, scale=T))) %>% add_column('sample'=training.arms$Sample, .before=1)
+colnames(t.arm.pp.scale) = colnames(training.arms)
 
 v.per.pt.scale = as_tibble(t(apply(as.matrix(val.tiles[,-1]), 1, scale, center=T, scale=T))) %>% add_column('sample'=val.tiles$Sample, .before=1)
 colnames(v.per.pt.scale) = colnames(val.tiles)
+v.arm.pp.scale = as_tibble(t(apply(as.matrix(val.arms[,-1]), 1, scale, center=T, scale=T))) %>% add_column('sample'=val.arms$Sample, .before=1)
+colnames(v.arm.pp.scale) = colnames(val.arms)
 
 t.pt = per.pt.tile(t.per.pt.scale) %>% mutate(cohort='train')
 v.pt = per.pt.tile(v.per.pt.scale) %>% mutate(cohort='val')
@@ -457,7 +472,6 @@ This strongly suggests that I need to try re-evaluate how to normalize bins.
 ### Per bin, after scaling per-pt
 
 ```{r}
-
 t.dist = tile.dist.measure(t.per.pt.scale) %>% mutate(cohort='train')
 v.dist = tile.dist.measure(v.per.pt.scale) %>% mutate(cohort='val')
 
@@ -469,10 +483,55 @@ gridExtra::grid.arrange(
     geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
     labs(title='SD'), 
   ncol=2, top='Per bin tiled values on per-pt scaled')
+```
+
+
+After the arm segments have been subtracted as well.
+```{r}
+
+t.pp.scale = BarrettsProgressionRisk:::subtractArms(as.matrix(t.per.pt.scale[,-1]), as.matrix(t.arm.pp.scale[,-1])) %>% as_tibble %>% add_column('Sample' = 'x', .before=1)
+v.pp.scale = BarrettsProgressionRisk:::subtractArms(as.matrix(v.per.pt.scale[,-1]), as.matrix(v.arm.pp.scale[,-1]))  %>% as_tibble %>% add_column('Sample' = 'x', .before=1)
+
+t.dist = tile.dist.measure(t.pp.scale) %>% mutate(cohort='train')
+v.dist = tile.dist.measure(v.pp.scale) %>% mutate(cohort='val')
+
+gridExtra::grid.arrange(
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Mean'),
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='SD'), 
+  ncol=2, top='Per bin tiled values on per-pt scaled')
+
 
 
 ```
 
+### Predictions
+
+```{r}
+preds = do.call(bind_rows, purrr::map(
+  list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions_per_pt_scale/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
+  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`) %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'))
+
+preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
+
+# Non progressors
+# FPR is ~40% still
+fpr = round(nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP')),2)
+
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('NP risk predictions, FPR=',fpr)) %>% kable_styling(full_width = F) 
+
+# Progressors
+# FNR is still over 50% in the old progressors as well
+fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`))),2)
+
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
+
+```
 
 
 
@@ -511,16 +570,18 @@ preds = do.call(bind_rows, purrr::map(
 preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
 
 # Non progressors
-preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
-
 # FPR is ~40% still
-nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP'))
+fpr = round(nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP')),2)
+
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('NP risk predictions, FPR=',fpr)) %>% kable_styling(full_width = F) 
 
 # Progressors
-preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
-
 # FNR is still over 50% in the old progressors as well
-nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`)))
+fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`))),2)
+
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
 ```
 
 ## Rank adjust validation values then scale?
@@ -589,16 +650,18 @@ preds = do.call(bind_rows, purrr::map(
 preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
 
 # Non progressors
-preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
+# FPR is ~40% still
+fpr = round(nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP')),2)
 
-# FPR is nearly 40% still
-nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP'))
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('NP risk predictions, FPR=',fpr)) %>% kable_styling(full_width = F) 
 
 # Progressors
-preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
-
 # FNR is still over 50% in the old progressors as well
-nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`)))
+fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`))),2)
+
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
 ```
 
 

@@ -12,7 +12,7 @@ datadir = args[1]
 info.file = args[2]
 # info.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 model.dir = args[3]
-# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/model_per_pt_scaling/'
+# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms'
 outdir = args[4]
 # outdir = '/tmp'
 training.dir = args[5]
@@ -115,11 +115,11 @@ info = do.call(bind_rows, lapply(sheets, function(s) {
 }))
 
 ## Means!
-val.mean = apply(as.matrix(val.tiles.5e6[,-1]),2,mean,na.rm=T)
-val.sd = apply(as.matrix(val.tiles.5e6[,-1]),2,sd,na.rm=T)
+val.mean = apply(as.matrix(bind_rows(val.tiles.5e6,training.tiles.5mb)[,-1]), 2, mean, na.rm=T)
+val.sd = apply(as.matrix(bind_rows(val.tiles.5e6,training.tiles.5mb)[,-1]), 2, sd, na.rm=T)
 
-arm.mean = apply(as.matrix(val.tiles.arms[,-1]),2,mean,na.rm=T)
-arm.sd = apply(as.matrix(val.tiles.arms[,-1]),2,sd,na.rm=T)
+arm.mean = apply(as.matrix(bind_rows(val.tiles.arms,training.tiles.arms)[,-1]), 2, mean, na.rm=T)
+arm.sd = apply(as.matrix(bind_rows(val.tiles.arms,training.tiles.arms)[,-1]), 2, sd, na.rm=T)
 
 #info = info %>% dplyr::filter(`Hospital Research ID` == pt) %>% arrange(Sample)
 
@@ -143,8 +143,8 @@ arm.sd = apply(as.matrix(val.tiles.arms[,-1]),2,sd,na.rm=T)
 # print(paste('cx', cx))
 
 #val.df = cbind(BarrettsProgressionRisk::subtractArms(val.tiles, val.arms), 'cx'= BarrettsProgressionRisk:::unit.var(cx, mn.cx, sd.cx))
-#be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, arm.mean, val.sd, arm.sd, mn.cx, sd.cx, nz, cvRR, NULL)
-be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, NULL, NULL, NULL, NULL, mn.cx, sd.cx, nz, cvRR, NULL)
+be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, arm.mean, val.sd, arm.sd, mn.cx, sd.cx, nz, cvRR, NULL)
+#be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, NULL, NULL, NULL, NULL, mn.cx, sd.cx, nz, cvRR, NULL)
 
 print("Loading segment file")
 segFiles = list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T)
@@ -157,7 +157,7 @@ for (f in segFiles) {
   index = sub('_.*', '', basename(f))
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
-  tiles = BarrettsProgressionRisk:::tileSamples(segmented, scale=T, MARGIN = 1, verbose=T)
+  tiles = BarrettsProgressionRisk:::tileSamples(segmented, scale=T, MARGIN = 2, verbose=T)
   #tiles$tiles = val.df
   
   prr = BarrettsProgressionRisk:::predictRisk(segmented, tiles, be.model)
