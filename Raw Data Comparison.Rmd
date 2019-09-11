@@ -72,10 +72,10 @@ summarise.per.pt<-function(df) {
   iqrs = df %>% dplyr::select(-matches('location|chrom|start|end')) %>% summarise_all( list(~IQR(.,na.rm=T))  ) 
 
   disp = full_join(
-           full_join( as_tibble(t(means), rownames='sample') %>% rename(V1='mean'), 
-                      as_tibble(t(sds), rownames='sample') %>% rename(V1='sd'), by='sample'),
-           full_join(as_tibble(t(vars), rownames='sample') %>% rename(V1='var'),
-                     as_tibble(t(iqrs), rownames='sample') %>% rename(V1='IQR'), by='sample'), 
+           full_join( as_tibble(t(means), rownames='sample') %>% dplyr::rename('mean' = 'V1'), 
+                      as_tibble(t(sds), rownames='sample') %>% dplyr::rename('sd' = 'V1'),  by='sample'),
+           full_join(as_tibble(t(vars), rownames='sample') %>% dplyr::rename('var' = 'V1'), 
+                     as_tibble(t(iqrs), rownames='sample') %>% dplyr::rename('IQR' = 'V1'),  by='sample'), 
            by='sample') 
   return(disp)
 }
@@ -603,6 +603,33 @@ gridExtra::grid.arrange(
 
 
 ```
+   
+## Retrained model, no scaling
+
+Shows nearly the same problem as before.  The variance is clearly at issue.
+
+```{r}
+
+preds = do.call(bind_rows, purrr::map(
+  list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions_no_scale/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
+  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`)
+
+preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
+
+# Non progressors
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
+
+# FPR is nearly 40% still
+nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP'))
+
+# Progressors
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
+
+# FNR is still over 50% in the old progressors as well
+nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`)))
+```
+```
+
    
 ```{r eval=F}
 

@@ -19,7 +19,7 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 data = args[1]
 # data = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/'
 outdir = args[2]
-# outdir = '~/Data/BarrettsProgressionRisk/Analysis/model_no_bin_scaling/'
+# outdir = '/tmp'
 infodir = args[3]
 # infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 set = 'Training'
@@ -99,7 +99,7 @@ per.samp.mean = apply(seg.tiles,1,mean)
 #if (logT) seg.tiles = t(apply(seg.tiles, 1, BarrettsProgressionRisk:::.logTransform))
 
 # After mean centering set all NA values to 0
-segsList = prep.matrix(seg.tiles,scale=F)
+segsList = prep.matrix(seg.tiles,scale=T, MARGIN=1)
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
 segs = segsList$matrix
@@ -123,7 +123,7 @@ arm.tiles = as.matrix(arm.tiles[,-1])
 rownames(arm.tiles) = samples
 #if (logT) arm.tiles = t(apply(arm.tiles, 1, logTransform))
 
-armsList = prep.matrix(arm.tiles,scale=F)
+armsList = prep.matrix(arm.tiles,scale=T,MARGIN=1)
 arms = armsList$matrix
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd

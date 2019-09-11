@@ -1,6 +1,6 @@
 
 ## Should NAs be replace by per-sample mean value instead??
-prep.matrix<-function(dt, na.replace=0, scale=F) {
+prep.matrix<-function(dt, na.replace=0, scale=F, MARGIN=2) {
   output = list()
   rows = rownames(dt)
   
@@ -11,9 +11,12 @@ prep.matrix<-function(dt, na.replace=0, scale=F) {
   output[['z.sd']] = sd
   
   if (scale) {
-    dt = apply(dt, 2,  BarrettsProgressionRisk:::unit.var)
-    dt = apply(dt, 2,  scale, T, F)
-    rownames(dt) = rows
+    dt = apply(dt, MARGIN,  BarrettsProgressionRisk:::unit.var)
+    if (MARGIN == 2) { 
+      rownames(dt) = rows
+    } else {
+      dt = t(dt)  
+    }
   }
 
   if (!is.null(na.replace))
