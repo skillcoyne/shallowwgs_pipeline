@@ -300,6 +300,20 @@ rm(prr500, prr250, pd500, pd250, seg500, seg250)
 5MB bins.  For most bins this involves a weight average of 2 segments that overlap the bin.
 
 ```{r, echo=F, message=F, warning=F}
+tile.dist.measure<-function(df) {
+  means = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~mean(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('mean' = 'V1')
+  sds = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~sd(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('sd' = 'V1')
+  iqrs = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~IQR(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('iqrs' = 'V1')
+  vars = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~var(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('var' = 'V1')
+  
+  skew = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~skewness(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('skew' = 'V1')
+  kurt = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~kurtosis(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('kurtosis' = 'V1')
+  
+  
+  dist = means %>% full_join(sds, by='bin') %>% full_join(iqrs, by='bin') %>% full_join(vars, by='bin') %>% full_join(skew, by='bin') %>% full_join(kurt, by='bin')
+  return(dist)
+}
+
 files = list.files('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/', '5e06_cleaned_tiled', recursive=T, full.names = T)
 training.tiles = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
@@ -333,9 +347,9 @@ val.resids = do.call(bind_rows, purrr::map(files, function(f) {
 
 ```
 
-## Per patient
+## Looking at the distribution of values per sample
 
-Per patient after tiling which merges the segments using a weighted mean.  Again, there's an upwards shift per-patient. 
+Per sample after tiling which merges the segments using a weighted mean.  Again, there's an upwards shift per-sample 
 ```{r, fig.width=10}
 
 per.pt.tile<-function(df) {
@@ -358,7 +372,12 @@ gridExtra::grid.arrange(
     geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
     labs(title='StdDev per patient'),
   ncol=2, top='Per patient tiled values')
+```
 
+## Scale per sample
+
+Scaling and centering per sample makes the samples directly comparable, but not sure what it will do to the bins.  
+```{r}
 t.per.pt.scale = as_tibble(t(apply(as.matrix(training.tiles[,-1]), 1, scale, center=T, scale=T))) %>% add_column('sample'=training.tiles$Sample, .before=1)
 colnames(t.per.pt.scale) = colnames(training.tiles)
 t.arm.pp.scale = as_tibble(t(apply(as.matrix(training.arms[,-1]), 1, scale, center=T, scale=T))) %>% add_column('sample'=training.arms$Sample, .before=1)
@@ -383,25 +402,89 @@ gridExtra::grid.arrange(
 
 ```
 
-## Per bin
+### Per bin, after scaling per-sample
 
-Per 5MB bin (across patients).  There's a lot more variation in the means per bin in the validation data. This is before unit normalization, which is based on the training data mean/sd, so where the variance causes issues is starting to become more clear.
+Now the variance of the cohorts appears to be nearly the same.
 
 ```{r}
-tile.dist.measure<-function(df) {
-  means = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~mean(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('mean' = 'V1')
-  sds = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~sd(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('sd' = 'V1')
-  iqrs = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~IQR(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('iqrs' = 'V1')
-  vars = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~var(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('var' = 'V1')
-  
-  skew = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~skewness(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('skew' = 'V1')
-  kurt = as_tibble(df %>% dplyr::summarise_at(vars(-Sample), list(~kurtosis(.,na.rm=T))) %>% t, rownames='bin')  %>% dplyr::rename('kurtosis' = 'V1')
-  
-  
-  dist = means %>% full_join(sds, by='bin') %>% full_join(iqrs, by='bin') %>% full_join(vars, by='bin') %>% full_join(skew, by='bin') %>% full_join(kurt, by='bin')
-  return(dist)
-}
+t.dist = tile.dist.measure(t.per.pt.scale) %>% mutate(cohort='train')
+v.dist = tile.dist.measure(v.per.pt.scale) %>% mutate(cohort='val')
 
+gridExtra::grid.arrange(
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Mean'),
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='SD'), 
+  ncol=2, top='Per bin tiled values on per-pt scaled')
+
+grid.arrange(
+  ggplot(full_join(t.dist, v.dist, by='bin'), aes(mean.x,mean.y)) + geom_point() + labs(x='train', y='val', title='mean'),
+  ggplot(full_join(t.dist, v.dist, by='bin'), aes(sd.x,sd.y)) + geom_point() + labs(x='train', y='val', title='SD'),
+  ggplot(full_join(t.dist, v.dist, by='bin'), aes(var.x,var.y)) + geom_point() + labs(x='train', y='val', title='var'),
+  ggplot(full_join(t.dist, v.dist, by='bin'), aes(skew.x,skew.y)) + geom_point() + labs(x='train', y='val', title='Skew'),
+ncol=2)
+
+```
+
+
+Just to check...after the arm segments have been subtracted as well.
+```{r}
+
+t.pp.scale = BarrettsProgressionRisk:::subtractArms(as.matrix(t.per.pt.scale[,-1]), as.matrix(t.arm.pp.scale[,-1])) %>% as_tibble %>% add_column('Sample' = 'x', .before=1)
+v.pp.scale = BarrettsProgressionRisk:::subtractArms(as.matrix(v.per.pt.scale[,-1]), as.matrix(v.arm.pp.scale[,-1]))  %>% as_tibble %>% add_column('Sample' = 'x', .before=1)
+
+t.dist = tile.dist.measure(t.pp.scale) %>% mutate(cohort='train')
+v.dist = tile.dist.measure(v.pp.scale) %>% mutate(cohort='val')
+
+gridExtra::grid.arrange(
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Mean'),
+  ggplot(bind_rows(t.dist, v.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='SD'), 
+  ncol=2, top='Per bin tiled values on per-sample scaled')
+
+
+
+```
+
+### Predictions
+
+Using a model built on per-sample scaled data. Unfortunately that has not resolved the predictions.
+
+```{r}
+preds = do.call(bind_rows, purrr::map(
+  list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions_per_pt_scale/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
+  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`) %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'))
+
+preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
+
+# Non progressors
+# FPR is ~40% still
+fpr = round(nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP')),2)
+
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('NP risk predictions, FPR=',fpr)) %>% kable_styling(full_width = F) 
+
+# Progressors
+# FNR is still over 50% in the old progressors as well
+fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`))),2)
+
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
+
+```
+
+## Per bin variance
+
+No scaling at this point.
+
+Per 5MB bin (across patients).  There's a lot more variation in the means per bin in the validation data. This is before bin scaling, which is based on the training data mean/sd, so where the variance causes issues is starting to become more clear.
+
+```{r}
 t.dist = tile.dist.measure(training.tiles) %>% mutate(cohort='train')
 v.dist = tile.dist.measure(val.tiles) %>% mutate(cohort='val')
 
@@ -469,75 +552,10 @@ gridExtra::grid.arrange(
 
 This strongly suggests that I need to try re-evaluate how to normalize bins.
 
-### Per bin, after scaling per-pt
 
-```{r}
-t.dist = tile.dist.measure(t.per.pt.scale) %>% mutate(cohort='train')
-v.dist = tile.dist.measure(v.per.pt.scale) %>% mutate(cohort='val')
+## Scale validation cohort within itself
 
-gridExtra::grid.arrange(
-  ggplot(bind_rows(t.dist, v.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
-    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-    labs(title='Mean'),
-  ggplot(bind_rows(t.dist, v.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
-    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-    labs(title='SD'), 
-  ncol=2, top='Per bin tiled values on per-pt scaled')
-```
-
-
-After the arm segments have been subtracted as well.
-```{r}
-
-t.pp.scale = BarrettsProgressionRisk:::subtractArms(as.matrix(t.per.pt.scale[,-1]), as.matrix(t.arm.pp.scale[,-1])) %>% as_tibble %>% add_column('Sample' = 'x', .before=1)
-v.pp.scale = BarrettsProgressionRisk:::subtractArms(as.matrix(v.per.pt.scale[,-1]), as.matrix(v.arm.pp.scale[,-1]))  %>% as_tibble %>% add_column('Sample' = 'x', .before=1)
-
-t.dist = tile.dist.measure(t.pp.scale) %>% mutate(cohort='train')
-v.dist = tile.dist.measure(v.pp.scale) %>% mutate(cohort='val')
-
-gridExtra::grid.arrange(
-  ggplot(bind_rows(t.dist, v.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
-    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-    labs(title='Mean'),
-  ggplot(bind_rows(t.dist, v.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
-    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
-    labs(title='SD'), 
-  ncol=2, top='Per bin tiled values on per-pt scaled')
-
-
-
-```
-
-### Predictions
-
-```{r}
-preds = do.call(bind_rows, purrr::map(
-  list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions_per_pt_scale/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
-  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`) %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'))
-
-preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
-
-# Non progressors
-# FPR is ~40% still
-fpr = round(nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP')),2)
-
-preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
-  kable(caption=paste0('NP risk predictions, FPR=',fpr)) %>% kable_styling(full_width = F) 
-
-# Progressors
-# FNR is still over 50% in the old progressors as well
-fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`))),2)
-
-preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
-  kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
-
-```
-
-
-
-## Normalize validation cohort within itself
-
-Instead scaling using z-values from the trianing data, I can do it from within the validation cohort. This looks better here, but when I use this for predictions it doesn't significantly change the results.
+Instead scaling using z-values from the training data, I can do it from within the validation cohort. This looks better here, but when I use this for predictions it doesn't significantly change the results.
 
 ```{r}
 v.means = apply(as.matrix(val.tiles[,-1]),2, mean, na.rm=T)
@@ -583,6 +601,54 @@ fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS
 preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
   kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
 ```
+
+## Scale validation using global z scores
+
+```{r}
+v.means = apply(as.matrix(bind_rows(training.tiles, val.tiles)[,-1]),2, mean, na.rm=T)
+v.sd = apply(as.matrix(bind_rows(training.tiles, val.tiles)[,-1]),2, sd, na.rm=T)
+
+val.int.norm = as.matrix(val.tiles[,-1])
+for (i in 1:ncol(val.int.norm)) 
+  val.int.norm[,i] = BarrettsProgressionRisk:::unit.var(val.int.norm[,i], v.means[i], v.sd[i])
+
+val.int.norm = as_tibble(val.int.norm) %>% add_column('Sample'=val.tiles$Sample,.before=T)
+vinorm.dist = tile.dist.measure(val.int.norm) %>% mutate(cohort='val glob')
+
+gridExtra::grid.arrange(
+  ggplot(bind_rows(tnorm.dist, vinorm.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Mean'),
+  ggplot(bind_rows(tnorm.dist, vinorm.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='SD'),
+  ncol=2, top='Per bin scaled tile values', bottom='Val glob = validation bins normalized using global z-scores')
+```
+
+### Predictions
+
+```{r}
+preds = do.call(bind_rows, purrr::map(
+  list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions_5e6_all_var/0.9/', pattern='predictions.tsv', recursive = T, full.names = T), 
+  function(f) read_tsv(f, col_types = 'cddcccccccc'))) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% dplyr::select(-`Path Notes`) %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'))
+
+preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
+
+# Non progressors
+# FPR is ~40% still
+fpr = round(nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP')),2)
+
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('NP risk predictions, FPR=',fpr)) %>% kable_styling(full_width = F) 
+
+# Progressors
+# FNR is still over 50% in the old progressors as well
+fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`))),2)
+
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
+```
+
 
 ## Rank adjust validation values then scale?
 
@@ -740,19 +806,50 @@ preds = do.call(bind_rows, purrr::map(
 preds = left_join(preds,all.val, by=c('Sample'='Samplename', 'Hospital Research ID', 'SLX-ID', 'Index Sequence', 'Block ID'))
 
 # Non progressors
-preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
+# FPR is ~40% still
+fpr = round(nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP')),2)
 
-# FPR is nearly 40% still
-nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP'))
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('NP risk predictions, FPR=',fpr)) %>% kable_styling(full_width = F) 
 
 # Progressors
-preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) 
-
 # FNR is still over 50% in the old progressors as well
-nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`)))
-```
+fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital Research ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital Research ID`))),2)
+
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
 ```
 
+
+# Model trained on all samples
+
+In this case I'm looking at the leave-one-out predictions, so somewhat different but at least gives an idea. While the progressors don't change, the non-progressors see a signficant shift.
+
+```{r}
+
+load('~/Data/BarrettsProgressionRisk/Analysis/all-samples/loo.Rdata')
+
+pg.samp = pg.samp %>% filter(Hospital.Research.ID %in% all.val$`Hospital Research ID` & !grepl('OCCAMS',Hospital.Research.ID)) %>%
+  mutate(qt = cut(Prediction, breaks=seq(0,1,.1)))
+
+preds = pg.samp %>% left_join(BarrettsProgressionRisk:::pred.confidence %>% dplyr::select(quant,Risk), by = c('qt'='quant'))
+
+# Non progressors
+# FPR is ~40% still
+fpr = round(nrow(preds %>% filter(Status == 'NP' & Risk == 'High'))/nrow(preds %>% filter(Status == 'NP')),2)
+
+preds %>% dplyr::filter(Status == 'NP') %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('NP risk predictions, FPR=',fpr)) %>% kable_styling(full_width = F) 
+
+# Progressors
+# FNR is still over 50% in the old progressors as well
+fnr = round(nrow(preds %>% filter(Status == 'P' & Risk == 'Low' & !grepl('OCCAMS',`Hospital.Research.ID`)))/nrow(preds %>% filter(Status == 'P' &  !grepl('OCCAMS',`Hospital.Research.ID`))),2)
+
+preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital.Research.ID`)) %>% group_by(Risk) %>% tally() %>% spread(Risk, n) %>% 
+  kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
+```
+
+   
    
 ```{r eval=F}
 

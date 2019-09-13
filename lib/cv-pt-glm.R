@@ -159,6 +159,38 @@ coef.stability<-function(opt, nz.list) {
   return(opt)
 }
 
+create.sample.sets<-function(data, uniqueID, n, splits, minR=0.2) {
+  data = data %>% mutate(label = ifelse(Status == 'P', 1, 0))
+  
+  check.sets<-function(df, grpCol, min) {
+    sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=df$label))
+    while ( (length(which(sets/rowSums(sets) < minR) ) >= 2 | length(which(sets/rowSums(sets) == 0)) > 0) ) {
+      print(sets/rowSums(sets))
+      s = sample(rep(seq(5), length = length(unique(df[[uniqueID]]))))
+      df2 = merge(df, cbind(unique(df[[uniqueID]]), 'tmpgrp'=s), by=1)
+      df[[grpCol]] = df2$tmpgrp
+      sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=df$label))
+    }
+    return(df[[grpCol]])
+  }
+  
+  s = sample(rep(seq(splits), length = length(unique(data[[uniqueID]]))))
+  data = merge(data %>% dplyr::select(matches(uniqueID), everything()), cbind(unique(data[[uniqueID]]), 'group'=s), by=1)  
+  colnames(data)[ncol(data)] = c('fold.1')
+  data$fold.1 = check.sets(data, 'fold.1', minR)
+  
+  for (i in 2:n) {
+    s = sample(rep(seq(splits), length = length(unique(data[[uniqueID]]))))
+    data = merge(data %>% dplyr::select(matches(uniqueID), everything()), cbind(unique(data[[uniqueID]]), 'group'=s), by=1)  
+    foldcol = grep('group',colnames(data))
+    colnames(data)[foldcol] = paste('fold',i,sep='.')
+    data[[paste('fold',i,sep='.')]] = check.sets(data, paste('fold',i,sep='.'))
+  }
+  return(data)
+  
+  
+}
+
 create.patient.sets<-function(pts, n, splits, minR=0.2) {
   # This function just makes sure the sets don't become too unbalanced with regards to the labels.
   pts$label = 0
@@ -201,7 +233,7 @@ binomial.deviance<-function(pmat, y) {
   return(dev)
 }
 
-crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=NULL, minR=0.2, select='deviance', opt=-1, ...) {
+crossvalidate.by.patient<-function(x,y,lambda,pts,a=1, sampleID = 1, nfolds=10, splits=5, fit=NULL, minR=0.2, select='deviance', opt=-1, ...) {
   if (nfolds > 5) minR = 0.1
   x = as.matrix(x)
   message(paste("Running", splits, "splits",nfolds,"times on", paste(dim(x), collapse=':'), 'alpha=',a ))
@@ -210,20 +242,20 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1,nfolds=10, splits=5, fit=N
   if (length(grep('fold',colnames(pts))) == nfolds) {
     tpts = pts
   } else {
-    tpts = create.patient.sets(pts, nfolds, splits, minR)
+    tpts = create.sample.sets(pts, sampleID, nfolds, splits, minR)
   }
   
   cv.pred = (matrix(nrow=0, ncol=length(lambda)))
   cv.binomial.deviance = (matrix(nrow=0, ncol=length(lambda)))
   for (n in 1:nfolds) {  
-    message(paste(n, "fold"))
+    message(paste("Fold ", n))
     setCol = grep(paste('^fold.',n,'$',sep=''), colnames(tpts))
     
     cv.class = matrix(nrow=splits, ncol=length(lambda))
     deviance = matrix(nrow=splits, ncol=length(lambda))
     for (i in 1:splits) { 
-      message(paste(i, "split"))
-      test.rows = which(rownames(x) %in% tpts[which(tpts[,setCol] == i), 2])
+      message(paste0('  ', i, " split"))
+      test.rows = which(rownames(x) %in% tpts[which(tpts[,setCol] == i), sampleID])
       test = x[test.rows,]
       training = x[-test.rows,]
       # pre-spec lambda seq

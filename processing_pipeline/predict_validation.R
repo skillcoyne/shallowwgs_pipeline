@@ -157,7 +157,7 @@ for (f in segFiles) {
   index = sub('_.*', '', basename(f))
   segmented$sample.info = BarrettsProgressionRisk::loadSampleInformation(info %>% filter(Sample %in% segmented$sample.info$Sample) )
   
-  tiles = BarrettsProgressionRisk:::tileSamples(segmented, scale=T, MARGIN = 2, verbose=T)
+  tiles = BarrettsProgressionRisk:::tileSamples(segmented, be.model = be.model, scale=T, MARGIN=2, verbose=T)
   #tiles$tiles = val.df
   
   prr = BarrettsProgressionRisk:::predictRisk(segmented, tiles, be.model)
