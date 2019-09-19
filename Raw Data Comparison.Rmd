@@ -59,6 +59,8 @@ rm(merged.fit, merged.raw)
 ##dim(tfit.data)
 ```
 
+
+
 # Raw counts & fitted values
 
 This is the raw data that gets segmented (after some processing).  It looks like there may be a slight shift in the distribution (per patient) of these values but it's not extremely high.
@@ -126,7 +128,7 @@ In the initial processing the raw counts are adjusted using the fitted values.
 
 ```{r}
 if (file.exists('prepped.Rdata')) {
-  load('prepped.Rdata')
+  load('prepped.Rdata',verbose=T)
 } else {
   t.prepped = BarrettsProgressionRisk:::.prepRawSWGS(traw.data, tfit.data, blacklist, verbose=T, plot=F)
   dim(t.prepped$data)
@@ -604,9 +606,19 @@ preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital Research ID`))
 
 ## Scale validation using global z scores
 
+In this case the z-scores are drawn from the entire cohort similarly to what I would do before training a model with all samples.
+
 ```{r}
 v.means = apply(as.matrix(bind_rows(training.tiles, val.tiles)[,-1]),2, mean, na.rm=T)
 v.sd = apply(as.matrix(bind_rows(training.tiles, val.tiles)[,-1]),2, sd, na.rm=T)
+
+tr.int.norm = as.matrix(training.tiles[,-1])
+for (i in 1:ncol(tr.int.norm)) 
+  tr.int.norm[,i] = BarrettsProgressionRisk:::unit.var(tr.int.norm[,i], v.means[i], v.sd[i])
+
+tr.int.norm = as_tibble(tr.int.norm) %>% add_column('Sample'=training.tiles$Sample,.before=T)
+trinorm.dist = tile.dist.measure(tr.int.norm) %>% mutate(cohort='training glob')
+
 
 val.int.norm = as.matrix(val.tiles[,-1])
 for (i in 1:ncol(val.int.norm)) 
@@ -615,17 +627,20 @@ for (i in 1:ncol(val.int.norm))
 val.int.norm = as_tibble(val.int.norm) %>% add_column('Sample'=val.tiles$Sample,.before=T)
 vinorm.dist = tile.dist.measure(val.int.norm) %>% mutate(cohort='val glob')
 
+
 gridExtra::grid.arrange(
-  ggplot(bind_rows(tnorm.dist, vinorm.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
+  ggplot(bind_rows(trinorm.dist, vinorm.dist), aes(cohort, mean, group=cohort, fill=cohort)) + 
     geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
     labs(title='Mean'),
-  ggplot(bind_rows(tnorm.dist, vinorm.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
+  ggplot(bind_rows(trinorm.dist, vinorm.dist), aes(cohort, sd, group=cohort, fill=cohort)) + 
     geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
     labs(title='SD'),
   ncol=2, top='Per bin scaled tile values', bottom='Val glob = validation bins normalized using global z-scores')
 ```
 
 ### Predictions
+
+Starts looking a little better in non-progressors.  
 
 ```{r}
 preds = do.call(bind_rows, purrr::map(

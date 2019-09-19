@@ -16,7 +16,7 @@ patient.file = args[2]
 outdir = args[3]
 # data = '~/Data/Ellie/QDNAseq/training/'
 # patient.file = paste(data, 'All_patient_info.xlsx', sep='/')
-# outdir = '~/Data/Ellie/Analysis'
+# outdir = '~/Data/Ellie/Analysis/IntPloidy'
 
 patient.name = NULL
 if (length(args) == 4)
@@ -138,14 +138,14 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   dir.create(pd,showWarnings = F)
   
   info = all.patient.info %>% filter(Hospital.Research.ID == pt) %>% 
-    select('Patient','Hospital.Research.ID', 'Samplename','Endoscopy.Year','Block','Pathology','p53.Status') %>% 
+    dplyr::select('Patient','Hospital.Research.ID', 'Samplename','Endoscopy.Year','Block','Pathology','p53.Status') %>% 
     dplyr::rename('Sample' = 'Samplename', 'GEJ.Distance' = 'Block', 'p53 IHC' = 'p53.Status', 'Endoscopy' = 'Endoscopy.Year') %>% rowwise %>% 
     dplyr::mutate( Endoscopy = paste(as.character(Endoscopy), '01', '01', sep='-')   )
   info = BarrettsProgressionRisk::loadSampleInformation(info, path=c('BE','ID','LGD','HGD','IMC'))
 
   cols = which(colnames(fit.data) %in% subset(all.patient.info, Hospital.Research.ID == pt)$Samplename)
 
-  segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)],verbose=T, cutoff=0.011)
+  segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)],intPloidy = T, verbose=T, cutoff=0.015*2)
   residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
 
   save(segmented, file=paste0(pd,'/segment.Rdata'))
