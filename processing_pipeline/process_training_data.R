@@ -178,9 +178,8 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     tiles = BarrettsProgressionRisk::tileSegments(segmented, verbose=T)
     arms = BarrettsProgressionRisk::tileSegments(segmented, 'arms', verbose=T)
     
-    write_tsv(tiles, path=paste0(pd, '/5e06_tiled_segvals.txt'))
-    write_tsv(arms, path=paste0(pd, '/arms_tiled_segvals.txt'))
-    
+    write.table(arms$tiles, file=paste0(pd, '/arms_tiled_segvals.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
+    write.table(tiles$tiles, file=paste0(pd, '/5e06_tiled_segvals.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
   }
   
 }
