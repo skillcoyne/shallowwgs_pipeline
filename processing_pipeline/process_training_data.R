@@ -135,40 +135,54 @@ arms.tiled = NULL; arm.MSE = NULL
 for (pt in unique(pts_slx$Hospital.Research.ID)) {
   print(pt)
   pd = paste(multipcfdir, pt,sep='/')
-  dir.create(pd,showWarnings = F)
   
-  info = all.patient.info %>% filter(Hospital.Research.ID == pt) %>% 
-    dplyr::select('Patient','Hospital.Research.ID', 'Samplename','Endoscopy.Year','Block','Pathology','p53.Status') %>% 
-    dplyr::rename('Sample' = 'Samplename', 'GEJ.Distance' = 'Block', 'p53 IHC' = 'p53.Status', 'Endoscopy' = 'Endoscopy.Year') %>% rowwise %>% 
-    dplyr::mutate( Endoscopy = paste(as.character(Endoscopy), '01', '01', sep='-')   )
-  info = BarrettsProgressionRisk::loadSampleInformation(info, path=c('BE','ID','LGD','HGD','IMC'))
-
-  cols = which(colnames(fit.data) %in% subset(all.patient.info, Hospital.Research.ID == pt)$Samplename)
-
-  segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)],intPloidy = T, verbose=T, cutoff=0.015*2)
-  residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
-
-  save(segmented, file=paste0(pd,'/segment.Rdata'))
-  readr::write_tsv(residuals, path=paste0(pd,'/residuals.tsv'))
-
-  message("Saving plots")
-
-  plotdir = paste0(pd,'/segmented_plots')
-  dir.create(plotdir, showWarnings=F )
-  plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
-  for (sample in names(plots)) 
-    ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize=F)
-
-  ggsave(filename=paste0(plotdir, '/', pt, '_segmented.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
-
-
-  plotdir = paste0(pd,'/cvg_binned_fitted')
-  dir.create(plotdir, showWarnings=F )
-  plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list') 
-  for (sample in names(plots))    
-    ggsave(filename=paste0(plotdir, '/', sample, '_cvg_binned.png'), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize = F)
-
-  ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
+  if (!file.exists(paste0(pd,'/segment.Rdata'))) {
+  
+    dir.create(pd,showWarnings = F)
+    
+    info = all.patient.info %>% filter(Hospital.Research.ID == pt) %>% 
+      dplyr::select('Patient','Hospital.Research.ID', 'Samplename','Endoscopy.Year','Block','Pathology','p53.Status') %>% 
+      dplyr::rename('Sample' = 'Samplename', 'GEJ.Distance' = 'Block', 'p53 IHC' = 'p53.Status', 'Endoscopy' = 'Endoscopy.Year') %>% rowwise %>% 
+      dplyr::mutate( Endoscopy = paste(as.character(Endoscopy), '01', '01', sep='-')   )
+    info = BarrettsProgressionRisk::loadSampleInformation(info, path=c('BE','ID','LGD','HGD','IMC'))
+  
+    cols = which(colnames(fit.data) %in% subset(all.patient.info, Hospital.Research.ID == pt)$Samplename)
+  
+    segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)],intPloidy = T, verbose=T, cutoff=0.015*2)
+    residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
+  
+    save(segmented, file=paste0(pd,'/segment.Rdata'))
+    readr::write_tsv(residuals, path=paste0(pd,'/residuals.tsv'))
+  
+    message("Saving plots")
+  
+    plotdir = paste0(pd,'/segmented_plots')
+    dir.create(plotdir, showWarnings=F )
+    plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
+    for (sample in names(plots)) 
+      ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize=F)
+  
+    ggsave(filename=paste0(plotdir, '/', pt, '_segmented.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
+  
+  
+    plotdir = paste0(pd,'/cvg_binned_fitted')
+    dir.create(plotdir, showWarnings=F )
+    plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list') 
+    for (sample in names(plots))    
+      ggsave(filename=paste0(plotdir, '/', sample, '_cvg_binned.png'), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize = F)
+  
+    ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
+  } else {
+    load(file = paste0(pd,'/segment.Rdata'))
+    
+    tiles = BarrettsProgressionRisk::tileSegments(segmented, verbose=T)
+    arms = BarrettsProgressionRisk::tileSegments(segmented, 'arms', verbose=T)
+    
+    write_tsv(tiles, path=paste0(pd, '/5e06_tiled_segvals.txt'))
+    write_tsv(arms, path=paste0(pd, '/arms_tiled_segvals.txt'))
+    
+  }
+  
 }
 
 message("Finished")

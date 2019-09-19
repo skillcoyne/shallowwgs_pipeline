@@ -58,15 +58,15 @@ pastefun<-function(x) {
   return(x)
 }
 
-val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
-sheets = readxl::excel_sheets(val.file)[8:13]
-all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
-})) %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>% mutate(
-  `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'),
-  `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
-  Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
-)
+# val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+# sheets = readxl::excel_sheets(val.file)[8:13]
+# all.val = do.call(bind_rows, lapply(sheets, function(s) {
+#   readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
+# })) %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>% mutate(
+#   `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'),
+#   `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
+#   Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
+# )
 
 #patient.info = patient.info %>% dplyr::select(Hospital.Research.ID, Path.ID, Status, Samplename) 
 #%>% bind_rows( all.val %>% dplyr::select(`Hospital Research ID`, `Block ID`, Status, Samplename ) %>% dplyr::rename(Hospital.Research.ID = `Hospital Research ID`, Path.ID = `Block ID`) )
@@ -99,7 +99,8 @@ per.samp.mean = apply(seg.tiles,1,mean)
 #if (logT) seg.tiles = t(apply(seg.tiles, 1, BarrettsProgressionRisk:::.logTransform))
 
 # After mean centering set all NA values to 0
-segsList = prep.matrix(seg.tiles,scale=T, MARGIN=1)
+#segsList = prep.matrix(seg.tiles,scale=T, MARGIN=1)
+segsList = prep.matrix(seg.tiles,scale=F)
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
 segs = segsList$matrix
@@ -123,7 +124,8 @@ arm.tiles = as.matrix(arm.tiles[,-1])
 rownames(arm.tiles) = samples
 #if (logT) arm.tiles = t(apply(arm.tiles, 1, logTransform))
 
-armsList = prep.matrix(arm.tiles,scale=T,MARGIN=1)
+#armsList = prep.matrix(arm.tiles,scale=T,MARGIN=1)
+armsList = prep.matrix(arm.tiles,scale=F)
 arms = armsList$matrix
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd
