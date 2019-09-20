@@ -90,7 +90,7 @@ for (ra in levels(all.val$RA) ) {
 
     tryCatch({
       
-      segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,cutoff=0.011, verbose=T)
+      segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,intPloidy=T,cutoff=0.03, verbose=T)
       
       #prr2 = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=lambda, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx)
       
@@ -113,23 +113,16 @@ for (ra in levels(all.val$RA) ) {
       save(segmented, file=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra), '_segObj.Rdata'),sep='/'))
    
   		failed = sampleResiduals(segmented) %>% dplyr::filter(!Pass)
-      if (nrow(failed) < nrow(sampleResiduals(segmented)) {
+      if (nrow(failed) < nrow(sampleResiduals(segmented))) {
 				tiles = BarrettsProgressionRisk::tileSegments(segmented)
-				write_tsv(tiles, path=paste0(dirname(plot.dir), '/5e06_cleaned_tiled.tsv')
+				arms = BarrettsProgressionRisk::tileSegments(segmented)
+				write_tsv(tiles$tiles, path=paste0(dirname(plot.dir), '/5e06_cleaned_tiled.tsv'))
+				write_tsv(arms$tiles, path=paste0(dirname(plot.dir), '/arms_cleaned_tiled.tsv'))
   		} 
-      #if (nrow(subset(residuals, !Pass)) > 0)
-      #  failedQC = bind_rows(failedQC, residuals %>% filter(!Pass) %>% mutate(`Hospital Research ID` = pid) %>% select(`Patient ID`, everything()) )
-      
-      # if (nrow(subset(residuals,Pass)) > 0) {
-      #   pr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, verbose=F)
-      #   preds = predictions(pr)
-      #   } else {
-      #   message(paste('All samples failed QC for patient ID',pid))
-      #   }
   }, error = function(e) {
     message(paste("Error in segmentation for patient",pid,'from RA:', ra, ', skipping:\n\t',e))
   })
 }
+  }
 }
-
 print("Finished")
