@@ -17,7 +17,7 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 
 
 data = args[1]
-# data = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/'
+# data = '~/Data/BarrettsProgressionRisk/Analysis/IntPloidy/multipcf_perPatient/'
 outdir = args[2]
 # outdir = '/tmp'
 infodir = args[3]
@@ -176,7 +176,7 @@ if (file.exists(file)) {
     l = fit0$lambda
     if (a > 0.5) l = more.l(l)
     
-    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
+    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, sampleID = 2, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
     lambda.opt = cv.patient$lambda.1se
     
