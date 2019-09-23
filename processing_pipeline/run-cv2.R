@@ -32,7 +32,7 @@ logT = F
 cache.dir = outdir
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
 
-if (dir.exists(cache.dir)) stop(paste0("Output directory ",cache.dir," exists. Exiting."))
+#if (dir.exists(cache.dir)) stop(paste0("Output directory ",cache.dir," exists. Exiting."))
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 ## Hospital.Research.ID info file
