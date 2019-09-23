@@ -59,6 +59,7 @@ failedQC = tibble()
 
 # Need to process the batches from CK and SA separately even if the patients overlap
 for (ra in levels(all.val$RA) ) {
+  if (ra == 'C.Kosmidou') next
   print(ra)
   pts = all.val %>% filter(RA == ra) %>% dplyr::select(`Hospital Research ID`) %>% unique() %>% pull  
   if (length(pts) <= 0) next
