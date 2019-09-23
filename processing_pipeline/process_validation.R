@@ -91,7 +91,7 @@ for (ra in levels(all.val$RA) ) {
 
     tryCatch({
       info = loadSampleInformation(si %>% filter(Samplename == sample))
-      segmented = BarrettsProgressionRisk::segmentRawData(info,rd,fd,intPloidy=T,cutoff=0.3, verbose=T)
+      segmented = BarrettsProgressionRisk::segmentRawData(info,rd,fd,intPloidy=T,cutoff=0.04, verbose=T)
       
       #prr2 = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=lambda, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx)
       
@@ -114,7 +114,7 @@ for (ra in levels(all.val$RA) ) {
       save(segmented, file=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra), '_segObj.Rdata'),sep='/'))
    
   		failed = sampleResiduals(segmented) %>% dplyr::filter(!Pass)
-      if (nrow(failed) < nrow(sampleResiduals(segmented))) {
+      if (nrow(failed) < nrow(sampleResiduals(segmented)) & ra != 'C.Kosmidou') {
 				tiles = BarrettsProgressionRisk::tileSegments(segmented)
 				arms = BarrettsProgressionRisk::tileSegments(segmented)
 
