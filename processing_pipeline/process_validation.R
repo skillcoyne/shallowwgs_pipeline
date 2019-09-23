@@ -56,6 +56,7 @@ if (!is.null(patients))
 #patients = (pts_slx %>% filter(`SLX-ID` == slx)) %>% select(`Patient ID`) %>% pull
 failedQC = tibble()
 
+
 # Need to process the batches from CK and SA separately even if the patients overlap
 for (ra in levels(all.val$RA) ) {
   print(ra)
@@ -75,22 +76,22 @@ for (ra in levels(all.val$RA) ) {
 
     dir.create(plot.dir, showWarnings = F, recursive = T)
     
-    for (sample in si$Samplename) {
-      #samples = si %>% filter(RA == ra & `Hospital Research ID` == pid) %>% select(Samplename) %>% pull
+    #for (sample in si$Samplename) {
+      samples = si %>% filter(RA == ra & `Hospital Research ID` == pid) %>% dplyr::select(Samplename) %>% pull
 
-      rcols = grep(paste(sample,collapse='|'), colnames(merged.raw))
-      fcols = grep(paste(sample,collapse='|'), colnames(merged.fit))
+      rcols = grep(paste(samples,collapse='|'), colnames(merged.raw))
+      fcols = grep(paste(samples,collapse='|'), colnames(merged.fit))
     
-      # if (length(rcols) != length(samples) | length(fcols) != length(samples)) {
-      #   warning(paste0(pid, ' from RA ', ra, ' samples do not match. Skipping'))
-      #   break
-      # }
+      if (length(rcols) != length(samples) | length(fcols) != length(samples)) {
+        warning(paste0(pid, ' from RA ', ra, ' samples do not match. Skipping'))
+        break
+      }
     
       rd = merged.raw %>% dplyr::select(location,chrom,start,end,!!rcols)
       fd = merged.fit %>% dplyr::select(location,chrom,start,end,!!fcols)
 
     tryCatch({
-      info = loadSampleInformation(si %>% filter(Samplename == sample))
+      info = loadSampleInformation(si %>% filter(Samplename == samples))
       segmented = BarrettsProgressionRisk::segmentRawData(info,rd,fd,intPloidy=T,cutoff=0.04, verbose=T)
       
       #prr2 = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=lambda, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx)
