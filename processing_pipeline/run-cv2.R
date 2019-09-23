@@ -176,7 +176,7 @@ if (file.exists(file)) {
     l = fit0$lambda
     if (a > 0.5) l = more.l(l)
     
-    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, sampleID = 2, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
+    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, sampleID=2, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
     lambda.opt = cv.patient$lambda.1se
     
@@ -218,7 +218,7 @@ if (file.exists(file)) {
     #if (a == 0)
     #  l = more.l(fitNoHGD$lambda)
     
-    cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(sets, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoHGD, standardize=F)
+    cv.nohgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(sets, Samplename %in% samples), sampleID=2, a=a, nfolds=folds, splits=splits, fit=fitNoHGD, standardize=F)
     
     no.hgd.plots[[as.character(a)]] = arrangeGrob(cv.nohgd$plot+ggtitle('Classification'), cv.nohgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
@@ -252,7 +252,7 @@ if (file.exists(file)) {
     l = fitNoLGD$lambda
     if (a > 0.5) l = more.l(l)
 
-    cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(sets, Samplename %in% samples), a=a, nfolds=folds, splits=splits, fit=fitNoLGD, standardize = F)
+    cv.nolgd = crossvalidate.by.patient(x=dysplasia.df[samples,], y=labels[samples], lambda=l, pts=subset(sets, Samplename %in% samples), sampleID=2, a=a, nfolds=folds, splits=splits, fit=fitNoLGD, standardize = F)
     
     nolgd.plots[[as.character(a)]] = arrangeGrob(cv.nolgd$plot+ggtitle('Classification'), cv.nolgd$deviance.plot+ggtitle('Binomial Deviance'), top=paste('alpha=',a,sep=''), ncol=2)
     
@@ -312,7 +312,7 @@ if (file.exists(file)) {
     l = fitLOO$lambda
     
     cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
-                                  pts=subset(sets, Samplename %in% samples), fit=fitLOO, standardize=F)
+                                  pts=subset(sets, Samplename %in% samples), sampleID=2, fit=fitLOO, standardize=F)
     
     plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
     
@@ -402,7 +402,7 @@ if (lnhgd) {
       l = fitLOO$lambda
       
       cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
-                                    pts=subset(sets, Samplename %in% samples), fit=fitLOO, standardize=F)
+                                    pts=subset(sets, Samplename %in% samples),sampleID=2, fit=fitLOO, standardize=F)
       
       plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
       
