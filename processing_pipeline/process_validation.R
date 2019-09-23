@@ -81,10 +81,10 @@ for (ra in levels(all.val$RA) ) {
       rcols = grep(paste(sample,collapse='|'), colnames(merged.raw))
       fcols = grep(paste(sample,collapse='|'), colnames(merged.fit))
     
-      if (length(rcols) != length(samples) | length(fcols) != length(samples)) {
-        warning(paste0(pid, ' from RA ', ra, ' samples do not match. Skipping'))
-        break
-      }
+      # if (length(rcols) != length(samples) | length(fcols) != length(samples)) {
+      #   warning(paste0(pid, ' from RA ', ra, ' samples do not match. Skipping'))
+      #   break
+      # }
     
       rd = merged.raw %>% dplyr::select(location,chrom,start,end,!!rcols)
       fd = merged.fit %>% dplyr::select(location,chrom,start,end,!!fcols)
