@@ -90,8 +90,8 @@ for (ra in levels(all.val$RA) ) {
       fd = merged.fit %>% dplyr::select(location,chrom,start,end,!!fcols)
 
     tryCatch({
-      
-      segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,intPloidy=T,cutoff=0.3, verbose=T)
+      info = loadSampleInformation(si %>% filter(Samplename == sample))
+      segmented = BarrettsProgressionRisk::segmentRawData(info,rd,fd,intPloidy=T,cutoff=0.3, verbose=T)
       
       #prr2 = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=lambda, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx)
       
