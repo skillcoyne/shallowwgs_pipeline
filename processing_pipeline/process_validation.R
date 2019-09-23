@@ -32,7 +32,8 @@ if (!is.null(patients)) {
 
 sheets = readxl::excel_sheets(val.file)[1:13]
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% mutate_at(vars(`SLX-ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% 
+    dplyr::mutate_at(vars(`SLX-ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
 }))
 
 pastefun<-function(x) {
@@ -58,7 +59,7 @@ failedQC = tibble()
 # Need to process the batches from CK and SA separately even if the patients overlap
 for (ra in levels(all.val$RA) ) {
   print(ra)
-  pts = all.val %>% filter(RA == ra) %>% select(`Hospital Research ID`) %>% unique() %>% pull  
+  pts = all.val %>% filter(RA == ra) %>% dplyr::select(`Hospital Research ID`) %>% unique() %>% pull  
   if (length(pts) <= 0) next
   
   for (pid in pts) {
@@ -90,7 +91,7 @@ for (ra in levels(all.val$RA) ) {
 
     tryCatch({
       
-      segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,intPloidy=T,cutoff=0.03, verbose=T)
+      segmented = BarrettsProgressionRisk::segmentRawData(loadSampleInformation(si),rd,fd,intPloidy=T,cutoff=0.3, verbose=T)
       
       #prr2 = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=lambda, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx)
       
@@ -116,8 +117,9 @@ for (ra in levels(all.val$RA) ) {
       if (nrow(failed) < nrow(sampleResiduals(segmented))) {
 				tiles = BarrettsProgressionRisk::tileSegments(segmented)
 				arms = BarrettsProgressionRisk::tileSegments(segmented)
-				write_tsv(tiles$tiles, path=paste0(dirname(plot.dir), '/5e06_cleaned_tiled.tsv'))
-				write_tsv(arms$tiles, path=paste0(dirname(plot.dir), '/arms_cleaned_tiled.tsv'))
+
+				write.table(tiles$tiles, sep='\t', quote=F, col.names=NA, row.names=T, file=paste0(dirname(plot.dir), '/5e06_cleaned_tiled.tsv'))
+				write.table(arms$tiles, sep='\t', quote=F, col.names=NA, row.names=T, file=paste0(dirname(plot.dir), '/arms_cleaned_tiled.tsv'))
   		} 
   }, error = function(e) {
     message(paste("Error in segmentation for patient",pid,'from RA:', ra, ', skipping:\n\t',e))
