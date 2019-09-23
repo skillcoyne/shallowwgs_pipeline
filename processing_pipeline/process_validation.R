@@ -126,7 +126,7 @@ for (ra in levels(all.val$RA) ) {
   }, error = function(e) {
     message(paste("Error in segmentation for patient",pid,'from RA:', ra, ', skipping:\n\t',e))
   })
-}
   }
 }
+#}
 print("Finished")
