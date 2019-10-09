@@ -864,6 +864,62 @@ preds %>% dplyr::filter(Status == 'P' & !grepl('OCCAMS',`Hospital.Research.ID`))
   kable(caption=paste0('P risk predictions, FNR=',fnr)) %>% kable_styling(full_width = F) 
 ```
 
+
+
+# Adjusted to nearly integer ploidy?
+
+```{r}
+
+
+files = list.files('~/Data/BarrettsProgressionRisk/Analysis/IntPloidy/multipcf_perPatient/', '5e06_tiled', recursive=T, full.names = T)
+training.tiles.int = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% dplyr::rename('Sample' = 'X1')
+
+files = list.files('~/Data/BarrettsProgressionRisk/Analysis/IntPloidy/multipcf_perPatient/', 'arms_tiled', recursive=T, full.names = T)
+training.arms.int = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% dplyr::rename('Sample' = 'X1')
+
+files = list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/IntPloidy/', '5e06_cleaned_tiled', recursive=T, full.names = T)
+val.tiles.int = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% dplyr::rename('Sample' = 'X1')
+
+files = list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/IntPloidy/', 'arms_cleaned_tiled', recursive=T, full.names = T)
+val.arms.int = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% dplyr::rename('Sample' = 'X1')
+
+
+
+t.pt = per.pt.tile(training.tiles.int) %>% mutate(cohort='train')
+v.pt = per.pt.tile(val.tiles.int) %>% mutate(cohort='val')
+
+gridExtra::grid.arrange(
+  ggplot(bind_rows(t.pt, v.pt), aes(cohort, mean, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='Mean per patient'),
+  ggplot(bind_rows(t.pt, v.pt), aes(cohort, sd, group=cohort, fill=cohort)) + 
+    geom_jitter(width=0.1) + geom_violin(alpha=0.5) + theme(legend.position = 'none') +
+    labs(title='StdDev per patient'),
+  ncol=2, top='Per patient tiled values')
+
+
+mean(tile.dist.measure(training.tiles.int)$mean)
+mean(tile.dist.measure(training.tiles.int)$sd)
+
+
+mean(tile.dist.measure(val.tiles.int)$mean)
+mean(tile.dist.measure(val.tiles.int)$sd)
+
+
+```
+
+
+
+
+
    
    
 ```{r eval=F}
