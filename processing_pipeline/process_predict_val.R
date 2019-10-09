@@ -1,7 +1,7 @@
 args = commandArgs(trailingOnly=TRUE)
 
-if (length(args) < 3)
-  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir> <patient list OPT>")
+if (length(args) < 5)
+  stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <model dir> <output dir> <patient>")
 
 
 suppressPackageStartupMessages(library(tidyverse))
@@ -15,6 +15,11 @@ model.dir = args[3]
 outdir = args[4]
 patients = args[5]
 
+# data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
+# val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/'
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
+# patients = 'AHM1400'
 
 patients = str_replace( unlist(str_split(patients, ',| ')), ' ', '')
 patients = str_replace_all( patients, '/', '_')
@@ -23,11 +28,6 @@ patients = str_replace_all( patients, '/', '_')
 
 var.cutoff<-function(x) { x > 0.143093 } #{ x > median(training.raw$sd) }
 
-
-# data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
-# val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
-# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/'
-# outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
 
 select.alpha = '0.9'
 
@@ -97,8 +97,9 @@ get.qdnaseg<-function(samples, dir) {
 
 
 
-
-for (pid in patients) {
+pid = patients[1]
+#for (pid in patients) 
+{
   message(paste('Patient',pid))
   
   si = all.val %>% filter(`Hospital Research ID` == pid) 
@@ -113,13 +114,10 @@ for (pid in patients) {
   
   #for (sample in si$Samplename) {
   samples = si %>% filter(`Hospital Research ID` == pid) %>% dplyr::select(Samplename) %>% pull
-  
+
   variance = tibble( 'Samples' = samples, '15kb'=NA, '50kb'=NA, '100kb'=NA)
   tryCatch({
     info = loadSampleInformation(si %>% filter(Samplename == samples))
-    
-    ## There's an issue using multipcf with the 100kb.  It works for single sample pcf.  So...the right answer may be that each sample is selected separately and the variance tested.  That means they also get segmented separately.  Need to update the BE code for this.
-    
     
     qdna = get.qdnaseg(samples, paste0(data,'/15kb'))
     prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
@@ -127,7 +125,6 @@ for (pid in patients) {
     kb = 15
     variance = variance %>% mutate('15kb'=t(raw.variance[variance$Samples])[,1])
 
-    
     if (length(which( raw.variance %>% mutate_all(var.cutoff) %>% unlist )) > 0) {
       message('Using 50kb segments')
       qdna = get.qdnaseg(samples, paste0(data,'/50kb'))
@@ -154,11 +151,11 @@ for (pid in patients) {
     for (s in names(plots))
       ggsave(paste(plot.dir, paste(s, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=plots[[s]], height=4, width=20, units='in')
     
-    ggsave(paste(plot.dir, paste(pid, ra, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=do.call(grid.arrange, c(plots,ncol=1)), height=4*length(rcols), width=20, units='in')
+#    ggsave(paste(plot.dir, paste(pid, ra, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=do.call(grid.arrange, c(plots,ncol=1)), height=4*length(rcols), width=20, units='in')
     
-    file.remove( paste(dirname(plot.dir), 'residuals.txt',sep='/' ) )
-    readr::write_tsv(residuals, path=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra),'_residuals.txt'),sep='/'), col_names = F, append=F)
-    save(segmented, file=paste(dirname(plot.dir), paste0(which(levels(all.val$RA) == ra), '_segObj.Rdata'),sep='/'))
+    #file.remove( paste(dirname(plot.dir), 'residuals.txt',sep='/' ) )
+    readr::write_tsv(residuals, path=paste(dirname(plot.dir), 'residuals.txt',sep='/'), col_names = F, append=F)
+    save(segmented, file=paste(dirname(plot.dir), 'segObj.Rdata',sep='/'))
     
     failed = sampleResiduals(segmented) %>% dplyr::filter(!Pass)
     # if (nrow(failed) < nrow(sampleResiduals(segmented))) {
