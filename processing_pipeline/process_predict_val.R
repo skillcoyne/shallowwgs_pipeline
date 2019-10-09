@@ -19,7 +19,7 @@ patients = args[5]
 # val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 # model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/'
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
-# patients = 'AHM1400'
+# patients = 'OCCAMS_AH_071'
 
 patients = str_replace( unlist(str_split(patients, ',| ')), ' ', '')
 patients = str_replace_all( patients, '/', '_')
@@ -78,7 +78,6 @@ if (!is.null(patients))
   all.val = all.val %>% filter(`Hospital Research ID` %in% patients)
 
 
-
 get.qdnaseg<-function(samples, dir) {
   if (!file.exists(paste0(dir, '/merged_raw_fit.Rdata'))) stop(paste0('Missing merged rdata file in ', dir))
   load(file=paste0(dir, '/merged_raw_fit.Rdata'))
@@ -94,8 +93,6 @@ get.qdnaseg<-function(samples, dir) {
 
   return(list('rd'=rd,'fd'=fd))
 }
-
-
 
 pid = patients[1]
 #for (pid in patients) 
@@ -143,6 +140,13 @@ pid = patients[1]
       variance = variance %>% mutate('100kb'=t(raw.variance[variance$Samples])[,1])
     }
     variance %>% write_tsv(paste0(plot.dir,'/variance.tsv'))
+    print(variance)
+
+  qdna$rd = qdna$rd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
+    rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H3G33BBXY.*','',.)))
+
+  qdna$fd = qdna$rd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
+    rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H3G33BBXY.*','',.)))
 
     segmented = BarrettsProgressionRisk::segmentRawData(info,qdna$rd,qdna$fd,kb=kb, multipcf=F,verbose=T)
     residuals = BarrettsProgressionRisk::sampleResiduals(segmented)
