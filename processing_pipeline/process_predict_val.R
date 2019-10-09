@@ -126,7 +126,8 @@ pid = patients[1]
       message('Using 50kb segments')
       qdna = get.qdnaseg(samples, paste0(data,'/50kb'))
       prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
-      raw.variance = prepped$data %>% dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
+      raw.variance = prepped$data %>% rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H3G33BBXY.*','',.))) %>%
+        dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
       kb = 50
       variance = variance %>% mutate('50kb'=t(raw.variance[variance$Samples])[,1])
     }
@@ -135,7 +136,8 @@ pid = patients[1]
       message('Using 100kb segments')
       qdna = get.qdnaseg(samples, paste0(data,'/100kb'))
       prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
-      raw.variance = prepped$data %>% dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
+      raw.variance = prepped$data %>% rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H3G33BBXY.*','',.))) %>%
+        dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
       kb = 100
       variance = variance %>% mutate('100kb'=t(raw.variance[variance$Samples])[,1])
     }
@@ -145,7 +147,7 @@ pid = patients[1]
   qdna$rd = qdna$rd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
     rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H3G33BBXY.*','',.)))
 
-  qdna$fd = qdna$rd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
+  qdna$fd = qdna$fd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
     rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H3G33BBXY.*','',.)))
 
     segmented = BarrettsProgressionRisk::segmentRawData(info,qdna$rd,qdna$fd,kb=kb, multipcf=F,verbose=T)
