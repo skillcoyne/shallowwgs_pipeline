@@ -77,7 +77,6 @@ load(file=paste0(data.15kb, '/merged_raw_fit.Rdata'))
 if (!is.null(patients))
   all.val = all.val %>% filter(`Hospital Research ID` %in% patients)
 
-
 get.qdnaseg<-function(samples, dir) {
   if (!file.exists(paste0(dir, '/merged_raw_fit.Rdata'))) stop(paste0('Missing merged rdata file in ', dir))
   load(file=paste0(dir, '/merged_raw_fit.Rdata'))
