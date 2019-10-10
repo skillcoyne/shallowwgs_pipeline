@@ -21,7 +21,7 @@ pid = args[5]
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
 # pid = 'AHM0689'
 
-pid = str_replace( unlist(str_split(pid, ',| ')), ' ', '')
+#pid = str_replace( unlist(str_split(pid, ',| ')), ' ', '')
 pid = str_replace_all( pid, '/', '_')
 
 #training.raw = read_tsv('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/pre_seg_medians.tsv', col_types = 'cdd') %>% dplyr::rename(sd='SD',sample='Sample') %>% mutate(cohort = 'train')
