@@ -13,16 +13,16 @@ data = args[1]
 val.file = args[2]
 model.dir = args[3]
 outdir = args[4]
-patients = args[5]
+pid = args[5]
 
 # data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
 # val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 # model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/'
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
-# patients = 'OCCAMS_AH_071'
+# pid = 'AHM0689'
 
-patients = str_replace( unlist(str_split(patients, ',| ')), ' ', '')
-patients = str_replace_all( patients, '/', '_')
+pid = str_replace( unlist(str_split(pid, ',| ')), ' ', '')
+pid = str_replace_all( pid, '/', '_')
 
 #training.raw = read_tsv('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/pre_seg_medians.tsv', col_types = 'cdd') %>% dplyr::rename(sd='SD',sample='Sample') %>% mutate(cohort = 'train')
 
@@ -74,8 +74,8 @@ if (!file.exists(  paste0(data.15kb, '/merged_raw_fit.Rdata')))
 
 load(file=paste0(data.15kb, '/merged_raw_fit.Rdata'))
 
-if (!is.null(patients))
-  all.val = all.val %>% filter(`Hospital Research ID` %in% patients)
+if (!is.null(pid))
+  all.val = all.val %>% filter(`Hospital Research ID` %in% pid)
 
 get.qdnaseg<-function(samples, dir) {
   if (!file.exists(paste0(dir, '/merged_raw_fit.Rdata'))) stop(paste0('Missing merged rdata file in ', dir))
@@ -93,9 +93,6 @@ get.qdnaseg<-function(samples, dir) {
   return(list('rd'=rd,'fd'=fd))
 }
 
-pid = patients[1]
-#for (pid in patients) 
-{
   message(paste('Patient',pid))
   
   si = all.val %>% filter(`Hospital Research ID` == pid) 
@@ -184,7 +181,6 @@ pid = patients[1]
   }, error = function(e) {
     message(paste("Error in segmentation/predictions for patient",pid,': ',e))
   })
-}
 
 
 message('Finished')
