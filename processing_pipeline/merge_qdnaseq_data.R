@@ -18,7 +18,7 @@ val.file = args[2]
 #  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 
 
-sheets = readxl::excel_sheets(val.file)[1:13]
+sheets = readxl::excel_sheets(val.file)[1:14]
 
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
   print(s)
