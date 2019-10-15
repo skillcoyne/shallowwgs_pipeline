@@ -1,0 +1,177 @@
+---
+title: "QDNAseq segmentation"
+author: "Sarah Killcoyne"
+date: "03/10/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+sheets = readxl::excel_sheets(val.file)[8:13]
+
+pastefun<-function(x) {
+  if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
+  return(x)
+}
+
+val.info = do.call(bind_rows, lapply(sheets, function(s) {
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% 
+    dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) 
+})) %>% mutate(Samplename = paste(`SLX-ID`,`Index Sequence`, sep='.')) %>% 
+  rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>% 
+  mutate(
+  `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), 
+  `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
+  Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
+  )
+
+
+training.raw = read_tsv('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/pre_seg_medians.tsv', col_types = 'cdd') %>% dplyr::rename(sd='SD',sample='Sample') %>% mutate(cohort = 'train')
+
+
+v15.file= '~/Data/BarrettsProgressionRisk/Analysis/validation/pre_seg_disp.tsv'
+all.val15 = read_tsv(v15.file, col_types = 'ddc') %>% dplyr::select(sample,median,sd) %>% mutate(cohort='val')
+```
+
+# Raw Data
+
+I'm looking at the variance in the raw data immediately following QDNAseq processing. The training data was all run with a 15kb bin size so in the initial runs of the validation data all samples were run with that bin size.
+
+## Comparing the distributions
+
+Training vs Validation set
+
+```{r, echo=F}
+ggplot(bind_rows(training.raw, all.val15)) + xlim(0.95,1.05) + ylim(0,1.0) + 
+  geom_point(aes(median,sd,color=cohort)) + 
+  theme_minimal() + labs(title='Median vs SD for available samples')
+```
+
+The median is pretty close to the same, but there is a larger spread in the validation dataset.
+
+```{r}
+tv15 = bind_rows(training.raw, all.val15) %>% mutate(cohort = factor(cohort))
+
+ggplot(tv15, aes(median)) + facet_grid(~cohort, scales = 'free_x') +# xlim(0.95,1.05) +
+  geom_histogram(bins=20, color='lightblue')
+
+ggplot(tv15, aes(cohort, median, group=cohort, fill=cohort)) + ylim(0.95,1.05) +
+  geom_jitter(width=0.2) + geom_boxplot() 
+
+wilcox.test(all.val15$median, training.raw$median)
+```
+
+The difference is clearer in the std. deviation of the two cohorts, even when the extreme outliers are removed.
+
+```{r}
+ggplot(tv15, aes(sd)) + facet_grid(~cohort) + xlim(0,1) +
+  geom_histogram(bins=50, color='lightblue')
+
+ggplot(tv15, aes(cohort, sd, group=cohort, fill=cohort)) + ylim(0,1) + 
+  geom_jitter(width=0.2) + geom_boxplot(outlier.colour = NA) 
+
+wilcox.test(all.val15$sd, training.raw$sd)
+```
+
+### Per sample the shift is event more obvious.
+
+Dotted line is median(sd).
+```{r, echo=F}
+ggplot(tv15, aes(x=1:nrow(tv15),y=sd)) + ylim(0,1.0) + 
+  geom_point(aes(color=cohort)) + geom_hline(yintercept = median(training.raw$sd), linetype='dashed') +
+  #geom_hline(yintercept = median(training.raw$sd)+mad(all.val15$sd), color='grey39') +
+  theme(axis.text.x = element_blank()) +
+  theme_minimal() + labs(title='Training and validation cohorts (15kb bins)')
+```
+
+## Altering the QDNAseq bin size
+
+Looking at different bin sizes in the validation cohort. Ellie's bam files are not as easily recovered so I'm using the training cohort as the standard and altering the validation cohort. The median variance decreases as I increase the bin size.
+```{r}
+files = grep('ellie',list.files('~/Data/BarrettsProgressionRisk/data', 'prepped_dist.tsv', recursive = T, full.names = T),invert = T, value=T)
+val = do.call(bind_rows, lapply(files, function(f) {
+  read_tsv(f, col_types = 'cdd') %>% mutate('seg.size'=basename(dirname(f)))
+})) %>% mutate(seg.size = factor(seg.size)) %>% arrange(sample, seg.size)
+
+val = val %>% mutate(kb = as.integer(sub('kb','',seg.size)), seg.size = factor(seg.size, levels=c('15kb','30kb','50kb','100kb','500kb'), ordered=T)) %>% arrange(kb) %>% mutate(index = row_number())
+
+samples = val %>% group_by(sample) %>% tally %>% dplyr::filter(n == 4) %>% select(sample) %>% pull 
+
+#val = val %>% group_by(sample) %>% mutate(diff = dist(sd))
+ggplot(val,  aes(index, sd, color=seg.size)) + ylim(0,1) + 
+  geom_point() + 
+  theme(axis.text.x=element_blank()) + theme_minimal()
+
+
+ggplot(val %>% arrange(kb),  aes(seg.size, sd, color=seg.size)) + ylim(0,1) + 
+  geom_jitter(width=0.2) + geom_boxplot(alpha=0.8, outlier.colour = NA) +
+  theme_minimal() + theme(axis.text.x=element_blank(), legend.position = 'none') 
+
+
+val = val %>% filter(kb > 15)
+
+tv15 = tv15 %>% mutate(seg.size = '15kb', kb=15) %>% dplyr::select(sample,cohort,seg.size,kb,sd,median)
+val = val %>% mutate(cohort = paste('val',seg.size)) %>% dplyr::select(sample,cohort,seg.size,kb,sd,median)
+
+merged = bind_rows(val,tv15) 
+
+merged = merged %>% mutate(
+  seg.size = factor(seg.size, levels=c('train','15kb','30kb','50kb','100kb','500kb'), ordered=T),
+  cohort = factor(cohort, levels=c('train','val','val 30kb','val 50kb','val 100kb','val 500kb'), ordered=T)
+  ) %>% arrange(seg.size)
+
+
+ggplot(merged, aes(seg.size, sd, group=seg.size, fill=seg.size)) + facet_grid(~cohort, scales='free_x') + ylim(0,1) +
+  geom_jitter(width=0.2) + geom_boxplot(outlier.colour = NA) + 
+  scale_fill_brewer(palette = 'Set1') + theme_minimal()
+
+```
+
+
+So it appears that I can decrease the variance by increasing the bin size.  But it doesn't necessarily make sense to do it across the board.  I can take the median of the training data and call that the cutoff for deciding.  
+
+```{r}
+ggplot(merged, aes(x=1:nrow(merged),y=sd)) + ylim(0,1.0) + 
+  geom_point(aes(color=cohort)) + geom_hline(yintercept = median(training.raw$sd), linetype='dashed') +
+  geom_hline(yintercept = median(training.raw$sd)+0.5*mad(all.val15$sd), color='grey39') +
+  theme(axis.text.x = element_blank()) +
+  theme_minimal() 
+
+out.samples = all.val15 %>% filter(sd > median(training.raw$sd))# +0.5*mad(all.val15$sd)))
+
+```
+
+In the validation dataset, starting at 15kb `r nrow(out.samples)`:`r nrow(all.val15)` samples have a variance greater than the median.
+
+
+```{r, echo=F}
+preds15 = do.call(bind_rows, lapply(list.files('~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/predictions_model_5e6/0.9','predictions',full.names=T, recursive=T), function(f) read_tsv(f,col_types='cddcccDcccc')))
+
+#preds15 %>% filter(Sample %in% out.samples$sample) %>% group_by(Risk) %>% tally
+```
+
+## Re-process dynamically
+
+I re-processed all of the validation data with this in mind.  I start with the 15kb bin size, immediately following the QDNAseq processing I check the variance of the raw data.  If it's greater than the median of the training data (`r median(training.raw$sd)`) then I use the next greater bin size for that sample.  I do this up to a bin size of 100kb currently.
+
+```{r, echo=F}
+library(BarrettsProgressionRisk)
+
+analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation/resegment/'
+
+
+per.sample.var = do.call(bind_rows, lapply(list.files(analysis.dir, 'variance.tsv', recursive=T, full.names=T), function(f) {
+  read_tsv(f, col_types='cddd') %>% mutate(patient = basename(sub('plots','',dirname(f))))
+})
+
+
+
+```
+
+
+
+
+

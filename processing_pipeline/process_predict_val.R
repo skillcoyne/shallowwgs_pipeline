@@ -19,7 +19,7 @@ pid = args[5]
 # val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 # model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/'
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
-# pid = 'AHM0689'
+# pid = 'AHM1807'
 
 pid = str_replace_all( pid, '/', '_')
 
@@ -46,7 +46,7 @@ rm(dysplasia.df, coefs, labels)
 
 be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, z.mean, z.arms.mean, z.sd, z.arms.sd, mn.cx, sd.cx, nz, cvRR, NULL)
 
-sheets = readxl::excel_sheets(val.file)[8:13]
+sheets = readxl::excel_sheets(val.file)[8:14]
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
   readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% 
     dplyr::mutate_at(vars(`SLX-ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
@@ -109,73 +109,66 @@ get.qdnaseg<-function(samples, dir) {
   variance = tibble( 'Samples' = samples, '15kb'=NA, '50kb'=NA, '100kb'=NA)
   tryCatch({
     info = loadSampleInformation(si %>% filter(Samplename == samples))
+
+    residuals = tibble(); predictions = tibble()
     
-    qdna = get.qdnaseg(samples, paste0(data,'/15kb'))
-    prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
-    raw.variance = prepped$data %>% dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
-    kb = 15
-    variance = variance %>% mutate('15kb'=t(raw.variance[variance$Samples])[,1])
-
-    if (length(which( raw.variance %>% mutate_all(var.cutoff) %>% unlist )) > 0) {
-      message('Using 50kb segments')
-      qdna = get.qdnaseg(samples, paste0(data,'/50kb'))
+    objList = list()  
+    # This is ridiculously kludgy but...  
+    for (sample in info$Sample) {
+      message('15kb...')
+      qdna = get.qdnaseg(sample, paste0(data,'/15kb'))
       prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
-      raw.variance = prepped$data %>% rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H\\dG.*','',.))) %>%
-        dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
-      kb = 50
-      variance = variance %>% mutate('50kb'=t(raw.variance[variance$Samples])[,1])
-    }
+      raw.variance = prepped$data %>% dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
+      kb = 15
+      variance[variance$Samples == sample,] = variance %>% filter(Samples == sample) %>% mutate('15kb'=t(raw.variance)[,1])
 
-    if (length(which( raw.variance %>% mutate_all(var.cutoff) %>% unlist )) > 0) {
-      message('Using 100kb segments')
-      qdna = get.qdnaseg(samples, paste0(data,'/100kb'))
-      prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
-      raw.variance = prepped$data %>% rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H\\dG.*','',.))) %>%
-        dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
-      kb = 100
-      variance = variance %>% mutate('100kb'=t(raw.variance[variance$Samples])[,1])
+      if (var.cutoff(raw.variance[[1]])) {
+        message('50kb...')
+        qdna = get.qdnaseg(sample, paste0(data,'/50kb'))
+        prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
+        raw.variance = prepped$data %>% rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H\\dG.*','',.))) %>%
+          dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
+        variance[variance$Samples == sample,] = variance %>% filter(Samples == sample) %>% mutate('50kb'=t(raw.variance)[,1])
+        kb = 50
+      }
+        
+      if (var.cutoff(raw.variance[[1]])) {
+        message('100kb...')
+        qdna = get.qdnaseg(sample, paste0(data,'/100kb'))
+        prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
+        raw.variance = prepped$data %>% rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H\\dG.*','',.))) %>%
+          dplyr::summarise_at(vars(-chrom,-start), list(~sd(.,na.rm=T)))
+        variance[variance$Samples == sample,] = variance %>% filter(Samples == sample) %>% mutate('100kb'=t(raw.variance)[,1])
+        kb = 100
+      } 
+        
+      qdna$rd = qdna$rd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
+        rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H\\dG.*','',.)))
+      qdna$fd = qdna$fd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
+        rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H\\dG.*','',.)))
+
+      segmented = BarrettsProgressionRisk::segmentRawData(info %>% filter(Sample == sample),qdna$rd, qdna$fd, kb=kb, cutoff = 0.011, multipcf=F,verbose=T)   
+      residuals = bind_rows(residuals, BarrettsProgressionRisk::sampleResiduals(segmented) %>% mutate('kb' = kb) )
+      objList[[sample]] = segmented
+      
+      plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
+      for (s in names(plots))
+        ggsave(paste(plot.dir, paste(s, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=plots[[s]], height=4, width=20, units='in')
+      
+      pred.dir = paste0(dirname(plot.dir), '/predictions')
+      dir.create(pred.dir,showWarnings = F)
+
+      prr = predictRiskFromSegments(segmented, be.model = be.model)
+      predictions = bind_rows(predictions, predictions(prr))
+      
+      plots = BarrettsProgressionRisk::copyNumberMountainPlot(prr,annotate = T,legend = F, as='list')
+      for (s in names(plots))
+        ggsave(paste(pred.dir, paste0(s,'_cnMtn.png'),sep='/'), plot=plots[[s]], height=4, width=20, units='in')
     }
+    
     variance %>% write_tsv(paste0(plot.dir,'/variance.tsv'))
-    print(variance)
-
-  qdna$rd = qdna$rd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
-    rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H\\dG.*','',.)))
-
-  qdna$fd = qdna$fd %>% select(matches('loc|chr|start|end'), matches(paste(info$Samplename,collapse='|'))) %>% 
-    rename_at(vars(matches(paste(info$Samplename,collapse='|'))), funs(sub('.H\\dG.*','',.)))
-
-    segmented = BarrettsProgressionRisk::segmentRawData(info,qdna$rd,qdna$fd,kb=kb, multipcf=F,verbose=T)
-    residuals = BarrettsProgressionRisk::sampleResiduals(segmented)
-
-    plots = BarrettsProgressionRisk::plotSegmentData(segmented, 'list')
-    for (s in names(plots))
-      ggsave(paste(plot.dir, paste(s, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=plots[[s]], height=4, width=20, units='in')
-    
-#    ggsave(paste(plot.dir, paste(pid, ra, 'segmentedCoverage.png',sep='_'), sep='/'),  plot=do.call(grid.arrange, c(plots,ncol=1)), height=4*length(rcols), width=20, units='in')
-    
-    #file.remove( paste(dirname(plot.dir), 'residuals.txt',sep='/' ) )
-    readr::write_tsv(residuals, path=paste(dirname(plot.dir), 'residuals.txt',sep='/'), col_names = F, append=F)
-    save(segmented, file=paste(dirname(plot.dir), 'segObj.Rdata',sep='/'))
-    
-    failed = sampleResiduals(segmented) %>% dplyr::filter(!Pass)
-    # if (nrow(failed) < nrow(sampleResiduals(segmented))) {
-    #   tiles = BarrettsProgressionRisk::tileSegments(segmented)
-    #   arms = BarrettsProgressionRisk::tileSegments(segmented)
-    #   
-    #   write.table(tiles$tiles, sep='\t', quote=F, col.names=NA, row.names=T, file=paste0(dirname(plot.dir), '/5e06_cleaned_tiled.tsv'))
-    #   write.table(arms$tiles, sep='\t', quote=F, col.names=NA, row.names=T, file=paste0(dirname(plot.dir), '/arms_cleaned_tiled.tsv'))
-    # } 
-    
-    pred.dir = paste0(dirname(plot.dir), '/predictions')
-    dir.create(pred.dir,showWarnings = F)
-    
-    prr = predictRiskFromSegments(segmented, be.model = be.model)
-    plots = BarrettsProgressionRisk::copyNumberMountainPlot(prr,annotate = T,legend = F, as='list')
-    for (s in names(plots))
-      ggsave(paste(pred.dir, paste0(s,'_cnMtn.png'),sep='/'), plot=plots[[s]], height=4, width=20, units='in')
-
-    predictions(prr) %>% write_tsv(path=paste0(pred.dir,'/preds.tsv'))
-    
+    predictions %>% write_tsv(path=paste0(pred.dir,'/preds.tsv'))
+    residuals %>% write_tsv(paste0(dirname(plot.dir), '/residuals.tsv'))
   }, error = function(e) {
     message(paste("Error in segmentation/predictions for patient",pid,': ',e))
   })
