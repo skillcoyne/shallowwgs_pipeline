@@ -106,15 +106,17 @@ get.qdnaseg<-function(samples, dir) {
   #for (sample in si$Samplename) {
   samples = si %>% filter(`Hospital Research ID` == pid) %>% dplyr::select(Samplename) %>% pull
 
-  variance = tibble( 'Samples' = samples, '15kb'=NA, '50kb'=NA, '100kb'=NA)
+
   tryCatch({
     info = loadSampleInformation(si %>% filter(Samplename == samples))
 
     residuals = tibble(); predictions = tibble()
+    variance = tibble( 'Samples' = samples, '15kb'=NA, '50kb'=NA, '100kb'=NA)
     
     objList = list()  
     # This is ridiculously kludgy but...  
     for (sample in info$Sample) {
+      message(sample)
       message('15kb...')
       qdna = get.qdnaseg(sample, paste0(data,'/15kb'))
       prepped = BarrettsProgressionRisk:::prepRawSWGS(qdna$rd,qdna$fd)
@@ -172,7 +174,7 @@ get.qdnaseg<-function(samples, dir) {
   }, error = function(e) {
     message(paste("Error in segmentation/predictions for patient",pid,': ',e))
   })
-
+save(objList, path=paste0(dirname(plot.dir), '/segObj.Rdata'))
 
 message('Finished')
 
