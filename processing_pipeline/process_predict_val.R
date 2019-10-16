@@ -160,8 +160,10 @@ get.qdnaseg<-function(samples, dir) {
       pred.dir = paste0(dirname(plot.dir), '/predictions')
       dir.create(pred.dir,showWarnings = F)
 
-      prr = predictRiskFromSegments(segmented, be.model = be.model)
-      predictions = bind_rows(predictions, predictions(prr))
+      if (length(which(sampleResiduals(segmented)$Pass)) > 0) {
+        prr = predictRiskFromSegments(segmented, be.model = be.model)
+        predictions = bind_rows(predictions, predictions(prr))
+      }
       
       plots = BarrettsProgressionRisk::copyNumberMountainPlot(prr,annotate = T,legend = F, as='list')
       for (s in names(plots))
@@ -174,7 +176,7 @@ get.qdnaseg<-function(samples, dir) {
   }, error = function(e) {
     message(paste("Error in segmentation/predictions for patient",pid,': ',e))
   })
-save(objList, path=paste0(dirname(plot.dir), '/segObj.Rdata'))
+save(objList, file=paste0(dirname(plot.dir), '/segObj.Rdata'))
 
 message('Finished')
 
