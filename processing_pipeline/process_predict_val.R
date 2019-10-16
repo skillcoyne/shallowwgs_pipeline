@@ -163,11 +163,11 @@ get.qdnaseg<-function(samples, dir) {
       if (length(which(sampleResiduals(segmented)$Pass)) > 0) {
         prr = predictRiskFromSegments(segmented, be.model = be.model)
         predictions = bind_rows(predictions, predictions(prr))
+        plots = BarrettsProgressionRisk::copyNumberMountainPlot(prr,annotate = T,legend = F, as='list')
+        for (s in names(plots))
+          ggsave(paste(pred.dir, paste0(s,'_cnMtn.png'),sep='/'), plot=plots[[s]], height=4, width=20, units='in')
       }
       
-      plots = BarrettsProgressionRisk::copyNumberMountainPlot(prr,annotate = T,legend = F, as='list')
-      for (s in names(plots))
-        ggsave(paste(pred.dir, paste0(s,'_cnMtn.png'),sep='/'), plot=plots[[s]], height=4, width=20, units='in')
     }
     
     variance %>% write_tsv(paste0(plot.dir,'/variance.tsv'))

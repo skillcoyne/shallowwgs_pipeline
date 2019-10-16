@@ -8,6 +8,7 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
+library(kableExtra)
 
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 sheets = readxl::excel_sheets(val.file)[8:13]
@@ -18,7 +19,7 @@ pastefun<-function(x) {
 }
 
 val.info = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% 
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Pathology, Cohort, Batch, matches('Collection|Notes')) %>% 
     dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) 
 })) %>% mutate(Samplename = paste(`SLX-ID`,`Index Sequence`, sep='.')) %>% 
   rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>% 
@@ -162,14 +163,34 @@ library(BarrettsProgressionRisk)
 
 analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis/validation/resegment/'
 
-
 per.sample.var = do.call(bind_rows, lapply(list.files(analysis.dir, 'variance.tsv', recursive=T, full.names=T), function(f) {
   read_tsv(f, col_types='cddd') %>% mutate(patient = basename(sub('plots','',dirname(f))))
-})
+})) %>% dplyr::select(patient, Samples, everything())
 
+max.bin<-function(bin15,bin50,bin100) {
+  if (!is.na(bin100))
+    return(100)
+  if (!is.na(bin50))
+    return(50)
+  return(15)
+}
 
+per.sample.bin = per.sample.var %>% group_by(Samples) %>% dplyr::summarise( max.bin = max.bin(`15kb`,`50kb`,`100kb`) ) %>% arrange(max.bin)
+
+per.sample.bin %>% group_by(max.bin) %>% tally() %>% spread(max.bin,n) %>% kable(caption = 'Number of samples per QDNAseq bin size') %>% kable_styling('striped', full_width = F)
+```
+
+```{r}
+
+per.sample.bin = val.info %>% dplyr::select(matches('Hospital|Status|Block|Pathology|Samplename')) %>% 
+  left_join(per.sample.bin, by=c('Samplename'='Samples'))
+
+per.sample.bin %>% group_by(max.bin, Status) %>% tally() 
+
+per.sample.bin %>% filter(is.na(max.bin))
 
 ```
+
 
 
 
