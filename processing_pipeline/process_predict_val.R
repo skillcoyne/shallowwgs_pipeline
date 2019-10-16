@@ -20,7 +20,7 @@ pid = args[5]
 # model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/'
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
 # pid = 'AHM1807'
-
+# pid = 'PRI_ADH_097'
 pid = str_replace_all( pid, '/', '_')
 
 #training.raw = read_tsv('~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient/pre_seg_medians.tsv', col_types = 'cdd') %>% dplyr::rename(sd='SD',sample='Sample') %>% mutate(cohort = 'train')
@@ -48,8 +48,8 @@ be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, z.mean, z.ar
 
 sheets = readxl::excel_sheets(val.file)[8:14]
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% 
-    dplyr::mutate_at(vars(`SLX-ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, Endoscopy) %>% 
+    dplyr::mutate_at(vars(`SLX-ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% dplyr::mutate(Endoscopy = as.Date(Endoscopy))
 }))
 
 pastefun<-function(x) {
@@ -59,7 +59,7 @@ pastefun<-function(x) {
 all.val = all.val %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup
 #all.val = all.val %>% arrange(Batch, `Hospital Research ID`) %>% group_by(`Hospital Research ID`) %>% mutate(AID = group_indices()) %>% ungroup
 all.val = all.val %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''))
-all.val = all.val %>% mutate(Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.'), RA = factor(RA))
+all.val = all.val %>% mutate(Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.'))
 
 if ( length(grep('15|50|100', list.files(data, 'kb'))) < 3) 
   stop('Segmentation files for 15kb, 50kb, and 100kb are required.')
