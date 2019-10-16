@@ -19,7 +19,7 @@ pid = args[5]
 # val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 # model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms/'
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/validation'
-# pid = 'AHM1807'
+# pid = 'AHM1024'
 # pid = 'PRI_ADH_097'
 pid = str_replace_all( pid, '/', '_')
 
