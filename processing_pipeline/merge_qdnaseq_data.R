@@ -53,6 +53,7 @@ print(unique(all.info$`SLX-ID`))
 data.dirs = grep(paste(unique(all.info$`SLX-ID`), collapse='|'), list.dirs(data, full.names=T, recursive=F), value=T)
 
 qd.bins = unique(basename(list.dirs(data.dirs, recursive = F)))
+qd.bins = grep('15kb-ol*', qd.bins, invert=T, value=T)
 
 if (length(data.dirs) <= 0)
   stop(paste("No directories in", data))
