@@ -5,50 +5,73 @@ if (length(args) <2)
 
 
 library(tidyverse)
+
 #library(ggrepel)
 #library(gridExtra)
 #library(BarrettsProgressionRisk)
-#source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
+source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 data = args[1]
 val.file = args[2]
-
+normals = F
+if (length(args) == 3) normals = as.logical(args[3])
 
 #  data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
 #  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
-
-
-sheets = readxl::excel_sheets(val.file)[1:14]
-
-all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  print(s)
-  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA) %>% 
-    dplyr::filter(!is.na(`SLX-ID`)) %>%
-    mutate_at(vars(`SLX-ID`), list(as.character))
-}))
+#val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx'
 
 pastefun<-function(x) {
   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
   return(x)
 }
-all.val = all.val %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup
 
-all.val = all.val %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''))
+all = which(grepl('All', sheets))
 
-print(unique(all.val$`SLX-ID`))
+if (length(all) == 1) {
+  all.info = read.patient.info(val.file, sheet=all)
+  if (normals) { 
+    all.info = all.info$normal
+  } else {
+    all.info = all.info$info
+  }
+  all.info = all.info %>% dplyr::rename(`SLX-ID` = 'SLX.ID')
+} else {
+  sheets = readxl::excel_sheets(val.file)[1:14]
+  
+  all.info = do.call(bind_rows, lapply(sheets, function(s) {
+    print(s)
+    readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Batch) %>% 
+      dplyr::filter(!is.na(`SLX-ID`)) %>%
+      mutate_at(vars(`SLX-ID`), list(as.character))
+  }))
+  all.info = all.info %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup
+  all.info = all.info %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''))  
+}
 
-data.dirs = grep( paste(sub('SLX-', '', unique(all.val$`SLX-ID`)), collapse='|'), list.dirs(data, full.names=T, recursive=F), value = T)
+
+print(unique(all.info$`SLX-ID`))
+
+data.dirs = grep(paste(unique(all.info$`SLX-ID`), collapse='|'), list.dirs(data, full.names=T, recursive=F), value=T)
+
+qd.bins = unique(basename(list.dirs(data.dirs, recursive = F)))
+
 if (length(data.dirs) <= 0)
   stop(paste("No directories in", data))
 
-print(data.dirs)
 
-merged.raw = NULL; merged.fit = NULL
-for (dir in data.dirs) {
-  print(dir)
+for (bin in qd.bins) {
   
-  rawFile = grep('raw',list.files(dir,'txt',full.names=T,recursive=T), value=T)
-  fittedFile = grep('fitted',list.files(dir,'txt',full.names=T,recursive=T), value=T)
+  print(data.dirs)
+
+  merged.raw = NULL; merged.fit = NULL
+  
+  for (dir in data.dirs) {
+    print(dir)
+  
+    files = list.files(paste0(dir,'/',bin), 'txt',full.names=T,recursive=T)
+    
+    rawFile = grep('raw',files,value=T)
+    fittedFile = grep('fitted',files,value=T)
   
   if (length(rawFile) < 1 | length(fittedFile) < 1) {
     message(paste("Missing raw or fitted file for SLX ID",slx,"in",dir))

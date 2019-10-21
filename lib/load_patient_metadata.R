@@ -94,44 +94,46 @@ read.patient.info<-function(file, file2=NULL, set='All', sheet=NULL) {
     colnames(patient.info) = c('Patient','Hospital.Research.ID', 'Path.ID','Status','Endoscopy.Year','Pathology','Plate.Index','SLX.ID','Barretts.Cellularity', 'p53.Status', 'Total.Reads', 'Batch.Name', 'Set', 'Block')
   }
   
-  patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
-  patient.info$Plate.Index = strip.whitespace(patient.info$Plate.Index)
-
-  patient.info[] = lapply(patient.info[], strip.whitespace)
+  #patient.info$SLX.ID = gsub('SLX-', '', strip.whitespace( patient.info$SLX.ID ) )
+  #patient.info = patient.info %>% mutate(SLX.ID = strip.whitespace( SLX.ID ) , Plate.Index = strip.whitespace(Plate.Index))
   
-  patient.info[c('Status','Pathology','p53.Status')] = 
-    lapply(patient.info[c('Status','Pathology','p53.Status')], function(x) factor(strip.whitespace(x)))
+  patient.info = patient.info %>% mutate_all(strip.whitespace)
   
-  patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads','Block')] = 
-    lapply(patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads','Block')], as.numeric)
+  #patient.info[] = lapply(patient.info[], strip.whitespace)
   
-  patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
+  patient.info = patient.info %>% 
+    mutate_at(vars(Status, Pathology, p53.Status), list(as.factor)) %>%
+    mutate_at(vars(Endoscopy.Year, Barretts.Cellularity ,Total.Reads, Block), list(as.numeric)) %>% 
+    mutate(Samplename = paste0(SLX.ID, '.',gsub('-', '_', Plate.Index)) )
+  
+  #patient.info[c('Status','Pathology','p53.Status')] = 
+  #  lapply(patient.info[c('Status','Pathology','p53.Status')], function(x) factor(strip.whitespace(x)))
+  #patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads','Block')] = 
+  #  lapply(patient.info[c('Endoscopy.Year','Barretts.Cellularity','Total.Reads','Block')], as.numeric)
+  
+    #patient.info$Samplename = gsub('-', '_', paste(patient.info$Plate.Index,strip.whitespace(patient.info$SLX.ID),sep="_"))
   ## TODO Mistake in earlier version of the patient file caused this
-  snames = grep('_1072(5|9)$', patient.info$Samplename)
-  if ( length(snames > 0) ) 
-    patient.info$Samplename[snames] =  paste( sub('-','_', patient.info$Plate.Index[snames]), '10725_10729', sep='_' )
+  #snames = grep('_1072(5|9)$', patient.info$Samplename)
+  #if ( length(snames > 0) ) 
+  #  patient.info$Samplename[snames] =  paste( sub('-','_', patient.info$Plate.Index[snames]), '10725_10729', sep='_' )
 
   # Remove 'normal' samples
-  removed = subset(patient.info, grepl('D2|Gastriccardia|normal', Pathology, ignore.case=T))
+  removed = patient.info %>% filter(grepl('D2|Gastriccardia|normal', Pathology, ignore.case=T))
+  patient.info = patient.info %>% filter(!grepl('D2|Gastriccardia|normal', Pathology, ignore.case=T))
   
-  patient.info = subset(patient.info, !grepl('D2|Gastriccardia|normal', Pathology, ignore.case=T))
-
-  patient.info$Pathology = droplevels(patient.info$Pathology)
-  patient.info$Pathology = ordered( patient.info$Pathology, levels=c("BE","ID","LGD","HGD","IMC" ))
+  patient.info = patient.info %>% mutate(Pathology = ordered(droplevels(Pathology),levels=c("BE","ID","LGD","HGD","IMC" )), Batch.Name = as.factor(Batch.Name)) %>%
+    arrange(Status, Patient, Endoscopy.Year, Pathology)
   
-  patient.info$Batch.Name = as.factor(patient.info$Batch.Name)
-  
-  patient.info = arrange(patient.info, Status, Patient, Endoscopy.Year, Pathology)
   
   if (!grepl('all', set, ignore.case = T)) {
-    patient.info = subset(patient.info, Set == set)
+    patient.info = patient.info %>% filter(Set == set)
     message(paste("Returning only the", set, "set", sep=" "))
   } else {
     message(paste("Returning all patient data."))
   }
 
-  patient.info$Hospital.Research.ID = gsub('/', '_',patient.info$Hospital.Research.ID)
-  removed$Hospital.Research.ID = gsub('/', '_',removed$Hospital.Research.ID)
+  patient.info = patient.info %>% mutate(Hospital.Research.ID = gsub('/', '_',Hospital.Research.ID))
+  removed = removed %>% mutate(Hospital.Research.ID = gsub('/', '_',Hospital.Research.ID))
   
   message(paste(length(unique(patient.info$Hospital.Research.ID)), 'unique patient IDs'))
   
