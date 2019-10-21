@@ -25,6 +25,7 @@ pastefun<-function(x) {
   return(x)
 }
 
+sheets = readxl::excel_sheets(val.file)[1:14]
 all = which(grepl('All', sheets))
 
 if (length(all) == 1) {
@@ -36,8 +37,6 @@ if (length(all) == 1) {
   }
   all.info = all.info %>% dplyr::rename(`SLX-ID` = 'SLX.ID')
 } else {
-  sheets = readxl::excel_sheets(val.file)[1:14]
-  
   all.info = do.call(bind_rows, lapply(sheets, function(s) {
     print(s)
     readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Batch) %>% 
