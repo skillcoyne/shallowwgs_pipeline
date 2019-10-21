@@ -95,7 +95,8 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     for (sample in names(plots)) 
       ggsave(filename=paste(plotdir, '/', sample, '_segmented.png',sep=''), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize=F)
   
-    ggsave(filename=paste0(plotdir, '/', pt, '_segmented.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
+    if (length(plots) <= 10)
+      ggsave(filename=paste0(plotdir, '/', pt, '_segmented.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
   
   
     plotdir = paste0(pd,'/cvg_binned_fitted')
@@ -103,8 +104,12 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     plots = BarrettsProgressionRisk::plotCorrectedCoverage(segmented, 'list') 
     for (sample in names(plots))    
       ggsave(filename=paste0(plotdir, '/', sample, '_cvg_binned.png'), plot=plots[[sample]] + labs(title=paste(pt, sample)), width=20, height=6, units='in', limitsize = F)
-  
-    ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
+
+    if (length(plots) <= 10)
+      ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
+    
+    
+    
   } else {
     load(file = paste0(pd,'/segment.Rdata'))
   }
