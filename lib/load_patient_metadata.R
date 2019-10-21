@@ -104,7 +104,7 @@ read.patient.info<-function(file, file2=NULL, set='All', sheet=NULL) {
   patient.info = patient.info %>% 
     mutate_at(vars(Status, Pathology, p53.Status), list(as.factor)) %>%
     mutate_at(vars(Endoscopy.Year, Barretts.Cellularity ,Total.Reads, Block), list(as.numeric)) %>% 
-    mutate(Samplename = paste0(SLX.ID, '.',gsub('-', '_', Plate.Index)) )
+    mutate(Samplename = paste0(SLX.ID, '.', Plate.Index) ) 
   
   #patient.info[c('Status','Pathology','p53.Status')] = 
   #  lapply(patient.info[c('Status','Pathology','p53.Status')], function(x) factor(strip.whitespace(x)))
