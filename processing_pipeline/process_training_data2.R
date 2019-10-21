@@ -45,7 +45,6 @@ if (!is.null(patient.name))
   
 kb = as.integer(sub('kb', '',basename(data)))
 
-
 tiled = NULL; tile.MSE = NULL
 arms.tiled = NULL; arm.MSE = NULL
 
