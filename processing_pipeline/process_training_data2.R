@@ -36,7 +36,7 @@ if (!file.exists(datafile)) stop("Run merge_qdnaseq_data.R first")
 load(datafile, verbose=T)
 
 
-multipcfdir = paste(outdir, basename(data), "pcf_perPatient", sep='/')
+multipcfdir = paste(outdir,"pcf_perPatient", basename(data), sep='/')
 if ( !dir.exists(multipcfdir) ) 
   dir.create(multipcfdir, recursive = T)
 
