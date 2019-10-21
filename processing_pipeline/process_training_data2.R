@@ -65,6 +65,24 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     cols = which(colnames(merged.fit) %in% info$Sample)
     
     segmented = BarrettsProgressionRisk::segmentRawData(info, merged.raw[,c(1:4,cols)],merged.fit[,c(1:4,cols)], verbose=T, kb = kb, multipcf = kb<100 )
+    
+    raw_dist = tibble(
+      patient = segmented$sample.info$Hospital.Research.ID,
+      sample = segmented$sample.info$Sample,
+
+      min = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~min(.,na.rm=T))) %>% t())[,1],
+      max = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~max(.,na.rm=T))) %>% t())[,1],
+
+      mean = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~mean(.,na.rm=T))) %>% t())[,1],
+      median = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~median(.,na.rm=T))) %>% t())[,1],
+      stdev = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~sd(.,na.rm=T))) %>% t())[,1],
+      var = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~var(.,na.rm=T))) %>% t())[,1],
+      
+      Q1 = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~quantile(.,probs=0.25,na.rm=T))) %>% t())[,1],
+      Q3 = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~quantile(.,probs=0.75,na.rm=T))) %>% t())[,1]
+    )
+    raw_dist %>% write_tsv(path=paste0(pd,'/raw_dist.tsv'))
+    
     residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
   
     save(segmented, file=paste0(pd,'/segment.Rdata'))
