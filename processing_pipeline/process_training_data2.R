@@ -108,14 +108,14 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
   } else {
     load(file = paste0(pd,'/segment.Rdata'))
-    
-    tiles = BarrettsProgressionRisk::tileSegments(segmented, verbose=T)
-    arms = BarrettsProgressionRisk::tileSegments(segmented, 'arms', verbose=T)
-    
-    write.table(arms$tiles, file=paste0(pd, '/arms_tiled_segvals.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
-    write.table(tiles$tiles, file=paste0(pd, '/5e06_tiled_segvals.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
   }
   
+  tiles = BarrettsProgressionRisk::tileSegments(segmented, verbose=T)
+  arms = BarrettsProgressionRisk::tileSegments(segmented, 'arms', verbose=T)
+  
+  write.table(arms$tiles, file=paste0(pd, '/arms_tiled_segvals.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
+  write.table(tiles$tiles, file=paste0(pd, '/5e06_tiled_segvals.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
+
 }
 
 message("Finished")
