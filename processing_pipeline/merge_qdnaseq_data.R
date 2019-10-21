@@ -119,8 +119,8 @@ for (bin in qd.bins) {
     print(dim(merged.fit))
   }
   
-  merged.fit = merged.fit %>% rename_at(vars(matches('^SLX-')), fix.index)
-  merged.raw = merged.raw %>% rename_at(vars(matches('^SLX-')), fix.index)
+  #merged.fit = merged.fit %>% rename_at(vars(matches('^SLX-')), fix.index)
+  #merged.raw = merged.raw %>% rename_at(vars(matches('^SLX-')), fix.index)
 
   if (normals) {
     merged.fit = merged.fit %>% dplyr::select( location, chrom, start, end, all.info$Samplename )
