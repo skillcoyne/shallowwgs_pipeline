@@ -17,7 +17,7 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 
 
 data = args[1]
-# data = '~/Data/BarrettsProgressionRisk/Analysis/IntPloidy/multipcf_perPatient/'
+# data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/100kb/'
 outdir = args[2]
 # outdir = '/tmp'
 infodir = args[3]
@@ -47,17 +47,16 @@ patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% dp
 if (set != 'All') patient.info = patient.info %>% filter(Set == set)
 length(unique(patient.info$Hospital.Research.ID))
 
-fncols <- function(data, cname, default=NA) {
-  add <-cname[!cname%in%names(data)]
-  
-  if(length(add)!=0) data[add] <- default
-  data
-}
-pastefun<-function(x) {
-  if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
-  return(x)
-}
-
+# fncols <- function(data, cname, default=NA) {
+#   add <-cname[!cname%in%names(data)]
+#   
+#   if(length(add)!=0) data[add] <- default
+#   data
+# }
+# pastefun<-function(x) {
+#   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
+#   return(x)
+# }
 # val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 # sheets = readxl::excel_sheets(val.file)[8:13]
 # all.val = do.call(bind_rows, lapply(sheets, function(s) {
@@ -99,8 +98,8 @@ per.samp.mean = apply(seg.tiles,1,mean)
 #if (logT) seg.tiles = t(apply(seg.tiles, 1, BarrettsProgressionRisk:::.logTransform))
 
 # After mean centering set all NA values to 0
-#segsList = prep.matrix(seg.tiles,scale=T, MARGIN=1)
-segsList = prep.matrix(seg.tiles,scale=F)
+segsList = prep.matrix(seg.tiles,scale=T, MARGIN=2)
+#segsList = prep.matrix(seg.tiles,scale=F)
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
 segs = segsList$matrix
@@ -124,16 +123,16 @@ arm.tiles = as.matrix(arm.tiles[,-1])
 rownames(arm.tiles) = samples
 #if (logT) arm.tiles = t(apply(arm.tiles, 1, logTransform))
 
-#armsList = prep.matrix(arm.tiles,scale=T,MARGIN=1)
-armsList = prep.matrix(arm.tiles,scale=F)
+armsList = prep.matrix(arm.tiles,scale=T,MARGIN=2)
+#armsList = prep.matrix(arm.tiles,scale=F)
 arms = armsList$matrix
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd
 
 allDf = BarrettsProgressionRisk::subtractArms(segs, arms)
 mn.cx = sqrt(mean(cx.score^2))
-allDf = cbind(allDf, 'cx'=cx.score/sqrt(mean(cx.score^2)))
-#allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx), 'sd'=per.samp.sd*10, 'mn'=per.samp.mean)
+#allDf = cbind(allDf, 'cx'=cx.score/sqrt(mean(cx.score^2)))
+allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx))
 
 #all.val = all.val %>% mutate(Status = ifelse(Status == 'OAC', 'P', Status)) %>% mutate(Status == factor(Status))
 
