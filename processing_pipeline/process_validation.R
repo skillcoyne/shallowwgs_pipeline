@@ -56,6 +56,7 @@ if (!is.null(patients))
 #patients = (pts_slx %>% filter(`SLX-ID` == slx)) %>% select(`Patient ID`) %>% pull
 failedQC = tibble()
 
+kb = as.integer(sub('kb', '',basename(data)))
 
 # Need to process the batches from CK and SA separately even if the patients overlap
 for (ra in levels(all.val$RA) ) {
@@ -93,7 +94,25 @@ for (ra in levels(all.val$RA) ) {
 
     tryCatch({
       info = loadSampleInformation(si %>% filter(Samplename == samples))
-      segmented = BarrettsProgressionRisk::segmentRawData(info,rd,fd,intPloidy=T,cutoff=0.04, verbose=T)
+      segmented = BarrettsProgressionRisk::segmentRawData(info,rd,fd,cutoff=0.011,kb=kb,multipcf=kb<100,verbose=T)
+      
+      raw_dist = tibble(
+        patient = segmented$sample.info$Hospital.Research.ID,
+        sample = segmented$sample.info$Sample,
+        
+        min = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~min(.,na.rm=T))) %>% t())[,1],
+        max = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~max(.,na.rm=T))) %>% t())[,1],
+        
+        mean = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~mean(.,na.rm=T))) %>% t())[,1],
+        median = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~median(.,na.rm=T))) %>% t())[,1],
+        stdev = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~sd(.,na.rm=T))) %>% t())[,1],
+        var = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~var(.,na.rm=T))) %>% t())[,1],
+        
+        Q1 = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~quantile(.,probs=0.25,na.rm=T))) %>% t())[,1],
+        Q3 = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~quantile(.,probs=0.75,na.rm=T))) %>% t())[,1]
+      )
+      raw_dist %>% write_tsv(path=paste0(dirname(plot.dir),'/raw_dist.tsv'))
+      
       
       #prr2 = BarrettsProgressionRisk::predictRiskFromSegments(segmented, model=fit, s=lambda, tile.mean = z.mean, tile.sd = z.sd, arms.mean = z.arms.mean, arms.sd = z.arms.sd, cx.mean = mn.cx, cx.sd = sd.cx)
       
