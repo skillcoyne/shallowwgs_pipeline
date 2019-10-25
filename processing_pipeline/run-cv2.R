@@ -19,11 +19,15 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 data = args[1]
 # data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/100kb/'
 outdir = args[2]
-# outdir = '/tmp'
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6/100kb/'
 infodir = args[3]
 # infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 set = 'Training'
-if (length(args) == 4) set = args[4]
+#if (length(args) == 4) set = args[4]
+
+select.alpha = 0.9
+ if (length(args) == 4)
+   select.alpha = as.numeric(args[4])
 
 logT = F
 # if (length(args) == 4)
@@ -42,9 +46,14 @@ demo.file = list.files(infodir, pattern='Demographics_full.xlsx', recursive=T, f
 if ( length(patient.file) != 1 | length(demo.file) != 1)
   stop("Missing files in info dir: All_patient_info.xlsx and Demographics_full.xlsx")
 
-patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% dplyr::arrange(Status, Patient, Endoscopy.Year, Pathology)
+all.patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% dplyr::arrange(Status, Patient, Endoscopy.Year, Pathology)
 
-if (set != 'All') patient.info = patient.info %>% filter(Set == set)
+if (set != 'All') {
+  patient.info = all.patient.info %>% filter(Set == set)
+} else {
+  patient.info = all.patient.info
+}
+
 length(unique(patient.info$Hospital.Research.ID))
 
 # fncols <- function(data, cname, default=NA) {
@@ -276,9 +285,7 @@ pg.samp = patient.info %>% rowwise %>% dplyr::mutate(
   Prediction.Dev.Resid = NA
 ) %>% filter(Samplename %in% rownames(dysplasia.df))
 
-select.alpha = 0.9
-
-file = paste(cache.dir, 'loo.Rdata', sep='/')
+file = paste(cache.dir, paste0('loo_',select.alpha,'.Rdata'), sep='/')
 if (file.exists(file)) {
   message(paste("loading file", file))
   load(file, verbose=T)
@@ -445,5 +452,92 @@ if (lnhgd) {
     save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.sampNOHGD, file=file)
   }
 }
+
+
+## Predict the test set
+if (set != 'All') {
+  message(paste0("Prediction the test set using models for ", select.alpha))
+  load(paste(cache.dir, '/model_data.Rdata', sep='/'))
+  rm(dysplasia.df, labels)
+  
+  load(paste(cache.dir, 'all.pt.alpha.Rdata', sep='/'))
+  fit = models[[select.alpha]]
+  lambda = performance.at.1se[[select.alpha]]$lambda
+  rm(plots,coefs,performance.at.1se,dysplasia.df,cvs,labels,models)
+
+  patient.info = all.patient.info %>% filter(Set == 'Test')
+  sum.patient.data = as_tibble(summarise.patient.info(patient.info))
+  
+  cleaned = list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T)
+  cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
+  #cleaned = grep(paste(unique(patient.info$Hospital.Research.ID), collapse = '|'), cleaned, value=T)
+  
+  arm.files = c(grep('arm', cleaned, value=T))
+  seg.files = c(grep('arm', cleaned, value=T, invert=T))
+  
+  if (length(seg.files) != length(arm.files)) stop("Tiled files do not match between short segments and arms.")
+  
+  seg.tiles = do.call(bind_rows, lapply(seg.files, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+  colnames(seg.tiles)[1] = 'sample'
+  samples = seg.tiles$sample
+  
+  seg.tiles = as.matrix(seg.tiles[,-1])
+  rownames(seg.tiles) = samples
+
+  segs = prep.matrix(seg.tiles,scale=F)$matrix
+  for (col in 1:ncol(segs)) 
+    segs[,col] = BarrettsProgressionRisk:::unit.var(segs[,col], mean = z.mean[col], sd = z.sd[col])
+  
+  arm.tiles = do.call(bind_rows, lapply(arm.files, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+  colnames(arm.tiles)[1] = 'sample'
+  samples = arm.tiles$sample
+  
+  arm.tiles = as.matrix(arm.tiles[,-1])
+  rownames(arm.tiles) = samples
+  arms = prep.matrix(arm.tiles,scale=F)$matrix
+  for (col in 1:ncol(arms)) 
+    arms[,col] = BarrettsProgressionRisk:::unit.var(arms[,col], mean = z.mean[col], sd = z.sd[col])
+  
+  cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
+
+  test.df = cbind(BarrettsProgressionRisk::subtractArms(segs,arms), 'cx' = BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx))
+
+  patient.info = patient.info %>% dplyr::mutate(
+      PID = sub('_B.*$', '', Path.ID),
+      Prediction = NA,
+      RR = NA
+  ) %>% filter(Samplename %in% rownames(test.df))
+
+  test.samp = NULL
+  for (pt in unique(patient.info$Hospital.Research.ID)) {
+    
+    patient = patient.info %>% filter(Hospital.Research.ID == pt) 
+    
+    df = test.df[patient %>% dplyr::select(Samplename) %>% pull,]  
+
+    sparsed_test_data = Matrix(data=0, nrow=nrow(df),  ncol=ncol(df),
+                             dimnames=list(rownames(df),colnames(df)), sparse=T)
+    for(i in colnames(df)) sparsed_test_data[,i] = df[,i]
+
+    pm = predict(fit, newx=sparsed_test_data, s=lambda, type='response')
+  #  colnames(pm) = 'Prediction'
+  
+    rr = predict(fit, newx=sparsed_test_data, s=lambda, type='link')
+   # colnames(rr) = 'RR'
+
+   patient = patient %>% mutate(
+      Prediction = pm[patient$Samplename,],
+      RR = rr[patient$Samplename,]
+    ) 
+
+   if (is.null(test.samp)) {
+     test.samp = patient
+   } else {
+     test.samp = bind_rows(test.samp, patient)
+   }
+  }
+  write_tsv(test.samp, path=paste0(cache.dir, paste0('/test_patients_preds_',select.alpha,'.tsv')))
+}
+
 message("Finished")
 

@@ -16,8 +16,8 @@ val.file = args[2]
 normals = F
 if (length(args) == 3) normals = as.logical(args[3])
 
-#  data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
-#  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+ data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
+  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 #val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx'
 
 pastefun<-function(x) {
@@ -37,7 +37,7 @@ if (length(all) == 1) {
   }
   all.info = all.info %>% dplyr::rename(`SLX-ID` = 'SLX.ID')
 } else {
-  all.info = do.call(bind_rows, lapply(sheets, function(s) {
+  all.info = do.call(bind_rows, lapply(sheets[8:14], function(s) {
     print(s)
     readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Sample Type`, `SLX-ID`, `Index Sequence`, Batch) %>% 
       dplyr::filter(!is.na(`SLX-ID`)) %>%
@@ -50,9 +50,12 @@ if (length(all) == 1) {
 
 print(unique(all.info$`SLX-ID`))
 
-data.dirs = grep(paste(unique(all.info$`SLX-ID`), collapse='|'), list.dirs(data, full.names=T, recursive=F), value=T)
+ld = list.dirs(data, full.names=T, recursive=T)
+slx = gsub('SLX-','',paste(unique(all.info$`SLX-ID`),collapse='|'))
 
-qd.bins = unique(basename(list.dirs(data.dirs, recursive = F)))
+data.dirs = grep(slx,ld,value=T)
+
+qd.bins = unique(basename(list.dirs(data, recursive = F)))
 qd.bins = grep('15kb-ol*', qd.bins, invert=T, value=T)
 
 if (length(data.dirs) <= 0)

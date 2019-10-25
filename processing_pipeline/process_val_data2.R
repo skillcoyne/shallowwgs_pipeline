@@ -8,6 +8,7 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 3)
   stop("Missing required arguments: <qdna data dir> <patient spreadsheet> <output dir> <patient name OPT>")
 
+library(tidyverse)
 suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 #source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
