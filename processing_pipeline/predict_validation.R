@@ -8,15 +8,15 @@ suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 #source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 datadir = args[1]
-# datadir = '~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/AHM1400'
+# datadir = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/100kb/AHM1400'
 info.file = args[2]
 # info.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 model.dir = args[3]
-# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms'
+# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6/100kb'
 outdir = args[4]
 # outdir = '/tmp'
 training.dir = args[5]
-# training.dir = '~/Data/BarrettsProgressionRisk/Analysis/multipcf_perPatient'
+# training.dir = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/100kb/'
 
 select.alpha = '0.9'
 if (length(args) == 6) {
@@ -28,13 +28,13 @@ if (length(args) == 6) {
 
 # ----- Load ALL data
 
-files = list.files(training.dir, '5e06_cleaned_tiled', recursive=T, full.names = T)
+files = list.files(training.dir, '5e06_.*tiled', recursive=T, full.names = T)
 if (length(files) <= 0) stop(paste0("No tiled files in ", training.dir))
 training.tiles.5mb = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% dplyr::rename('Sample' = 'X1')
 
-files = list.files(training.dir, 'arms_cleaned_tiled', recursive=T, full.names = T)
+files = list.files(training.dir, 'arms_.*tiled', recursive=T, full.names = T)
 if (length(files) <= 0) stop(paste0("No tiled arm files in ", training.dir))
 training.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
@@ -43,12 +43,12 @@ training.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
 if (nrow(training.tiles.5mb) != nrow(training.tiles.arms)) stop("5MB files don't match arm files in training directory.")
 
 ## Val
-files = list.files(dirname(datadir), '5e06_tiles', recursive=T, full.names = T)
+files = list.files(dirname(datadir), '5e06_.*tiled', recursive=T, full.names = T)
 val.tiles.5e6 = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double()))
 })) %>% dplyr::rename('Sample' = 'X1')
 
-files = list.files(dirname(datadir), 'arm_tiles', recursive=T, full.names = T)
+files = list.files(dirname(datadir), 'arms_.*tiled', recursive=T, full.names = T)
 val.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
   read_tsv(f,col_types=c(.default=col_double())) %>% dplyr::filter(X1 != '')
 })) %>% dplyr::rename('Sample' = 'X1')
@@ -56,28 +56,27 @@ val.tiles.arms = do.call(bind_rows, purrr::map(files, function(f) {
 if (nrow(val.tiles.5e6) != nrow(val.tiles.arms)) stop("5MB files don't match arm files in validation directory.")
 
 # Rank adjust validation
-find.rank<-function(r,x) {
-  if ( nrow(x %>% filter(rank == r)) > 0 ) return(x %>% filter(rank == r))
-  find.rank(r-1,x)
-}
-
-rank.adjust<-function(train,val) {
-  for (n in 2:ncol(train)) {
-    col = colnames(train)[n]
-    
-    rk = sapply(seq(1, length(train[[col]]), 4), function(s) mean(train[[col]][s:(s+4)], na.rm=T))
-    tt.rank = tibble(value=rk, rank=rank(rk)) %>% arrange(rank)
-    vt.rank = floor(rank(val[[col]]))
-    
-    for (i in 1:length(vt.rank)) {
-      r = vt.rank[i]
-      if (is.na(mean(find.rank(r,tt.rank)$value,na.rm=T))) stop(paste(col, r))
-      val[i, col] = mean(find.rank(r,tt.rank)$value,na.rm=T)
-    }
-  }
-return(val)
-}
-
+# find.rank<-function(r,x) {
+#   if ( nrow(x %>% filter(rank == r)) > 0 ) return(x %>% filter(rank == r))
+#   find.rank(r-1,x)
+# }
+# 
+# rank.adjust<-function(train,val) {
+#   for (n in 2:ncol(train)) {
+#     col = colnames(train)[n]
+#     
+#     rk = sapply(seq(1, length(train[[col]]), 4), function(s) mean(train[[col]][s:(s+4)], na.rm=T))
+#     tt.rank = tibble(value=rk, rank=rank(rk)) %>% arrange(rank)
+#     vt.rank = floor(rank(val[[col]]))
+#     
+#     for (i in 1:length(vt.rank)) {
+#       r = vt.rank[i]
+#       if (is.na(mean(find.rank(r,tt.rank)$value,na.rm=T))) stop(paste(col, r))
+#       val[i, col] = mean(find.rank(r,tt.rank)$value,na.rm=T)
+#     }
+#   }
+# return(val)
+# }
 #print("Rank adjusting validation cohort")
 #val.tiles.5e6 = rank.adjust(training.tiles.5mb, val.tiles.5e6)
 #val.tiles.arms = rank.adjust(training.tiles.arms, val.tiles.arms)
@@ -93,7 +92,7 @@ dir.create(outdir, showWarnings = F, recursive = T)
 
 print(paste0("Output path:", outdir))
 
-x = list.files(model.dir, 'loo.Rdata', recursive = T, full.names = T)
+x = list.files(model.dir, paste0('loo_',select.alpha,'.Rdata'), recursive = T, full.names = T)
 load(x, verbose=F)
 nz = nzcoefs
 rm(plots,performance.at.1se,fits,pg.samp,coefs)
@@ -108,18 +107,24 @@ x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
 load(x, verbose=F)
 rm(dysplasia.df, coefs, labels)
 
-sheets = readxl::excel_sheets(info.file)[8:13]
+sheets = readxl::excel_sheets(info.file)[8:14]
 info = do.call(bind_rows, lapply(sheets, function(s) {
   readxl::read_xlsx(info.file, s, trim_ws = T) %>% 
     dplyr::select(`Hospital Research ID`, `Block ID`, Endoscopy, Pathology, `SLX-ID`, `Index Sequence`, `Path Notes`) %>% dplyr::mutate(Sample = paste0(`SLX-ID`,'.',`Index Sequence`))
 }))
 
 ## Means!
-val.mean = apply(as.matrix(bind_rows(val.tiles.5e6,training.tiles.5mb)[,-1]), 2, mean, na.rm=T)
-val.sd = apply(as.matrix(bind_rows(val.tiles.5e6,training.tiles.5mb)[,-1]), 2, sd, na.rm=T)
+#val.mean = apply(as.matrix(bind_rows(val.tiles.5e6,training.tiles.5mb)[,-1]), 2, mean, na.rm=T)
+#val.sd = apply(as.matrix(bind_rows(val.tiles.5e6,training.tiles.5mb)[,-1]), 2, sd, na.rm=T)
 
-arm.mean = apply(as.matrix(bind_rows(val.tiles.arms,training.tiles.arms)[,-1]), 2, mean, na.rm=T)
-arm.sd = apply(as.matrix(bind_rows(val.tiles.arms,training.tiles.arms)[,-1]), 2, sd, na.rm=T)
+#arm.mean = apply(as.matrix(bind_rows(val.tiles.arms,training.tiles.arms)[,-1]), 2, mean, na.rm=T)
+#arm.sd = apply(as.matrix(bind_rows(val.tiles.arms,training.tiles.arms)[,-1]), 2, sd, na.rm=T)
+
+val.mean = z.mean
+val.sd = z.sd
+
+arm.mean = z.arms.mean
+arm.sd = z.arms.sd
 
 #info = info %>% dplyr::filter(`Hospital Research ID` == pt) %>% arrange(Sample)
 
@@ -147,7 +152,8 @@ be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, val.mean, ar
 #be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, NULL, NULL, NULL, NULL, mn.cx, sd.cx, nz, cvRR, NULL)
 
 print("Loading segment file")
-segFiles = list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T)
+segFiles = list.files(datadir, '[2|3|4]?_?seg.*.Rdata',  full.names = T, recursive = T)
+#segFiles = list.files(datadir, '[2|3|4]_segObj',  full.names = T, recursive = T)
 print(segFiles)
 if (length(segFiles) <= 0) stop(paste0('No segmentation file found in ', datadir))
 
@@ -159,7 +165,7 @@ for (f in segFiles) {
   
   tiles = BarrettsProgressionRisk:::tileSamples(segmented, be.model = be.model, scale=T, MARGIN=2, verbose=T)
   #tiles$tiles = val.df
-  
+
   prr = BarrettsProgressionRisk:::predictRisk(segmented, tiles, be.model)
   predictions(prr)
 
