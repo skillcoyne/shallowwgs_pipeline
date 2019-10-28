@@ -456,12 +456,12 @@ if (lnhgd) {
 
 ## Predict the test set
 if (set != 'All') {
-  message(paste0("Prediction the test set using models for ", select.alpha))
+  message(paste0("Predicting the test set using models for ", select.alpha))
   message(paste(cache.dir, '/model_data.Rdata', sep='/'))
   load(paste(cache.dir, '/model_data.Rdata', sep='/'))
   rm(dysplasia.df, labels)
   
-  paste(cache.dir, '/all.pt.alpha.Rdata', sep='/')
+  message(paste(cache.dir, '/all.pt.alpha.Rdata', sep='/'))
   load(paste(cache.dir, '/all.pt.alpha.Rdata', sep='/'))
   fit = models[[as.character(select.alpha)]]
   lambda = performance.at.1se[[as.character(select.alpha)]]$lambda
