@@ -463,8 +463,8 @@ if (set != 'All') {
   
   paste(cache.dir, '/all.pt.alpha.Rdata', sep='/')
   load(paste(cache.dir, '/all.pt.alpha.Rdata', sep='/'))
-  fit = models[[select.alpha]]
-  lambda = performance.at.1se[[select.alpha]]$lambda
+  fit = models[[as.character(select.alpha)]]
+  lambda = performance.at.1se[[as.character(select.alpha)]]$lambda
   message(paste0('lambda=',lambda))
   
   rm(plots,coefs,performance.at.1se,dysplasia.df,cvs,labels,models)
