@@ -90,20 +90,23 @@ print(paste0('Patient ', pt))
 outdir = paste0(outdir, '/', select.alpha, '/', pt)
 dir.create(outdir, showWarnings = F, recursive = T)
 
-print(paste0("Output path:", outdir))
+message(paste0("Output path:", outdir))
 
 x = list.files(model.dir, paste0('loo_',select.alpha,'.Rdata'), recursive = T, full.names = T)
+message(paste0('LOO: ', x))
 load(x, verbose=F)
 nz = nzcoefs
 rm(plots,performance.at.1se,fits,pg.samp,coefs)
 
 x = list.files(model.dir, 'all.pt.alpha.Rdata', recursive = T, full.names = T)
+message(paste0('MODEL INFO: ',x))
 load(x, verbose=T)
 fit = models[[select.alpha]]
 lambda = performance.at.1se[[select.alpha]]$lambda  
 cvRR = BarrettsProgressionRisk:::cvRR(dysplasia.df, coefs[[select.alpha]])
 
 x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
+message(paste0('MODEL DATA: ', x))
 load(x, verbose=F)
 rm(dysplasia.df, coefs, labels)
 
