@@ -121,9 +121,9 @@ for (pt in unique(pts_slx$`Hospital Research ID`)) {
     if (length(plots) <= 10)
       ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
     
-  } else {
-    load(file = paste0(pd,'/segment.Rdata'))
-  }
+#  } else {
+#    load(file = paste0(pd,'/segment.Rdata'))
+#  }
   
   tiles = BarrettsProgressionRisk::tileSegments(segmented, verbose=T)
   arms = BarrettsProgressionRisk::tileSegments(segmented, 'arms', verbose=T)
