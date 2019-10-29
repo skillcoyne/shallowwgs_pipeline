@@ -36,10 +36,10 @@ pastefun<-function(x) {
   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
   return(x)
 }
-all.patient.info = all.patient.info %>% rowwise %>% mutate_at(vars(`SLX.ID`), list(pastefun) ) %>% ungroup
-#all.val = all.val %>% arrange(Batch, `Hospital Research ID`) %>% group_by(`Hospital Research ID`) %>% mutate(AID = group_indices()) %>% ungroup
-all.patient.info = all.patient.info %>% mutate(`Hospital.Research.ID` = str_replace_all( str_remove_all(`Hospital.Research.ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''))
-all.patient.info = all.patient.info %>% mutate(Samplename = paste(`SLX.ID`, `Index Sequence`, sep='.')) 
+all.patient.info = all.patient.info %>% rowwise %>% 
+  mutate_at(vars(`SLX.ID`), list(pastefun) ) %>% ungroup %>%
+  mutate(`Hospital.Research.ID` = str_replace_all( str_remove_all(`Hospital.Research.ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', '')) %>% 
+  mutate(Samplename = paste(`SLX.ID`, `Index Sequence`, sep='.')) 
 
 pts_slx = all.patient.info %>% dplyr::select(`SLX.ID`, `Hospital.Research.ID`) %>% distinct %>% arrange(`Hospital.Research.ID`)
 
@@ -62,7 +62,7 @@ kb = as.integer(sub('kb', '',basename(data)))
 tiled = NULL; tile.MSE = NULL
 arms.tiled = NULL; arm.MSE = NULL
 
-for (pt in unique(pts_slx$`Hospital Research ID`)) {
+for (pt in unique(pts_slx$`Hospital.Research.ID`)) {
   print(pt)
   pd = paste(multipcfdir, pt,sep='/')
   
