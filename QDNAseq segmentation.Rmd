@@ -32,10 +32,15 @@ train.resids = purrr::map( list.files(qdna.dirs, full.names=T), function(dir) {
 })
 names(train.resids) = basename(list.files(qdna.dirs, full.names=T))
 
-
+train.tiles = purrr::map( list.files(qdna.dirs, full.names=T), function(dir) {
+  do.call(bind_rows, lapply(list.files(dir, '5e06_tile', recursive = T, full.names = T), function(f) {
+    read_tsv(f, col_types = cols( .default = col_double(), X1 = col_character())) %>% dplyr::rename(sample = 'X1') 
+  }))
+})
+names(train.tiles) = basename(list.files(qdna.dirs, full.names=T))
 
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
-sheets = readxl::excel_sheets(val.file)[8:13]
+sheets = readxl::excel_sheets(val.file)[8:14]
 
 pastefun<-function(x) {
   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
@@ -55,12 +60,21 @@ val.info = do.call(bind_rows, lapply(sheets, function(s) {
 
 
 qdna.dirs = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient'
-val.train.dists.by.kb = purrr::map( list.files(qdna.dirs, full.names=T), function(dir) {
+val.dists.by.kb = purrr::map( list.files(qdna.dirs, full.names=T), function(dir) {
   do.call(bind_rows, lapply(list.files(dir, 'raw_dist.tsv', full.names = T, recursive = T), function(f) {
     read_tsv(f,col_types = 'ccdddddddd') %>% mutate(kb = basename(dir))  
   }))
 })
-names(val.train.dists.by.kb) = basename(list.files(qdna.dirs, full.names=T))
+names(val.dists.by.kb) = basename(list.files(qdna.dirs, full.names=T))
+
+
+val.tiles = purrr::map( list.files(qdna.dirs, full.names=T), function(dir) {
+  do.call(bind_rows, lapply(list.files(dir, '5e06_tile', recursive = T, full.names = T), function(f) {
+    read_tsv(f, col_types = cols( .default = col_double(), X1 = col_character())) %>% dplyr::rename(sample = 'X1') 
+  }))
+})
+names(val.tiles) = basename(list.files(qdna.dirs, full.names=T))
+
 
 val.resids = purrr::map( list.files(qdna.dirs, full.names=T), function(dir) {
   do.call(bind_rows, lapply(list.files(dir, 'residuals.tsv', full.names = T, recursive = T), function(f) {
@@ -146,7 +160,6 @@ ggplot(all %>% filter(kb == '100kb'), aes(stdev)) + facet_grid(~cohort) +
 The variance continues (as before) and is reflected in the residuals of the segmented values for each bin size
 
 ```{r}
-
 plist = lapply(train.resids, function(df) {
   lim = c(0, max(df$varMAD_median))
   if (max(df$varMAD_median) > 0.05) lim = c(min(df$varMAD_median), 0.05)
@@ -170,6 +183,68 @@ sapply(names(train.resids), function(kb) nrow( train.resids[[kb]] %>% filter(var
 sapply(names(val.resids), function(kb) nrow( val.resids[[kb]] %>% filter(varMAD_median >= cutoffs[kb])))
 
 ggplot(do.call(bind_rows,train.resids), aes(kb, varMAD_median)) + geom_boxplot() + ylim(0,0.05)
+```
+
+## Post segmentation 5mb bins
+
+```{r}
+train.tile.var = do.call(bind_rows, lapply(train.tiles, function(df) {
+  df %>% dplyr::summarise_if(is.double, list( ~ sd(.,na.rm=T) ))  
+})) %>% add_column(kb  = names(train.tiles), cohort = 'training', .before=1)
+
+val.tile.var = do.call(bind_rows, lapply(val.tiles, function(df) {
+  df %>% dplyr::summarise_if(is.double, list( ~ sd(.,na.rm=T) ))  
+})) %>% add_column(kb  = names(val.tiles), cohort = 'validation', .before=1)
+
+m = melt(bind_rows(train.tile.var, val.tile.var), id.vars = c('kb','cohort'))
+
+ggplot(m, aes(variable, value, color=cohort, group=cohort)) + ylim(0.95,1.05) + facet_grid(~kb) +  geom_jitter(position = position_dodge(width=1)) + geom_violin(position = position_dodge(width=1), alpha=0.5) 
+
+```
+
+
+### Post z-adjustment
+
+```{r}
+z.sds = lapply(train.tiles, function(df) {
+  df %>% dplyr::summarise_if(is.double, list( ~ sd(.,na.rm=T) ))  
+})
+
+z.means = lapply(train.tiles, function(df) {
+  df %>% dplyr::summarise_if(is.double, list( ~ mean(.,na.rm=T) ))  
+})
+
+scaled.training = lapply(train.tiles, function(df) {
+  df %>% dplyr::mutate_if(is.double, list(~ BarrettsProgressionRisk:::unit.var(.) ) )
+})
+
+
+scaled.val = lapply(names(val.tiles), function(kb) {
+  df = val.tiles[[kb]]
+  zm = z.means[[kb]]
+  zd = z.sds[[kb]]
+  for (col in colnames((df %>% dplyr::select(-sample))))
+       df[[col]] = BarrettsProgressionRisk:::unit.var( df[[col]], zm[[col]], zd[[col]]  )
+  return(df)       
+})
+names(scaled.val) = names(val.tiles)
+
+
+scale.train.tile.var = do.call(bind_rows, lapply(scaled.training, function(df) {
+  df %>% dplyr::summarise_if(is.double, list( ~ median(.,na.rm=T) ))  
+})) %>% add_column(kb  = names(scaled.training), cohort = 'training', .before=1)
+
+scale.val.tile.var = do.call(bind_rows, lapply(scaled.val, function(df) {
+  df %>% dplyr::summarise_if(is.double, list( ~ median(.,na.rm=T) ))  
+})) %>% add_column(kb  = names(scaled.val), cohort = 'validation', .before=1)
+
+m = melt(bind_rows(scale.train.tile.var, scale.val.tile.var), id.vars = c('kb','cohort'))
+
+ggplot(m, aes(cohort, value, color=cohort, group=cohort)) + facet_grid(~kb) +  
+  geom_jitter(position = position_dodge(width=1)) + 
+  geom_violin(position = position_dodge(width=1), alpha=0.5) 
+
+
 ```
 
 

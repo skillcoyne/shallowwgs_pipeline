@@ -18,17 +18,19 @@ outdir = args[3]
 # data = '~/Data/Ellie/QDNAseq/validation/merged/100kb'
 # patient.file = '~/Data/Ellie/QDNAseq/validation/sWGS_validation_batches.xlsx'
 # outdir = '~/Data/Ellie/Analysis/validation'
-
+# patient.name = 'AHM1990'
 
 patient.name = NULL
 if (length(args) == 4)
   patient.name = gsub('\\/', '_', args[4])
 
-sheets = readxl::excel_sheets(patient.file)[8:13]
+sheets = readxl::excel_sheets(patient.file)[8:14]
 all.patient.info = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(patient.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status|Endoscopy|Block|Path'), `Sample Type`, `SLX-ID`, `Index Sequence`) %>% 
+  readxl::read_xlsx(patient.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status|Endoscopy|Block|Path'), `Sample Type`, `SLX-ID`, `Index Sequence`,Cohort) %>% 
     dplyr::mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
 })) %>% dplyr::rename('SLX.ID'='SLX-ID', 'Hospital.Research.ID'='Hospital Research ID', 'Block'='Block ID')
+
+#all.patient.info =all.patient.info %>% filter(Cohort != 'Old progressor scrolls')
 
 pastefun<-function(x) {
   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
@@ -64,7 +66,7 @@ for (pt in unique(pts_slx$`Hospital Research ID`)) {
   print(pt)
   pd = paste(multipcfdir, pt,sep='/')
   
-  if (!file.exists(paste0(pd,'/segment.Rdata'))) {
+#  if (!file.exists(paste0(pd,'/segment.Rdata'))) {
     dir.create(pd,showWarnings = F)
     
     info = all.patient.info %>% filter(`Hospital.Research.ID` == pt) %>% 
@@ -74,7 +76,7 @@ for (pt in unique(pts_slx$`Hospital Research ID`)) {
   
     cols = which(colnames(merged.fit) %in% info$Sample)
     
-    segmented = BarrettsProgressionRisk::segmentRawData(info, merged.raw[,c(1:4,cols)],merged.fit[,c(1:4,cols)], verbose=T, kb = kb, multipcf = kb<100 )
+    segmented = BarrettsProgressionRisk::segmentRawData(info, merged.raw[,c(1:4,cols)],merged.fit[,c(1:4,cols)], verbose=T, kb = kb, multipcf = F )
     
     raw_dist = tibble(
       patient = segmented$sample.info$Hospital.Research.ID,
@@ -118,8 +120,6 @@ for (pt in unique(pts_slx$`Hospital Research ID`)) {
 
     if (length(plots) <= 10)
       ggsave(filename=paste0(plotdir, '/', pt, '_cvg_binned.png'), plot=do.call(gridExtra::grid.arrange, c(plots, ncol=1, top=pt)), width=20, height=6*length(plots), units='in', limitsize=F) 
-    
-    
     
   } else {
     load(file = paste0(pd,'/segment.Rdata'))
