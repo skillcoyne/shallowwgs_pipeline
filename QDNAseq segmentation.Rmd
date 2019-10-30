@@ -93,13 +93,19 @@ The training data was all reprocessed at different QDNAseq bin sizes
 ```{r}
 m = melt(do.call(bind_rows, train.dists.by.kb), id.vars='kb', measure.vars=c('median'))
 m = m %>% mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T))
-ggplot(m, aes(kb, value, group=kb)) + geom_boxplot(aes(fill=kb), show.legend = F) + ylim(0.95,1.05) + 
+ggplot(m, aes(kb, value, group=kb)) + ylim(0.95,1.05) + 
+  geom_jitter(width=0.1) + 
+  geom_violin(aes(fill=kb), show.legend = F) +
+  geom_boxplot(width=0.1,alpha=0.5) +
   scale_fill_brewer(palette='Set1') + 
   labs(title='Training data median per QDNAseq bin size', y='median',x='') + theme_minimal()
 
 m = melt(do.call(bind_rows, train.dists.by.kb), id.vars='kb', measure.vars=c('stdev'))
 m = m %>% mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T))
-ggplot(m, aes(kb, value, group=kb)) + geom_boxplot(aes(fill=kb), show.legend = F) + ylim(0,1) +
+ggplot(m, aes(kb, value, group=kb)) + ylim(0,1) +
+  geom_jitter(width=0.1) + 
+  geom_violin(aes(fill=kb), show.legend = F) +
+  geom_boxplot(width=0.1,alpha=0.5) +
   scale_fill_brewer(palette='Set1') + 
   labs(title='Training data variance per QDNAseq bin size', y='stdev',x='') + theme_minimal()
 
@@ -115,13 +121,19 @@ The validation data was all reprocessed at different QDNAseq bin sizes
 ```{r}
 m = melt(do.call(bind_rows, val.dists.by.kb), id.vars='kb', measure.vars=c('median'))
 m = m %>% mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T))
-ggplot(m, aes(kb, value, group=kb)) + geom_boxplot(aes(fill=kb), show.legend = F) + ylim(0.95,1.05) + 
+ggplot(m, aes(kb, value, group=kb)) + ylim(0.95,1.05) + 
+  geom_jitter(width=0.1) + 
+  geom_violin(aes(fill=kb), show.legend = F) +
+  geom_boxplot(width=0.1,alpha=0.5) +
   scale_fill_brewer(palette='Set1') + 
   labs(title='Validation data median per QDNAseq bin size', y='median',x='') + theme_minimal()
 
 m = melt(do.call(bind_rows, val.dists.by.kb), id.vars='kb', measure.vars=c('stdev'))
 m = m %>% mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T))
-ggplot(m, aes(kb, value, group=kb)) + geom_boxplot(aes(fill=kb), show.legend = F) + ylim(0,1) +
+ggplot(m, aes(kb, value, group=kb)) +  ylim(0,1) +
+  geom_jitter(width=0.1) + 
+  geom_violin(aes(fill=kb), show.legend = F) +
+  geom_boxplot(width=0.1,alpha=0.5) +
   scale_fill_brewer(palette='Set1') + 
   labs(title='Validation data variance per QDNAseq bin size', y='stdev',x='') + theme_minimal()
 
@@ -134,24 +146,27 @@ m %>% group_by(kb) %>% dplyr::summarise( outliers = length(which(value > 1)), me
 
 At every bin size there is an overall increase in the variance for the validation set.  It is not driven by the outliers.
 
-```{r}
+```{r, fig.width=10, fig.height=8}
 all = bind_rows(do.call(bind_rows, train.dists.by.kb) %>% mutate(cohort='training'),
                 do.call(bind_rows, val.dists.by.kb) %>% mutate(cohort = 'validation'))
 all = all %>% mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T))
 
-m = melt(all, id.vars=c('kb','cohort'), measure.vars='stdev')
-ggplot(m, aes(cohort, value, group=cohort)) + facet_grid(~kb) + ylim(0,1) +
-  geom_jitter(width=0.2,alpha=0.5) + geom_violin(aes(fill=kb), alpha=0.5, show.legend=F) + 
-  #geom_boxplot(aes(fill=kb), outlier.color=NA, show.legend = F) 
-  scale_fill_brewer(palette='Set1') + labs(title='Data variance per QDNAseq bin size', y='stdev',x='') + theme_minimal()
-
 m = melt(all, id.vars=c('kb','cohort'), measure.vars='median')
-ggplot(m, aes(cohort, value, group=cohort)) + facet_grid(~kb) + 
-  geom_jitter(width=0.2,alpha=0.5) + geom_violin(aes(fill=kb), alpha=0.5, show.legend=F) + ylim(0.95,1.1) +
+ggplot(m, aes(cohort, value, group=cohort)) + facet_grid(~kb) + ylim(0.95,1.1) +
+  geom_jitter(width=0.1) + 
+  geom_violin(aes(fill=kb), show.legend = F) +
+  geom_boxplot(width=0.1,alpha=0.5) +
   scale_fill_brewer(palette='Set1') + labs(title='Median per QDNAseq bin size', y='median',x='') + theme_minimal()
 
-ggplot(all %>% filter(kb == '100kb'), aes(stdev)) + facet_grid(~cohort) + 
-  geom_density(fill='lightblue',kernel='gaussian') + xlim(0,1)
+m = melt(all, id.vars=c('kb','cohort'), measure.vars='stdev')
+ggplot(m, aes(cohort, value, group=cohort)) + facet_grid(~kb) + ylim(0,1) +
+  geom_jitter(width=0.1) + 
+  geom_violin(aes(fill=kb), show.legend = F) +
+  geom_boxplot(width=0.1,alpha=0.5) +
+  scale_fill_brewer(palette='Set1') + labs(title='Data variance per QDNAseq bin size', y='stdev',x='') + theme_minimal()
+
+#ggplot(all %>% filter(kb == '100kb'), aes(stdev)) + facet_grid(~cohort) + 
+#  geom_density(fill='lightblue',kernel='gaussian') + xlim(0,1)
 
 ```
 
@@ -163,7 +178,7 @@ The variance continues (as before) and is reflected in the residuals of the segm
 plist = lapply(train.resids, function(df) {
   lim = c(0, max(df$varMAD_median))
   if (max(df$varMAD_median) > 0.05) lim = c(min(df$varMAD_median), 0.05)
-  ggplot(df, aes(varMAD_median)) + geom_histogram(color='lightblue') + labs(title=unique(df$kb)) + xlim(lim)
+  ggplot(df, aes(varMAD_median)) + geom_histogram(color='lightblue') + labs(title=unique(df$kb)) + xlim(lim) + theme_minimal()
 })
 do.call(grid.arrange, c(plist))
 
@@ -173,16 +188,17 @@ all.resids = bind_rows(
 
 m = melt(all.resids, id.vars=c('kb','cohort'), measure.vars = 'varMAD_median')
 ggplot(m %>% filter(value < 0.1), aes(cohort, value)) + facet_grid(~kb) + 
-  geom_jitter(width=0.2, alpha=0.5) + geom_violin(aes(fill=cohort), alpha=0.5, show.legend=F) + 
+  geom_jitter(width=0.1, color='grey50') + 
+  geom_violin(aes(fill=cohort), show.legend = F) +
+  geom_boxplot(width=0.1,alpha=0.5) +
+  theme_minimal() + 
   labs(title='Post-segmentation MAD residuals', x='median MAD variance')
 
-
 cutoffs = list('100kb' = 0.009, '15kb' = 0.011, '500kb' = 0.005, '50kb' = 0.011)
-
 sapply(names(train.resids), function(kb) nrow( train.resids[[kb]] %>% filter(varMAD_median >= cutoffs[kb])))
 sapply(names(val.resids), function(kb) nrow( val.resids[[kb]] %>% filter(varMAD_median >= cutoffs[kb])))
 
-ggplot(do.call(bind_rows,train.resids), aes(kb, varMAD_median)) + geom_boxplot() + ylim(0,0.05)
+#ggplot(do.call(bind_rows,train.resids), aes(kb, varMAD_median)) + geom_boxplot() + ylim(0,0.05)
 ```
 
 ## Post segmentation 5mb bins
@@ -198,14 +214,17 @@ val.tile.var = do.call(bind_rows, lapply(val.tiles, function(df) {
 
 m = melt(bind_rows(train.tile.var, val.tile.var), id.vars = c('kb','cohort'))
 
-ggplot(m, aes(variable, value, color=cohort, group=cohort)) + ylim(0.95,1.05) + facet_grid(~kb) +  geom_jitter(position = position_dodge(width=1)) + geom_violin(position = position_dodge(width=1), alpha=0.5) 
+ggplot(m, aes(variable, value, color=cohort, group=cohort)) + ylim(0.95,1.05) + facet_grid(~kb) +  
+  geom_jitter(position = position_dodge(width=1)) + 
+  geom_violin(position = position_dodge(width=1), alpha=0.5) + 
+  theme_minimal()
 
 ```
 
 
 ### Post z-adjustment
 
-```{r}
+```{r, warning=F, message=F}
 z.sds = lapply(train.tiles, function(df) {
   df %>% dplyr::summarise_if(is.double, list( ~ sd(.,na.rm=T) ))  
 })
