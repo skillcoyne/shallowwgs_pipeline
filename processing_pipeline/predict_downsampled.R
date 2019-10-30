@@ -13,7 +13,8 @@ dir = args[1]
 model.dir = args[2]
 outdir = args[3]
 info = args[4]
-sample = args[5]
+
+#sample = args[5]
 
 
 # dir = '~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/100kb'
@@ -23,8 +24,8 @@ sample = args[5]
 # sample = 'LP6008280-DNA_A06'
 
 select.alpha = '0.9'
-if (length(args) == 6) {
-  select.alpha = args[6]
+if (length(args) == 5) {
+  select.alpha = args[5]
   
   if (!select.alpha %in% c(0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0))
     stop("Alpha values available: 0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0")
