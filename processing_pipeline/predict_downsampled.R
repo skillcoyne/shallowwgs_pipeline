@@ -56,19 +56,12 @@ rm(dysplasia.df, coefs, labels)
 
 be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, z.mean, z.arms.mean, z.sd, z.arms.sd, mn.cx, sd.cx, nz, cvRR, NULL)
 
-#dir = '~/Data/Ellie/QDNAseq/all_downsampled/20180206_KillcoyneS_RF_BarrettsCN/qdnaseq'
-#outdir = '~/Data/Ellie/Analysis/downsampled'
-
 qdnaseq.files = list.files(dir, 'raw|fitted', recursive = T, full.names = T)
 #qndaseq.files = list.files(dir, pattern=sample, recursive = T, full.names = T)
-
-#files = list.files(dir, '.txt', full.names=T)
-#sampleNames = unique(sub('\\.binsize.*', '', basename(files), ignore.case = T))
 
 all.preds = list(); dspred = tibble()
 #for (name in sampleNames) {
 #print(name)
-  
 
 rawFile = grep('raw', qdnaseq.files, value=T)
 fittedFile = grep('.*fitted|corr', qdnaseq.files, value=T)
@@ -83,6 +76,7 @@ raw.data = read_tsv(rawFile, col_types = cols(chrom = col_character(), location 
 fit.data = read_tsv(fittedFile, col_types = cols(chrom = col_character(), location = col_character(), .default = col_double()))
 
 for (sample in all.ds.info$`Illumina ID`) {
+  message(paste0('Processing sample ', sample))
   info = loadSampleInformation( all.ds.info %>% filter(`Illumina ID` == sample) %>% dplyr::mutate(Endoscopy = "01/01/2001") %>% dplyr::rename(Sample = `Illumina ID`) )
   
   kb = as.integer(sub('kb','',basename(dir)))
