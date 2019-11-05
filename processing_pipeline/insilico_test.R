@@ -15,15 +15,16 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_
 
 
 outdir = args[1]
+modeldir = args[2]
 # outdir = '~/Data/Ellie/Analysis'
-infodir = args[2]
+infodir = args[3]
 # infodir = '~/Data/Ellie/QDNAseq/training'
 logT = F
 if (length(args) == 4)
   logT = as.logical(args[4])
 
 x = (unclass(Sys.time()) + sample(1:1000, 1))
-cache.dir = paste(outdir, '5e6_arms_splits', sep='/')
+cache.dir = paste(outdir, 'insilico_splits', sep='/')
 
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
 cache.dir = paste(cache.dir, as.character(x) , sep='/')
@@ -42,7 +43,7 @@ all.patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>
 sum.patient.data = summarise.patient.info(all.patient.info)
 
 
-modeldir = paste0(outdir, '/5e6_arms')
+#modeldir = paste0(outdir, '/5e6_arms')
 if (!dir.exists(modeldir))
   stop(paste0("Missing trained model in ", modeldir))
 load(paste0(modeldir, '/all.pt.alpha.Rdata'),verbose=T)
@@ -68,6 +69,7 @@ save(dysplasia.df, labels, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
 
 nl = 1000; folds = 10; splits = 5 
 sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2) 
+
 #alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
 alpha.values = c(0.9)
 
@@ -83,8 +85,8 @@ if (file.exists(file)) {
     l = fit0$lambda
     #l = more.l(l)
     
-    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
-    
+    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, sampleID=2, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
+
     lambda.opt = cv.patient$lambda.1se
     
     coef.opt = as.data.frame(non.zero.coef(fit0, lambda.opt))
@@ -165,9 +167,8 @@ if (file.exists(file)) {
     fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
     l = fitLOO$lambda
     
-    cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
-                                  pts=subset(sets, Samplename %in% samples$Samplename), fit=fitLOO, standardize=F)
-    
+    cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, pts=subset(sets, Samplename %in% samples$Samplename), sampleID=2, a=a, nfolds=folds, splits=splits, fit=fitLOO, select='deviance', opt=-1, standardize=F)
+
     plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
     
     fits[[pt]] = cv  

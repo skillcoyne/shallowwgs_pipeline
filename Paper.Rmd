@@ -116,7 +116,7 @@ To use GLMs across the patients I merge all samples from all patients and overla
 The labels are split such that all samples from progressor patients are (1) and all samples from non-progressors are (0).
 
 ```{r labelsPNP, echo=F, message=F, include=T}
-cache.dir = paste(data, 'Analysis/5e6_arms', sep='/') # QC'd
+cache.dir = paste(data, 'Analysis/models_5e6/50kb', sep='/') # QC'd
 
 file = paste(cache.dir, 'model_data.Rdata', sep='/')
 if (!file.exists(file))
@@ -142,7 +142,7 @@ Example subset of the data matrix:
 
 ```{r echo=F, warning=F, message=F, eval=T, fig.height=12, fig.width=20}
  
-chr.lengths = BarrettsProgressionRisk:::chrInfo(prefix = '') %>% dplyr::filter(chr %in% c(1:22)) %>%
+chr.lengths = BarrettsProgressionRisk:::chrInfo() %>% dplyr::filter(chr %in% c(1:22)) %>%
   dplyr::mutate(chrom = factor(sub('chr','', chrom), levels=c(1:22), ordered=T))
 
 arm.loc = arrange(rbind(
@@ -280,7 +280,7 @@ most.stable = arrange(most.stable, chr, start)
 classification.rate = add_row(classification.rate, 'model'='All samples', 'mean'=mp$performance[select.alpha, 'mean'], 'sme'=mp$performance[select.alpha, 'sme'],                              'stable.coef'=length(which(mp$stable.coeffients[[select.alpha]] >= 0.75)), 'all.coef'=length(mp$stable.coeffients[[select.alpha]]))
 
 
-mp$performance[,c('n.Coef','25%','50%','75%', '100%')] %>% kable(caption='Number of features stable in >=n% of folds') %>% kable_styling()
+mp$performance[,c('n.Coef','25%','50%','75%', '100%')] %>% kable(caption='Number of features stable in >=n% of folds') %>% kable_styling(full_width = F)
 ```
 
 
