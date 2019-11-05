@@ -16,8 +16,8 @@ library(gridExtra)
 library(kableExtra)
 
 
-dir1 = '~/Data/Ellie/Analysis/multipcf_perPatient/'
-dir2 = '~/Data/Ellie/Analysis/validation//'
+dir1 = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
+dir2 = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/'
 
 ```
 
@@ -26,7 +26,7 @@ dir2 = '~/Data/Ellie/Analysis/validation//'
 ```{r, echo=F}
 
 res.variance = do.call(bind_rows, lapply(list.files(dir1, 'residuals', recursive = T, full.names = T), function(f) {
-  read_tsv(f, col_types = 'ccdddddl')
+  read_tsv(f, col_types = 'ccddddl')
 }))
 
 #pander(head(res.variance[,grep('var1sd',colnames(res.variance))]), caption='Residuals across segments per sample')
@@ -55,7 +55,8 @@ ggplot(res.variance, aes(varMAD_median)) + geom_histogram(bins=50,color='lightbl
 The cutoff=`r cutoff`. Samples with a variance greater than this are:
 
 ```{r, echo=F}
-res.variance %>% filter( round(varMAD_median,3) > cutoff ) %>% select(patient,sample, varMAD_median) %>% kable(caption=paste0('Samples variance > ',cutoff)) %>% kable_styling('striped')
+res.variance %>% filter( round(varMAD_median,3) > cutoff ) %>% dplyr::select(patient,samplename,varMAD_median) %>% 
+  kable(caption=paste0('Samples variance > ',cutoff)) %>% kable_styling('striped')
 
 failedQC = res.variance %>% filter( round(varMAD_median,3) > cutoff ) 
 ```
@@ -70,9 +71,11 @@ Cutoff from above dataset applied to the initial validation set.
 val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 sheets = readxl::excel_sheets(val.file)[1:4]
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`) & RA == 'C.Kosmidou') %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) 
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% 
+    dplyr::filter(!is.na(`SLX-ID`) & RA == 'C.Kosmidou') %>% 
+    mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) 
 }))
-all.val = all.val %>% select(-Collection)
+all.val = all.val %>% dplyr::select(-Collection)
 
 pastefun<-function(x) {
   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
@@ -88,12 +91,12 @@ all.val = all.val %>% mutate(
 
 
 resVal = do.call(bind_rows, lapply(list.files(dir2, 'residuals', recursive = T, full.names = T), function(f) {
-  readr::read_tsv(f, col_types = 'cdddddl', col_names = F) %>% set_names('sample', 'varMAD_median', 'varMAD_sd', 'varMAD_Q1', 'varMAD_Q3', 'n.segs', 'Pass') %>%  
-    mutate(`Patient ID` = as.character(basename(dirname(f))))
-})) %>% select(`Patient ID`, sample, matches('varMad'), n.segs, Pass) 
+  readr::read_tsv(f, col_types = 'ccddddl') #%>% set_names('sample', 'varMAD_median', 'varMAD_sd', 'varMAD_Q1', 'varMAD_Q3', 'n.segs', 'Pass') %>%  
+   # mutate(`Patient ID` = as.character(basename(dirname(f))))
+})) %>% dplyr::select(patient, samplename, matches('varMad'), Pass) 
 
 
-resVal = resVal %>% filter(sample %in% all.val$Sample)
+resVal = resVal %>% filter(samplename %in% all.val$Sample)
 
 
 resVal %>% kable(caption='Residuals across segments per sample') %>% kable_styling('striped')

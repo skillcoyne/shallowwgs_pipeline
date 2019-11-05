@@ -51,7 +51,7 @@ cvRR = BarrettsProgressionRisk:::cvRR(dysplasia.df, coefs[[select.alpha]])
 
 x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
 message(paste0('MODEL DATA: ',x))
-load(x, verbose=F)
+load(x, verbose=T)
 rm(dysplasia.df, coefs, labels)
 
 be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, z.mean, z.arms.mean, z.sd, z.arms.sd, mn.cx, sd.cx, nz, cvRR, NULL)
