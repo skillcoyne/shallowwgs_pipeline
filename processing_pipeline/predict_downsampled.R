@@ -94,13 +94,14 @@ for (sample in all.ds.info$`Illumina ID`) {
   prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, be.model)
   p2 = copyNumberMountainPlot(prr,T,F)
   ggsave(paste0(pred.dir, '/', sample, '_copyNumberMtn.png'), plot=grid.arrange(p2),  width=20, height=6, units='in', limitsize=F)
-
+  
+  save(prr, file=paste0(pred.dir, '/',sample,'/predictions.Rdata'))
+  readr::write_tsv(predictions(prr), path=paste0(pred.dir, '/',sample, '/predictions.tsv'))
+  
   dspred = bind_rows(dspred, predictions(prr))
 }
-  
-save(prr, file=paste0(pred.dir, '/predictions.Rdata'))
 
-readr::write_tsv(predictions(prr), path=paste0(outdir,'/predictions.tsv'))
+readr::write_tsv(dspred, path=paste0(outdir,'/predictions.tsv'))
 
 print("Finished'")
 
