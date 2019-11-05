@@ -4,9 +4,9 @@ args = commandArgs(trailingOnly=TRUE)
 if (length(args) < 4)
   stop("Missing required params: <data dir> <model dir> <outdir> <info file path> <same name> <alpha=0.9 DEF")
 
-library(tidyverse)
+suppressPackageStartupMessages( library(tidyverse) )
 library(gridExtra)
-library(BarrettsProgressionRisk)
+suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 #source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
 dir = args[1]
@@ -51,13 +51,13 @@ cvRR = BarrettsProgressionRisk:::cvRR(dysplasia.df, coefs[[select.alpha]])
 
 x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
 message(paste0('MODEL DATA: ',x))
-load(x, verbose=F)
+load(x, verbose=T)
 rm(dysplasia.df, coefs, labels)
 
 be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 5e6, z.mean, z.arms.mean, z.sd, z.arms.sd, mn.cx, sd.cx, nz, cvRR, NULL)
-
 qdnaseq.files = list.files(dir, 'raw|fitted', recursive = T, full.names = T)
 #qndaseq.files = list.files(dir, pattern=sample, recursive = T, full.names = T)
+print(qdnaseq.files)
 
 all.preds = list(); dspred = tibble()
 #for (name in sampleNames) {
@@ -68,15 +68,17 @@ fittedFile = grep('.*fitted|corr', qdnaseq.files, value=T)
   
 if (length(rawFile) < 1 | length(fittedFile) < 1) stop(paste0("Missing raw or fitted counts file for ", sample))
   
-pred.dir = paste(outdir, sample, sep='/')
-dir.create(pred.dir, showWarnings = F, recursive = T)
 
 
 raw.data = read_tsv(rawFile, col_types = cols(chrom = col_character(), location = col_character(), .default = col_double()))
 fit.data = read_tsv(fittedFile, col_types = cols(chrom = col_character(), location = col_character(), .default = col_double()))
 
 for (sample in all.ds.info$`Illumina ID`) {
-  message(paste0('Processing sample ', sample))
+  pred.dir = paste(outdir, sample, sep='/')
+  print(pred.dir)
+  dir.create(pred.dir, showWarnings = F, recursive = T)
+ 
+   message(paste0('Processing sample ', sample))
   info = loadSampleInformation( all.ds.info %>% filter(`Illumina ID` == sample) %>% dplyr::mutate(Endoscopy = "01/01/2001") %>% dplyr::rename(Sample = `Illumina ID`) )
   
   kb = as.integer(sub('kb','',basename(dir)))
