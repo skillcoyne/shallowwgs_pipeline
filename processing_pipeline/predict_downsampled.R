@@ -5,7 +5,7 @@ if (length(args) < 4)
   stop("Missing required params: <data dir> <model dir> <outdir> <info file path> <same name> <alpha=0.9 DEF")
 
 suppressPackageStartupMessages( library(tidyverse) )
-library(gridExtra)
+suppressPackageStartupMessages( library(gridExtra) )
 suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 #source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 
@@ -17,10 +17,10 @@ info = args[4]
 #sample = args[5]
 
 
-# dir = '~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/100kb'
+# dir = '~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/50kb'
 # info = '~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/downsampled_ids.xlsx'
-# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6/100kb'
-# outdir = '~/tmp/100kb'
+# model.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6/50kb'
+# outdir = '~/tmp/50kb'
 # sample = 'LP6008280-DNA_A06'
 
 select.alpha = '0.9'
@@ -68,8 +68,6 @@ fittedFile = grep('.*fitted|corr', qdnaseq.files, value=T)
   
 if (length(rawFile) < 1 | length(fittedFile) < 1) stop(paste0("Missing raw or fitted counts file for ", sample))
   
-
-
 raw.data = read_tsv(rawFile, col_types = cols(chrom = col_character(), location = col_character(), .default = col_double()))
 fit.data = read_tsv(fittedFile, col_types = cols(chrom = col_character(), location = col_character(), .default = col_double()))
 
@@ -78,7 +76,7 @@ for (sample in all.ds.info$`Illumina ID`) {
   print(pred.dir)
   dir.create(pred.dir, showWarnings = F, recursive = T)
  
-   message(paste0('Processing sample ', sample))
+  message(paste0('Processing sample ', sample))
   info = loadSampleInformation( all.ds.info %>% filter(`Illumina ID` == sample) %>% dplyr::mutate(Endoscopy = "01/01/2001") %>% dplyr::rename(Sample = `Illumina ID`) )
   
   kb = as.integer(sub('kb','',basename(dir)))
@@ -91,7 +89,7 @@ for (sample in all.ds.info$`Illumina ID`) {
   p1 = BarrettsProgressionRisk::plotSegmentData(segmented, 'plot') 
   ggsave(paste0(pred.dir, '/', sample, '_segmentedCoverage.png'), plot=grid.arrange(p1),  width=20, height=6, units='in', limitsize=F)
   
-  prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, be.model)
+  prr = BarrettsProgressionRisk::predictRiskFromSegments(segmented, be.model, verbose = T)
   p2 = copyNumberMountainPlot(prr,T,F)
   ggsave(paste0(pred.dir, '/', sample, '_copyNumberMtn.png'), plot=grid.arrange(p2),  width=20, height=6, units='in', limitsize=F)
   

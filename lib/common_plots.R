@@ -16,11 +16,9 @@ get.legend<-function(a.gplot){
 
 cn.mtn.plot<-function(df, label, type='bar') {
   df = arrange(df, chr, start)
+  df$mean.value = df$value
   rows = which(df$mean.value > 1 | df$mean.value < -1)
   
-  #low = c( min(df$mean.value), quantile(subset(df, mean.value < -1)$mean.value, probs=c(0.25, 0.75)), -1)
-  #high = c(1, quantile(subset(df, mean.value > 1)$mean.value, probs=c(0.25, 0.75)), max(df$mean.value))
-
   df$cuts = cut(df$mean.value, breaks=c(min(df$mean.value), -1,0,1, max(df$mean.value)), include.lowest = T, ordered_result = T)
   medDf = df[-rows,]
   rangeDf = df[rows,]
@@ -28,18 +26,17 @@ cn.mtn.plot<-function(df, label, type='bar') {
   medDf$cuts = factor('-1-1')
   rangeDf$cuts = factor(ifelse(rangeDf$mean.value > 1, '> 1', '< -1'))
 
-  #df$cuts = cut(df$mean.value, breaks=c(low,high), include.lowest = T, ordered_result = T)
-  
   p = ggplot(df, aes(x=chr.length)) + facet_grid(Status~chr, scales='free_x', space='free_x', labeller=label) 
   
   if (type == 'seg') {
     riskCols = brewer.pal(10, "PRGn")[c(1, 5, 10)]
-    p = p + geom_segment(aes(x=start, xend=end, y=mean.value, yend=mean.value, color=cn), show.legend=T, size=1) + scale_color_manual(values=riskCols) 
+    p = p + geom_segment(aes(x=start, xend=end, y=mean.value, yend=mean.value, color=cn), show.legend=T, size=1) + 
+      scale_color_manual(values=riskCols) 
   }
   if (type == 'bar') {
     highCol = rev(brewer.pal(6, "Purples"))[c(1,3)]
     lowCol = rev(brewer.pal(6, "Greens"))[c(3,1)]
-#    grey = brewer.pal(3,'Greys')[1]
+    # grey = brewer.pal(3,'Greys')[1]
     
     colors = c('#74C476', 'darkblue','#9E9AC8')
     
@@ -47,7 +44,6 @@ cn.mtn.plot<-function(df, label, type='bar') {
       geom_rect(data=rangeDf, aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=T ) + 
       geom_rect(data=medDf, aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=F ) + 
       scale_fill_manual(values=colors, limits=c( levels(rangeDf$cuts)[1], levels(medDf$cuts), levels(rangeDf$cuts)[2]), name='') 
-      #scale_fill_manual(values=c(lowCol,grey,highCol),labels=c('<25%','25-75%','75%','0','<25%','25-75%','>75%'), limits=levels(df$cuts), name='') 
   }
   p + labs(x='', y='Mean adjusted segmentation value', title='All samples') + theme_minimal() +
     theme(text=element_text(size=12), axis.text.x=element_blank(), legend.position='right', 
@@ -55,7 +51,7 @@ cn.mtn.plot<-function(df, label, type='bar') {
           panel.border = element_rect(color="grey88", fill=NA, size=0.5), panel.spacing.x = unit(0, 'lines') ) 
 }
 
-cn = function(x) {
+get.cn.state = function(x) {
   str = 'neutral'
   if(x <= -1) {
     str = 'loss'
@@ -65,7 +61,7 @@ cn = function(x) {
   return(str)
 }
 
-model.performance<-function(p1se, coeffs, lims=NULL) {
+model.performance<-function(p1se, coeffs, folds, splits, lims=NULL) {
   performance = do.call(rbind.data.frame, p1se)
   performance$alpha = rownames(performance)
   
@@ -176,7 +172,7 @@ pred.tiles <- function(df, probs=F, OR=F, path=5, colors=c('green3','orange','re
 
 plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NULL) {
   #df = subset(df, chr == chrom)
-  
+  df$mean.value = df$value  
   df = subset(df, chr == chrom)# & seg.type != 'arms')  
   
   df$cuts = cut(df$mean.value, breaks=c(min(df$mean.value), -1,0,1, max(df$mean.value)), include.lowest = T, ordered_result = T)
@@ -188,15 +184,7 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NUL
   medDf$cuts = factor('-1-1')
   rangeDf$cuts = factor(ifelse(rangeDf$mean.value > 1, '> 1', '< -1'))
 
-  #df$cuts = cut(df$mean.value, breaks=c(low,high), include.lowest = T, ordered_result = T)
-  
-  # highCol = rev(brewer.pal(6, "Purples"))[c(3,1,3)]
-  # lowCol = rev(rev(brewer.pal(6, "Greens"))[c(3,1,3)])
-  # cols = c(lowCol,'#F7F7F7', highCol)
-  
   colors = c('#74C476', 'darkblue','#9E9AC8')
-  
-  
   
   if (is.null(label)) label = labeller(chr=label_both)
   
@@ -205,11 +193,6 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NUL
     geom_rect(data=rangeDf[-arms,], aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=T, alpha=0.8 ) + 
     geom_rect(data=medDf, aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=F ) + 
     scale_fill_manual(values=colors, limits=c( levels(rangeDf$cuts)[1], levels(medDf$cuts), levels(rangeDf$cuts)[2]), name='') 
-  
-    #geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts),show.legend = T) + 
-    #geom_segment(aes(x=start, xend=end, y=mean.value, yend=mean.value, color=cuts), show.legend=T, size=1) + 
-    #geom_segment(data=subset(df, seg.type == 'arms'), aes(x=start, xend=end, y=mean.value, yend=mean.value, color=cn), alpha=0.8, show.legend = F) + 
-    #scale_color_manual(values=cols) + scale_fill_manual(values=cols,labels=c('<25%','25-75%','75%','0','<25%','25-75%','>75%'), name='') 
   
   if (!is.null(info)) {
     info = info[which(info$chrom == chrom),]
@@ -221,7 +204,7 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NUL
   if (!is.null(genes)) {
     genes = subset(genes, chr == chrom)
     if (nrow(genes) > 0) p = p + geom_point(data=genes, aes(x=start,  y=value), color='darkblue', size=3) +
-        geom_text_repel(data=genes, aes(x=start, y=value, label=Gene.Symbol), color='darkblue', fontface='italic') 
+        geom_text_repel(data=genes, aes(x=start, y=value, label=`Gene Symbol`), color='darkblue', fontface='italic') 
   }
   if (!is.null(haz)) {
     haz = subset(haz, chr == chrom)
@@ -317,6 +300,7 @@ min.theme = theme(text=element_text(size=12), panel.background=element_blank(), 
 
 
 mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
+  df$mean.value = df$value
   if (is.null(pal))
     pal = RColorBrewer::brewer.pal(length(limits), 'Set2')
   
@@ -357,4 +341,57 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
   return(list('grob'=g, 'legend'=legend))
   #grid::grid.draw(g)  
   #return(g)
+}
+
+
+plot.risk.by.path<-function(preds) {
+  riskPath = preds %>% dplyr::group_by(Status, Pathology, Risk) %>% tally(name='Freq') %>%
+    mutate(Status = recode_factor(Status, NP = 'Non-Progressor', P = 'Progressor', .ordered = T))
+  
+  pathTotal = preds %>% dplyr::group_by(Status, Pathology) %>% tally(name='nPath') %>%
+    mutate(Status = recode_factor(Status, NP = 'Non-Progressor', P = 'Progressor', .ordered = T))
+  
+  riskPath = full_join(riskPath, pathTotal, by=c('Status','Pathology')) %>% 
+    mutate(ratio = round(Freq/nPath, 3), Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered = T))
+  
+  pathTotal = riskPath %>% dplyr::group_by(Status, Pathology) %>% dplyr::summarise('nPath'=unique(nPath))
+  
+  rp = ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) + 
+    scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) +
+    geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), position=position_stack(), size=4) +
+    geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
+    facet_grid(~Status) + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom', text=element_text(size=10))
+  return(rp)
+}
+
+
+transform.by.time<-function(pt, info) {
+  pt = pt %>% dplyr::group_by(PID, Samplename) %>% dplyr::mutate( 'months.before.final' = (Final.Endoscopy - Endoscopy.Year)*12) %>% 
+    arrange(Pathology, PID, Endoscopy.Year) %>% ungroup
+  
+  tb = with(pt, table(Endoscopy.Year, PID))
+  tb[tb>0] = 1
+  for (yr in names(which(rowSums(tb) > 1))) {
+    tmp = pt[which(pt$Endoscopy.Year == yr),]
+    tmp = tmp %>% dplyr::group_by(PID) %>% summarise(max(Pathology))
+    
+    match = which(pt$Endoscopy.Year == yr & pt$PID == as.character(tmp[which.min(tmp$`max(Pathology)`), 'PID']))
+    pt[match,'months.before.final'] = pt[match,'months.before.final'] + 6
+  }
+  pt$nl = (pt$Block-1)*2
+  
+  tb = table(pt[,c('months.before.final', 'PID')])
+  if (nrow(tb) > 0) {
+    for (i in 1:nrow(tb)) {
+      pids = tb[i,]
+      yrs = which(pids > 0)
+      if (length(yrs) > 1) {
+        for (j in 2:length(yrs)) 
+          pt[which(pt$PID == names(yrs)[j]), 'nl'] = pt[which(pt$PID == names(yrs)[j]), 'nl'] + 1
+      }
+    }
+  } else {
+    pt$nl = 1
+  }
+  arrange(pt, -Endoscopy.Year, PID)
 }

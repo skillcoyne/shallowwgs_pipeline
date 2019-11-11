@@ -15,8 +15,9 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_
 
 
 outdir = args[1]
+# outdir = '~/tmp'
 modeldir = args[2]
-# outdir = '~/Data/Ellie/Analysis'
+# modeldir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb'
 infodir = args[3]
 # infodir = '~/Data/Ellie/QDNAseq/training'
 logT = F
@@ -50,7 +51,12 @@ load(paste0(modeldir, '/all.pt.alpha.Rdata'),verbose=T)
 rm(plots,coefs,performance.at.1se, cvs, models)
 
 # By patient
-leaveout = sample(sum.patient.data$Patient, round(nrow(sum.patient.data)*.2))
+samplePtsN = round(nrow(sum.patient.data)*.2)
+
+# Balanced labels?
+leaveout = c(sample(filter(sum.patient.data, Status == 'NP')$Patient, samplePtsN/2), sample(filter(sum.patient.data, Status == 'P')$Patient, samplePtsN/2))
+#leaveout = sample(sum.patient.data$Patient, round(nrow(sum.patient.data)*.2))
+
 leaveoutSamples = all.patient.info %>% filter(Patient %in% leaveout & Samplename %in% rownames(dysplasia.df)) 
 
 patient.info = all.patient.info %>% filter(!Patient %in% leaveout)
