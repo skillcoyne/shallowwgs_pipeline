@@ -366,15 +366,16 @@ plot.risk.by.path<-function(preds) {
 
 
 transform.by.time<-function(pt, info) {
-  pt = pt %>% dplyr::group_by(PID, Samplename) %>% dplyr::mutate( 'months.before.final' = (Final.Endoscopy - Endoscopy.Year)*12) %>% 
-    arrange(Pathology, PID, Endoscopy.Year) %>% ungroup
+  pt = pt %>% dplyr::group_by(PID, Samplename) %>%  
+    dplyr::mutate( 'months.before.final' = (Final.Endoscopy - Endoscopy.Year)*12) %>% 
+    arrange(Pathology, PID, Endoscopy.Year) %>% ungroup 
   
   tb = with(pt, table(Endoscopy.Year, PID))
   tb[tb>0] = 1
-  for (yr in names(which(rowSums(tb) > 1))) {
-    tmp = pt[which(pt$Endoscopy.Year == yr),]
-    tmp = tmp %>% dplyr::group_by(PID) %>% summarise(max(Pathology))
-    
+  for (yr in names(which(rowSums(tb,na.rm=T) > 1))) {
+    tmp = filter(pt, Endoscopy.Year == yr)
+    tmp = tmp %>% dplyr::group_by(PID) %>% dplyr::summarise(max(Pathology))
+
     match = which(pt$Endoscopy.Year == yr & pt$PID == as.character(tmp[which.min(tmp$`max(Pathology)`), 'PID']))
     pt[match,'months.before.final'] = pt[match,'months.before.final'] + 6
   }

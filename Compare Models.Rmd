@@ -1,0 +1,544 @@
+---
+title: "Model Comparison"
+author: "Sarah Killcoyne"
+date: "2 October 2017"
+output: 
+  html_document:
+    fig_height: 5
+    fig_width: 5
+    toc: yes
+    toc_depth: 4
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, error = T)
+
+library(tidyverse)
+library(BarrettsProgressionRisk)
+
+library(ggrepel)
+#library(GGally)
+library(kableExtra)
+library(reshape2)
+library(gridExtra)
+#library(CoxHD)
+library(RColorBrewer)
+
+library(OACUtils)
+
+source('lib/load_patient_metadata.R')
+#source('lib/cv-pt-glm.R')
+source('lib/common_plots.R')
+
+
+data = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/'
+info.dir = '~/Data/BarrettsProgressionRisk/QDNAseq'
+
+patient.file = list.files(info.dir, pattern='All_patient_info.xlsx', recursive=T, full.names=T)
+demo.file = list.files(info.dir, pattern='Demographics_full.xlsx', recursive=T, full.names=T)
+
+if (length(patient.file) != 1 | length(demo.file) != 1)
+  stop(paste("Missing/too many patient info file(s) in", info.dir))
+
+all.patient.info = read.patient.info(patient.file, demo.file, set='All')$info
+
+patient.info = all.patient.info %>% dplyr::filter(Set == 'Training')
+
+patient.info = arrange(patient.info, Status, Hospital.Research.ID, Endoscopy.Year, Pathology)
+sum.patient.data = as_tibble(summarise.patient.info(patient.info))
+
+```
+
+
+# Model performance
+
+Per alpha value and kb segment size the overall performance per cross-validated model.  While 15kb is consistently the best at alpha = 0.9 the performance for 50kb or 100kb is about 66% for both.
+
+```{r, fig.width=8,fig.height=7}
+kb.models = list.files(data)
+
+#list.files(f,full.names = T)
+
+kb.perf = do.call(bind_rows, lapply(list.files(data,full.names = T), function(f) {
+  load(paste0(f,'/all.pt.alpha.Rdata'),verbose=F)
+
+  nonz = names(which(sapply(performance.at.1se, nrow) > 0))
+# do.call(bind_rows,lapply(coefs, function(df){
+#   tibble(n=nrow(df), mean.stability=mean(rowSums(df[,-1])/50), sd.stability=sd(rowSums(df[,-1])/50) )
+# })) %>% mutate(alpha=names(coefs), kb=basename(f))
+
+  do.call(bind_rows, performance.at.1se) %>% 
+    mutate(alpha=nonz, kb = basename(f), n.coefs=sapply(coefs[nonz], nrow)) %>% 
+    dplyr::select(mean, sme, `lambda-1se`, alpha, n.coefs, kb) 
+  
+}))
+kb.perf = kb.perf %>% mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T)) %>% arrange(kb, alpha)
+
+ggplot(kb.perf, aes(kb, mean, fill=kb)) + facet_grid(~alpha) + geom_col() + 
+  geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme), col='grey39', width=0.2) + 
+  geom_text(aes(label=n.coefs, y = 0.01)) + scale_fill_brewer(palette='Set1') + labs(x='',y='cv performance') +
+  theme_minimal()
+  
+ggplot(kb.perf, aes(alpha, mean, fill=kb)) + facet_grid(~kb) + geom_col() + 
+  geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme), col='grey39', width=0.2) + 
+  scale_fill_brewer(palette='Set1') + labs(x='',y='cv performance') +
+  geom_text(aes(label=n.coefs, y = 0.01)) + 
+  theme_minimal()
+
+```
+
+
+
+
+# ROC
+
+## LOO Training
+
+Finally, I generate a ROC for each of the leave-one out prediction sets. Here again the AUC is best at 15kb.  However, 100kb is the best of the larger bin sizes.  The tradeoff here is that the TPR is not as good as 15kb or 50kb (given the threshold selected by the ROC).  The FPR is the highest in the 50kb bins.
+
+
+```{r fig.height=7, fig.width=8}
+rc9 = do.call(bind_rows, lapply(list.files(data,full.names = T), function(f) {
+  load(paste0(f,'/loo_0.9.Rdata'),verbose=F)
+  roc = pROC::roc(Status ~  Prediction, data=pg.samp, auc=T, ci=T, of='thresholds',transpose=T, quiet=T)
+  pROC::coords(roc, "best", transpose=F) %>% mutate( auc = as.numeric(pROC::auc(roc)), kb = basename(f) )
+})) 
+
+rc9 = rc9 %>% set_names(c('Threshold','FPR','TPR','AUC','kb')) %>% 
+  mutate(kb = factor(kb,levels=c('15kb','50kb','100kb','500kb'), ordered=T), FPR = 1-FPR) %>% arrange(kb) 
+
+ggplot(melt(rc9, id.vars='kb'), aes(variable, value, group=kb)) + 
+  geom_bar(aes(fill=kb), stat='identity', position='dodge') + 
+  geom_text(aes(label=round(value,2)), position=position_dodge(width=1)) + 
+  scale_fill_brewer(palette='Set1') + 
+  labs(title='Training ROC (alpha=0.9)', x='', y='%') + theme_minimal()
+```
+
+## Validation predicted on corresponding model
+
+```{r fig.height=7, fig.width=8}
+val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+sheets = readxl::excel_sheets(val.file)[8:14]
+
+pastefun<-function(x) {
+  if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
+  return(x)
+}
+
+val.info = do.call(bind_rows, lapply(sheets, function(s) {
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Pathology, Cohort, Batch, matches('Collection|Notes')) %>% 
+    dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) 
+})) %>% mutate(Samplename = paste(`SLX-ID`,`Index Sequence`, sep='.')) %>% 
+  rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>% 
+  mutate(
+  #`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), 
+  `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
+  Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
+  )
+
+vdir = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient'
+
+val.preds = purrr::map(list.files(vdir, full.names=T), function(dir) {
+  do.call(bind_rows, purrr::map(list.files(paste0(dir,'/predictions_5e6_all/0.9'), 'predictions.tsv', full.names = T, recursive = T), function(f) {
+    pd = read_tsv(f, col_types = 'cddcccDcccc') %>% dplyr::select(`Hospital Research ID`, everything())
+    left_join(pd, val.info %>% dplyr::select(`Hospital Research ID`, Status, Samplename, Cohort), by=c('Hospital Research ID', 'Sample'='Samplename')) %>% 
+      mutate(kb = basename(dir)) %>% mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T)) 
+  }))
+})
+names(val.preds) = list.files(vdir)
+
+val.auc = do.call(bind_rows, purrr::map(val.preds, function(kb) {
+  roc = pROC::roc(Status ~ Probability, data=kb, auc=T, ci=T, of='thresholds',transpose=T, quiet=T)
+  pROC::coords(roc, "best", transpose=F) %>% mutate( auc = as.numeric(pROC::auc(roc)), kb = unique(kb$kb) )
+}))
+
+
+val.auc = val.auc %>% set_names(c('Threshold','FPR','TPR','AUC','kb')) %>% 
+  mutate(kb = factor(kb,levels=c('15kb','50kb','100kb','500kb'), ordered=T), FPR = 1-FPR) %>% arrange(kb) 
+
+ggplot(melt(val.auc, id.vars='kb'), aes(variable, value, group=kb)) + 
+  geom_bar(aes(fill=kb), stat='identity', position='dodge') + 
+  geom_text(aes(label=round(value,2)), position=position_dodge(width=1)) + 
+  scale_fill_brewer(palette='Set1') + 
+  labs(title='Validation ROC (alpha=0.9)', x='', y='%') + theme_minimal()
+
+```
+
+## Side-by-side
+
+```{r fig.height=7, fig.width=8}
+aucs = bind_rows(rc9 %>% mutate(cohort = 'Training'), val.auc %>% mutate(cohort = 'Validation'))
+
+ggplot(aucs, aes(kb, AUC, group=cohort)) + 
+  geom_bar(aes(fill=cohort), stat='identity', position='dodge') + 
+  geom_text(aes(label=round(AUC,2)), position=position_dodge(width=1)) + 
+  scale_fill_brewer(palette='Set1') + 
+  labs(title='AUC training & validation', x='', y='AUC') + theme_minimal()
+```
+
+# Training LOO Performance
+
+The leave-one out analysis uses the models for alpha=0.9. 
+
+```{r, echo=F}
+minR = 0.3
+maxR = 0.5
+```
+
+
+Cutoffs are  `r minR` < P > `r maxR`
+
+```{r, fig.width=8, fig.height=12}
+ft.fun<-function(NP,P) {
+ f = chisq.test(rbind(cbind(NP,P),table(sum.patient.data$Status)))
+ cbind.data.frame('p.value'=round(f$p.value, 4))
+}
+
+pred.conf<-function(df) {
+  df = df %>% mutate(quants = cut(Prediction, breaks=seq(0,1,0.1), include.lowest = T))
+  qts = df %>% group_by(quants, Status) %>% dplyr::summarise(n=length(Status) ) %>% ungroup %>%
+    spread(Status, n) %>%  mutate_all(~replace_na(.,0)) %>% 
+    left_join(df %>% dplyr::group_by(quants) %>% 
+                dplyr::summarise ( 'mn'=mean(Prediction), 'sd'=sd(Prediction) ), by='quants') 
+
+  pred.confidence = qts %>% dplyr::group_by(quants) %>% 
+    dplyr::mutate( 'P.ratio'=P/sum(NP,P), 'p.value'=ft.fun(NP,P)$p.value, 'conf'=ifelse(p.value < 0.05, '*', '') ) %>% 
+    separate(quants, c('r1','r2'), ',', remove = F) %>% 
+    mutate_at(vars('r1','r2'), list(sub), pattern='\\[|\\]|\\(', replacement='') %>% 
+    mutate_at(vars(r1,r2), as.double) 
+  
+  # set cutoffs
+  pred.confidence = pred.confidence %>% ungroup %>% rowwise %>% mutate(Risk = 'Moderate') %>%
+    mutate(Risk = ifelse(r2 <= minR, 'Low',Risk)) %>% mutate(Risk = ifelse(r1 >= maxR, 'High',Risk)) 
+
+  pred.confidence = bind_cols(pred.confidence, 
+                            data.frame(ci.low=qbeta(0.025, shape1=pred.confidence$P+.5, shape2 = pred.confidence$NP+.5),
+                                         ci.high=qbeta(0.975, shape1=pred.confidence$P+.5, shape2 = pred.confidence$NP+.5)))
+  return(pred.confidence)
+}
+```
+
+```{r, fig.width=10,fig.height=7, eval=F}
+## 0.5
+loo.pred.confidence = purrr::map( list.files(data,full.names = T), function(f) {
+  #print(f)
+  load(paste0(f,'/loo_0.5.Rdata'),verbose=F)
+  suppressWarnings(pred.conf(pg.samp)) %>% mutate(kb = basename(f))
+}) 
+names(loo.pred.confidence) = basename(list.files(data,full.names = T))
+
+plist = lapply(loo.pred.confidence, function(lpf) {
+  BarrettsProgressionRisk::showPredictionCalibration(lpf %>% dplyr::rename('perc' = 'P.ratio') ) + labs(title=unique(lpf$kb))
+})
+  
+do.call(grid.arrange, c(plist, top='Alpha=0.5'))
+```
+
+
+```{r, fig.width=10,fig.height=7, eval=F}
+## 0.8
+
+loo.pred.confidence = purrr::map( list.files(data,full.names = T), function(f) {
+  #print(f)
+  load(paste0(f,'/loo_0.8.Rdata'),verbose=F)
+  suppressWarnings(pred.conf(pg.samp)) %>% mutate(kb = basename(f))
+}) 
+names(loo.pred.confidence) = basename(list.files(data,full.names = T))
+
+plist = lapply(loo.pred.confidence, function(lpf) {
+  BarrettsProgressionRisk::showPredictionCalibration(lpf %>% dplyr::rename('perc' = 'P.ratio') ) + labs(title=unique(lpf$kb))
+})
+  
+do.call(grid.arrange, c(plist, top='Alpha=0.8'))
+```
+
+## Training LOO alpha=0.9
+
+```{r, fig.width=8, fig.height=12}
+## ALL LOO is at alpha=0.9
+loo.pred.confidence = purrr::map( list.files(data,full.names = T), function(f) {
+  #print(f)
+  load(paste0(f,'/loo_0.9.Rdata'),verbose=F)
+  suppressWarnings(pred.conf(pg.samp)) %>% mutate(kb = basename(f))
+}) 
+names(loo.pred.confidence) = list.files(data)
+
+plist = lapply(loo.pred.confidence, function(lpf) {
+  BarrettsProgressionRisk::showPredictionCalibration(lpf %>% dplyr::rename('perc' = 'P.ratio') ) + labs(title=unique(lpf$kb))
+})
+  
+do.call(grid.arrange, c(plist, top='Training LOO alpha=0.9'))
+```
+
+## Per-sample alpha=0.9
+
+```{r, fig.width=8, fig.height=12}
+
+per.samp.train = lapply(list.files(data,full.names = T), function(f) {
+  load(paste0(f,'/loo_0.9.Rdata'),verbose=F)
+  
+  kb = basename(f)
+  
+  pg.samp = pg.samp %>% mutate(quants = cut(Prediction, breaks=seq(0,1,0.1), include.lowest = T)) %>%
+    left_join(loo.pred.confidence[[kb]] %>% dplyr::select(quants, Risk), by='quants') %>%
+    mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T))
+
+  pg.samp %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% 
+    left_join(pg.samp %>% group_by(Status) %>% tally, by='Status') %>%
+    dplyr::rename('Total' = 'n') %>%
+    mutate_at(vars(Low,Moderate,High), funs(./Total)) 
+})
+names(per.samp.train) = list.files(data)
+
+
+plist = purrr::map(names(per.samp.train), function(kb) {
+  df = per.samp.train[[kb]]
+  
+  ggplot(melt(df, id.vars=c('Status','Total')), aes(variable, value, group=Status, fill=Status)) + 
+    ylim(0,1) + geom_col(position='dodge') + 
+    geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) + 
+    labs(title=unique(kb), x='', y='ratio') + theme_minimal()
+})
+names(plist) = names(per.samp.train)
+
+do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Training predictions alpha=0.9'))
+
+
+```
+
+
+# Test Data
+
+Using the alpha=0.9 model for each and evaluate the risks based on the LOO performance.
+
+```{r fig.height=10,fig.width=10, eval=F}
+## 0.5
+test.preds.per.kb05 = purrr::map(list.files(data,full.names = T), function(f) {
+  read_tsv(list.files(f, 'test_patients_preds_0.5.tsv', full.names = T), col_types = 'cdccdccclddccccccddccccdddccdddcdd') %>% dplyr::select(Hospital.Research.ID, Status, Endoscopy.Year, Pathology, Prediction, RR) %>% mutate(kb = basename(f))
+}) 
+names(test.preds.per.kb05) = basename(list.files(data))
+
+test.preds.per.kb05 = lapply(test.preds.per.kb05, function(kb) {
+  kb %>% mutate(quants = cut(Prediction, breaks=seq(0,1,0.1), include.lowest = T)) %>% left_join(loo.pred.confidence[[unique(kb$kb)]] %>% dplyr::select(quants, Risk), by='quants') %>%
+      mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T)) 
+})
+
+test.samples = all.patient.info %>% filter(Set == 'Test') %>% group_by(Status) %>% tally
+
+test.counts05 = lapply(test.preds.per.kb05, function(kb) {
+  kb %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>%
+    mutate(kb = unique(kb$kb)) %>% left_join(test.samples, by='Status') %>% 
+    mutate_if(is.numeric, funs(./n))
+})
+
+plist = lapply(test.counts05, function(kb) {
+  tt = unique(kb$kb)
+  kb = kb  %>% ungroup %>% dplyr::select(-kb,-n)
+
+  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
+    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
+    labs(title=tt, x='', y='ratio') + theme_minimal()
+})
+
+do.call(grid.arrange, c(plist, top='Alpha=0.5'))
+```
+
+## Per-sample alpha=0.9
+
+```{r, fig.width=8, fig.height=12, eval=F}
+test.preds.per.kb09 = purrr::map(list.files(data,full.names = T), function(f) {
+  read_tsv(list.files(f, 'test_patients_preds_0.9.tsv', full.names = T), col_types = 'cdccdccclddccccccddccccdddccdddcdd') %>% dplyr::select(Hospital.Research.ID, Status, Endoscopy.Year, Pathology, Prediction, RR, Samplename, Path.ID) %>% mutate(kb = basename(f))
+}) 
+names(test.preds.per.kb09) = basename(list.files(data))
+
+test.preds.per.kb09 = lapply(test.preds.per.kb09, function(kb) {
+  kb %>% mutate(quants = cut(Prediction, breaks=seq(0,1,0.1), include.lowest = T)) %>% 
+    left_join(loo.pred.confidence[[unique(kb$kb)]] %>% dplyr::select(quants, Risk), by='quants') %>%
+    mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T)) 
+})
+
+test.samples = all.patient.info %>% filter(Set == 'Test') %>% group_by(Status) %>% tally
+
+test.counts09 = lapply(test.preds.per.kb09, function(kb) {
+  kb %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>%
+    mutate(kb = unique(kb$kb)) %>% left_join(test.samples, by='Status') %>% 
+    mutate_if(is.numeric, funs(./n))
+})
+
+plist = lapply(test.counts09, function(kb) {
+  tt = unique(kb$kb)
+  kb = kb  %>% ungroup %>% dplyr::select(-kb,-n) 
+
+  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
+    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
+    #scale_fill_manual(values=c('#4575B4','#A50026'),labels=c('NP','P')) + 
+    labs(title=tt, x='', y='sample ratio') + theme_minimal()
+})
+
+do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Test set predictions, alpha=0.9'))
+```
+
+## Per endoscopy
+```{r, fig.width=8, fig.height=12, eval=F}
+
+preds.per.endo = lapply(test.preds.per.kb09, function(kb) {
+  endo = kb %>% separate(Path.ID, c('PID', 'Block'), '[:blank:]|_') %>% 
+    group_by(Hospital.Research.ID, Status, Endoscopy.Year, PID, kb) %>% 
+    mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T)) 
+  
+  total.endo = endo %>% ungroup %>% dplyr::select(PID, Status) %>% distinct %>% group_by(Status) %>% tally
+  endo %>% dplyr::summarise(Max.Pred = max(Prediction), Risk = max(Risk), n.samples = length(Prediction)) %>%
+    group_by(kb,Status, Risk) %>% tally %>% spread(Risk,n) %>% left_join(total.endo, by='Status') %>% ungroup %>%
+    mutate_if(is.numeric, funs(./n)) %>% dplyr::select(-n)
+})
+
+
+plist = lapply(preds.per.endo, function(kb) {
+  tt = unique(kb$kb)
+  kb = kb  %>% ungroup %>% dplyr::select(-kb)
+
+  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
+    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
+    labs(title=tt, x='', y='sample ratio') + theme_minimal()
+})
+
+do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Predictions per endoscopy'))
+
+```
+
+
+
+
+# Validation Data
+
+## Per sample (alpha = 0.9)
+
+```{r, fig.width=8, fig.height=12}
+val.preds = lapply(val.preds, function(kb) {
+  kb %>% dplyr::select(-Risk) %>% mutate(quants = cut(Probability, breaks=seq(0,1,0.1), include.lowest = T)) %>% 
+    left_join(loo.pred.confidence[[unique(kb$kb)]] %>% dplyr::select(quants, Risk), by='quants') %>%
+    mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T)) 
+})
+
+
+to = nrow(val.info %>% filter(Pathology == 'OAC'))
+oac = do.call(bind_rows, val.preds) %>% filter(Pathology == 'OAC')
+
+oac %>% group_by(kb, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>% mutate_all( funs(ifelse(is.na(.), 0, .)) ) %>% 
+  mutate_if(is.numeric, funs(round(./to,2))) %>% mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T)) %>% arrange(kb) %>%
+  kable(caption='OAC predictions') %>% kable_styling(full_width=F)
+
+
+#val.info %>% filter(Cohort != 'Old progressor scrolls' & Pathology != 'OAC') %>% group_by(Status) %>% tally
+
+#  roc = pROC::roc(Status ~ Probability, data=val.preds$`100kb`, auc=T, ci=T, of='thresholds',transpose=T)
+#  pROC::coords(roc, "best", transpose=F) %>% mutate( auc = as.numeric(pROC::auc(roc)), kb = basename(f) )
+
+val.counts = lapply(val.preds, function(kb) {
+  totals = kb %>% dplyr::filter(Cohort != 'Old progressor scrolls' & Pathology != 'OAC') %>% group_by(Status) %>% tally
+  
+  kb %>% dplyr::filter(Cohort != 'Old progressor scrolls' & Pathology != 'OAC')  %>% 
+    group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>%
+    mutate(kb = unique(kb$kb)) %>% left_join(totals, by='Status') %>% 
+    mutate_if(is.numeric, funs(./n)) %>% dplyr::select(-n)
+})
+
+plist = lapply(val.counts, function(kb) {
+  tt = unique(kb$kb)
+  kb = kb  %>% ungroup %>% dplyr::select(-kb)
+  
+  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
+    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
+    labs(title=tt, x='', y='ratio') + theme_minimal()
+})
+
+do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Validation'))
+
+```
+
+## Per endoscopy
+
+```{r, fig.width=8, fig.height=12}
+
+val.endo = lapply(val.preds, function(kb) {
+  endo = kb %>% dplyr::filter(Cohort != 'Old progressor scrolls' & Pathology != 'OAC') %>%
+    separate(`Block ID`, c('PID','Block'), '[:blank:]|-|\\/', extra = 'drop') 
+  
+  total.endo = endo %>% ungroup %>% dplyr::select(PID, Status) %>% distinct %>% group_by(Status) %>% tally
+    
+  endo %>% group_by(`Hospital Research ID`, `PID`, Status, kb) %>%
+    dplyr::summarise(Max.Prob = max(Probability), Risk = max(Risk)) %>%
+    group_by(kb,Status,Risk) %>% tally %>% spread(Risk,n) %>% left_join(total.endo, by='Status') %>% ungroup %>%
+    mutate_all( funs( ifelse(is.na(.), 0, .) ) ) %>%
+    mutate_if(is.numeric, funs(./n)) %>% dplyr::select(-n)
+})
+
+
+plist = lapply(val.endo, function(kb) {
+  tt = unique(kb$kb)
+  kb = kb  %>% ungroup %>% dplyr::select(-kb)
+  
+  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
+    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
+    labs(title=tt, x='', y='ratio') + theme_minimal()
+})
+
+do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Validation per Endoscopy'))
+
+
+```
+
+# Downsampled Data
+
+
+## Per-sample alpha=0.9
+```{r, fig.width=8, fig.height=12, eval=F}
+
+ds.info = read_excel('~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/downsampled_ids.xlsx')
+
+ddir = '~/Data/BarrettsProgressionRisk/Analysis/downsampled/'
+
+ds.preds =   purrr::map(list.files(ddir, recursive = F, full.names = T), function(dir) {
+    read_tsv(list.files(paste0(dir,'/predictions/0.9'), 'predictions.tsv', full.names = T), col_types = cols(
+  Sample = col_character(), Probability = col_double(), `Relative Risk` = col_double(),
+  Risk = col_character(), PatientID = col_character(), Status = col_character(),
+  Tissue = col_character(), `Expected Risk` = col_character(), Grade_patient = col_character(),
+  Grade_biopsy = col_character(), Study = col_character(), Type = col_character(), Endoscopy = col_date(format = "")
+)) %>% dplyr::select(-Risk, -Status) %>% mutate(quants = cut(Probability, breaks=seq(0,1,0.1), include.lowest = T)) %>% 
+  left_join(loo.pred.confidence[['50kb']] %>% dplyr::select(quants, Risk), by='quants') %>%
+    mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T), kb = basename(dir)) %>% left_join(ds.info %>% dplyr::select(`Illumina ID`, Status), by=c('Sample' = 'Illumina ID'))
+})
+names(ds.preds) = list.files(ddir)
+
+ 
+
+ds.counts = lapply(ds.preds, function(kb) {
+  totals = kb %>% group_by(Status) %>% tally
+  
+  kb %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>%
+    mutate(kb = unique(kb$kb)) %>% left_join(totals, by='Status') %>% 
+    mutate_if(is.numeric, funs(./n)) %>% dplyr::select(-n) %>% 
+    mutate_if(is.numeric, funs(ifelse(is.na(.), 0, .)))
+})
+
+plist = lapply(ds.counts, function(kb) {
+  tt = unique(kb$kb)
+  kb = kb  %>% ungroup %>% dplyr::select(-kb)
+  
+  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
+    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
+    labs(title=tt, x='', y='ratio') + theme_minimal()
+})
+
+do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Downsampled'))
+
+```
+
+```{r}
+
+ds.preds$`50kb` %>% group_by(Type, Risk) %>% tally %>% spread(Risk,n) %>% mutate_if(is.numeric, funs(ifelse(is.na(.), 0, .))) %>% 
+  kable(caption = 'Downsampled types') %>% kable_styling(full_width = F)
+
+```
+
