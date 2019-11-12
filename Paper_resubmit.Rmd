@@ -1229,29 +1229,32 @@ mp$performance[17,'mean']
 # Validation Cohort
 
 ```{r, echo=F}
-p.diag = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/progressor_diagnosis.xlsx') %>% 
-  dplyr::mutate(`Hospital Research ID` = gsub('/', '_', `Hospital Research ID`), `Weeks Follow Up` = as.double(difftime(`Diagnostic Endoscopy`, `Sequenced Endoscopy`, units='weeks')))
-
-patient.file = '~/Data/Ellie/QDNAseq/validation/sWGS_validation_batches.xlsx'
-sheets = readxl::excel_sheets(patient.file)[8:14]
-all.val.info = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(patient.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status|Endoscopy|Block|Path'), `Sample Type`, `SLX-ID`, `Index Sequence`,Cohort) %>% 
-    dplyr::mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
-})) 
-
+#p.diag = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/QDNAseq/validation/progressor_diagnosis.xlsx') %>% 
+#  dplyr::mutate(`Hospital Research ID` = gsub('/', '_', `Hospital Research ID`), `Weeks Follow Up` = as.double(difftime(`Diagnostic Endoscopy`, `Sequenced Endoscopy`, units='weeks')))
 pastefun<-function(x) {
   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
   return(x)
 }
 
-all.val.info = all.val.info %>% rowwise %>% 
-  mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>%
-  #mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', '')) %>% 
+
+patient.file = '~/Data/Ellie/QDNAseq/validation/sWGS_validation_batches.xlsx'
+
+oac.info = readxl::read_xlsx(patient.file, 'OAC Test Samples') %>% 
+  dplyr::mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`)) %>%
   mutate(Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.')) %>%
-  separate(`Block ID`, c('PID','Block'), sep='-|[:blank:]', remove=F) %>% dplyr::rename(PathID = `Block ID`)
+  dplyr::select(-matches('SLX|Index')) %>%
+  mutate(Status = factor(Status, levels=levels(pg.samp$Status)), Block = factor(Block, levels=c('E','1','2'), ordered=T))
 
 
-all.val.info$Block = sapply(strsplit(all.val.info$Block, ''), function(x) {
+val.info = readxl::read_xlsx(patient.file, 'Final Validation Samples') %>% 
+  dplyr::mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`)) %>%
+  mutate(Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.')) %>%
+  separate(`Block ID`, c('PID','Block'), sep='-|[:blank:]', remove=F) %>% dplyr::rename(PathID = `Block ID`) %>%
+  dplyr::select(-matches('SLX|Index'), -`Path Notes`) %>%
+  mutate(Status = factor(Status, levels=levels(pg.samp$Status))) %>% ungroup %>% group_by(`Hospital Research ID`) %>% 
+  dplyr::mutate(`Weeks Follow Up` = as.double(difftime(`Last Endoscopy`, `Endoscopy`, units='weeks'))) 
+
+val.info$Block = sapply(strsplit(val.info$Block, ''), function(x) {
   if (is.na(x)) return(1)
   if (length(x) == 1) {
     if (!grepl('\\d', x)) return(recode(x, 'A'=1, 'B'=2, 'C'=3, 'D'=4, 'E'=5, 'F'=6,'G'=7 ))
@@ -1262,11 +1265,6 @@ all.val.info$Block = sapply(strsplit(all.val.info$Block, ''), function(x) {
     return(as.numeric(x[i]))
   }
 })
-
-all.val.info = left_join(all.val.info, p.diag, by=c('Hospital Research ID', 'PathID'='Block ID')) %>% group_by(`Hospital Research ID`) %>% 
-  dplyr::mutate(`Weeks Follow Up` = as.double(difftime(`Diagnostic Endoscopy`, `Sequenced Endoscopy`, units='weeks'))) 
-
-val.info = all.val.info %>% filter(Pathology != 'OAC')
 
 bind_rows(val.info %>% dplyr::select(`Hospital Research ID`, Status) %>% distinct %>% group_by(Status) %>% tally %>% 
   spread(Status,n) %>% add_column(' ' = 'n Patients', .before=1),
@@ -1280,20 +1278,29 @@ val.info %>% group_by(Status) %>% tally %>% spread(Status,n) %>% add_column(' ' 
 ```{r, fig.width=8, fig.height=12}
 vdir ='~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/predictions_5e6_all'
 
+residuals = do.call(bind_rows, purrr::map(list.files( dirname(vdir), 'residuals.tsv', full.names = T, recursive = T ), function(f) {
+  read_tsv(f, col_types = 'ccddddl')
+}))
+
+failedQC = residuals %>% filter(varMAD_median > 0.008)
+
+
 all.val.preds = do.call(bind_rows, purrr::map(list.files(vdir, 'predictions.tsv', full.names = T, recursive = T), function(f) {
     pd = read_tsv(f, col_types = 'cddcccDcccc') %>% dplyr::select(`Hospital Research ID`, Sample, Probability, `Relative Risk`)
-    #left_join(pd, all.val.info, by=c('Hospital Research ID', 'Sample'='Samplename', 'Block ID')) 
     return(pd)
 })) %>% mutate(quants = cut(Probability, breaks=cuts, include.lowest = T)) %>%
   left_join(pred.confidence %>% dplyr::select(quants, Risk), by='quants')
 
-all.val.preds = left_join(all.val.preds, all.val.info, by=c('Hospital Research ID', 'Sample'='Samplename'))
+oac.preds = all.val.preds %>% filter(`Hospital Research ID` %in% unique(oac.info$`Hospital Research ID`))
 
-val.preds = all.val.preds %>% dplyr::filter(Sample %in% val.info$Samplename)
-  
-oac.preds = all.val.preds %>% filter(Pathology == 'OAC')
-#all.val.preds %>% filter(Cohort == 'Old progressor scrolls') %>% group_by(Status, Risk) %>% tally
-#val.info %>% filter(Cohort != 'Old progressor scrolls' & Pathology != 'OAC') %>% group_by(Status) %>% tally
+all.val.preds = all.val.preds %>% filter( !Sample %in% failedQC$samplename &  
+                                            !`Hospital Research ID` %in% unique(oac.info$`Hospital Research ID`) )
+
+val.preds = left_join(all.val.preds, val.info, by=c('Hospital Research ID', 'Sample'='Samplename')) %>% dplyr::select(Patient, everything())
+
+val.preds = val.preds %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','GM','ID','LGD'), ordered=T)) %>% 
+  mutate(Final.Endoscopy = `Last Endoscopy`, Endoscopy.Year = Endoscopy, Block = factor(Block, ordered=T))  
+
 ```  
 
 
@@ -1316,11 +1323,6 @@ ggplot(melt(val.counts, id.vars=c('Status')), aes(variable, value, group=Status,
 ## By path
 
 ```{r}
-
-val.preds = val.preds %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','GM','ID','LGD'), ordered=T)) %>% 
-  dplyr::rename(Samplename = 'Sample') %>% 
-  mutate(Final.Endoscopy = `Diagnostic Endoscopy`, Endoscopy.Year = Endoscopy, Block = factor(Block, ordered=T))  
-
 rp = plot.risk.by.path(val.preds) + labs(title='Validation samples predicted by pathology')  
 rp
 ggsave(filename='plots/val_pred_by_path.png', plot=rp, width=9, height=7, units='in', dpi=300)
@@ -1329,11 +1331,29 @@ get.year<-function(x) {
   as.numeric(format(as.Date(x), '%Y'))
 }
 
-val.preds = do.call(bind_rows, lapply(unique(val.preds$`Hospital Research ID`) %>% 
-                            map( function(p) val.preds %>% 
-                                   filter(`Hospital Research ID` == p) %>% 
+val.preds = dplyr::rename(val.preds, 'Samplename'='Sample')
+
+val.preds = do.call(bind_rows, lapply(unique(val.preds$Patient) %>% 
+                            map( function(p) val.preds %>% filter(Patient == p) %>% 
                                    mutate_at(vars(Endoscopy.Year, Final.Endoscopy), list(~get.year(.)) )
                                  ), transform.by.time, info=val.info) ) 
+
+
+
+dir.create('plots/validation/heatmaps/P',recursive = T, showWarnings = F)
+dir.create('plots/validation/heatmaps/NP',recursive = T, showWarnings = F)
+
+for (pt in unique(val.preds$Patient)) {
+print(pt)
+  patient = val.preds %>% filter(Patient == pt) %>% 
+    dplyr::select(Patient, Status, Endoscopy, months.before.final, Pathology,Block,Risk) %>% 
+    dplyr::rename(GEJ.Distance = Block)
+
+  p = BarrettsProgressionRisk::patientRiskTilesPlot(patient, 'months.before.final', 'rev') + labs(x='months', y='location') + theme(legend.position = 'none',plot.title = element_text(face = 'bold', size=16))
+
+    ggsave(paste0('plots/validation/heatmaps/',unique(patient$Status),'/pt_',pt,'.png'), plot = p, height=length(unique(patient$GEJ.Distance))+1, width=length(unique(patient$months.before.final))+1, units='in', dpi=300, limitsize=F) 
+}
+
 
 v.prog = val.preds %>% filter(Status == 'P') %>% mutate(
   brks = cut(months.before.final, breaks=sq, 
@@ -1367,25 +1387,6 @@ rp = ggplot(endos.m, aes(x=brks, y=pred.r*100, ymin=(pred.r-`sem(P)`)*100, ymax=
   labs(x='Months prior to endpoint', y='Percent predicted', title='Predictions prior to final endoscopy', subtitle='n = #endoscopies, s = #samples') + coord_cartesian(ylim = c(0,100)) + 
   plot.theme + theme( axis.text.x=element_text(angle=45,hjust=1), text=element_text(size=12)) 
 rp
-
-dir.create('plots/validation/heatmaps/P',recursive = T, showWarnings = F)
-dir.create('plots/validation/heatmaps/NP',recursive = T, showWarnings = F)
-
-for (pt in unique(v.prog$`Hospital Research ID`)) {
-
-  patient = v.prog %>% filter(`Hospital Research ID` == pt) %>% 
-    dplyr::select(`Hospital Research ID`,Status, Endoscopy, months.before.final, Pathology,Block,Risk) %>% 
-    dplyr::rename(GEJ.Distance = Block, Patient = 'Hospital Research ID')
-
-  p = BarrettsProgressionRisk::patientRiskTilesPlot(patient, 'months.before.final', 'rev') + labs(x='months', y='location') + theme(legend.position = 'none',plot.title = element_text(face = 'bold', size=16))
-
-    ggsave(paste0('plots/validation/heatmaps/',unique(patient$Status),'/pt_',pt,'.png'), plot = p, height=length(unique(patient$GEJ.Distance))+1, width=length(unique(patient$months.before.final))+1, units='in', dpi=300, limitsize=F) 
-
-    return(p)
-}
-
-
-
 
 ```
 
