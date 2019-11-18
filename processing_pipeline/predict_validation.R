@@ -106,7 +106,7 @@ lambda = performance.at.1se[[select.alpha]]$lambda
 cvRR = BarrettsProgressionRisk:::cvRR(dysplasia.df, coefs[[select.alpha]])
 
 x = list.files(model.dir, 'model_data.Rdata', recursive = T, full.names = T)
-message(paste0('MODEL DATA: ',))
+message(paste0('MODEL DATA: ',x))
 load(x, verbose=F)
 rm(dysplasia.df, coefs, labels)
 

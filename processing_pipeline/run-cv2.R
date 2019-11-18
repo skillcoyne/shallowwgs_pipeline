@@ -22,7 +22,8 @@ outdir = args[2]
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6/100kb/'
 infodir = args[3]
 # infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
-set = 'Training'
+set = 'All'
+#set = 'Training'
 #if (length(args) == 4) set = args[4]
 
 select.alpha = 0.9
@@ -360,7 +361,7 @@ if (file.exists(file)) {
 }
 
 ## --------- LOO NO HGD--------- ##
-lnhgd = F
+lnhgd = T 
 if (lnhgd) {
   message("LOO NO HGD")
   

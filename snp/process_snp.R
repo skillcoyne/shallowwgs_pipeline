@@ -1,8 +1,9 @@
 options(bitmapType = "cairo")
 
-library(tidyverse)
-library(gridExtra)
-library(BarrettsProgressionRisk)
+suppressPackageStartupMessages( library(tidyverse) )
+suppressPackageStartupMessages( library(reshape2) )
+suppressPackageStartupMessages( library(gridExtra) )
+suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 #suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
 
 args = commandArgs(trailingOnly=TRUE)
@@ -26,6 +27,7 @@ if (!file.exists(allpts.file))
 
 load(allpts.file, verbose=T)
 
+chr.info = BarrettsProgressionRisk:::chrInfo() %>% filter(chr %in% c(1:22))
 sampletype<-function(level) {
   type = 'BE'
   if (grepl('BLD',level,ignore.case=T)) {
@@ -99,7 +101,6 @@ medianFilter <- function(x,k){
 }
 ### ---------------------- ###
 
-chr.info = BarrettsProgressionRisk:::chrInfo() %>% filter(chr %in% c(1:22))
 print(chr.info)
 #chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
 
