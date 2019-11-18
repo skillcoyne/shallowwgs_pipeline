@@ -2,19 +2,17 @@ options(bitmapType = "cairo")
 
 library(tidyverse)
 library(gridExtra)
-
-
-suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
+library(BarrettsProgressionRisk)
+#suppressPackageStartupMessages( source('~/workspace/shallowwgs_pipeline/lib/data_func.R') )
 
 args = commandArgs(trailingOnly=TRUE)
 
 if (length(args) < 3)
   stop("Usage: <data directory> <all patient ASCAT Rdata> <Combine by endoscopy T/F> <exlucde low SCA T/F")
 
-chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')
 
 datadir = args[1]
-datadir = '~/Data/Reid_SNP/PerPatient/1001'
+# datadir = '~/Data/Reid_SNP/PerPatient/512'
 # datadir =  "~/Data/Reid_SNP/PerPatient-preLM/512"
 allpts.file = args[2]
 # allpts.file = '~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata'
@@ -27,6 +25,7 @@ if (!file.exists(allpts.file))
   stop(paste(allpts.file, "doesn't exist or isn't readable"))
 
 load(allpts.file, verbose=T)
+
 sampletype<-function(level) {
   type = 'BE'
   if (grepl('BLD',level,ignore.case=T)) {
@@ -37,14 +36,9 @@ sampletype<-function(level) {
   return(type)
 }
 
-qcdata = qcdata %>% rowwise %>% dplyr::mutate(
-  PatientID = unlist(strsplit(Samplename, '_'))[1],
-  SampleID = unlist(strsplit(Samplename, '_'))[2],
-  EndoID = unlist(strsplit(Samplename, '_'))[3],
-  Level = unlist(strsplit(Samplename, '_'))[4], 
-  Samplename = sub('_$','',Samplename), 
-  SampleType = sampletype(Level)
-)
+qcdata = qcdata %>% separate(Samplename, c('PatientID','SampleID','EndoID','Level'), remove=F) %>%
+  mutate( Samplename = sub('_$', '', Samplename),  SampleType = purrr::map(Level, sampletype))
+
 segments.list = lapply(segments.list, function(pt) {
   pt$sample = sub('\\.LogR','',pt$sample)
   pt
@@ -61,8 +55,7 @@ qcdata$`ASCAT SCA Ratio` = apply(qcdata,1,function(s) {
   sum(x$endpos - x$startpos) / chr.info[22,'genome.length',drop=T]
 })
 
-lowSCACutoff = median((qcdata %>% filter(SampleType != 'BE') %>% select(`ASCAT SCA Ratio`))$`ASCAT SCA Ratio`)
-
+lowSCACutoff = median(qcdata %>% filter(SampleType != 'BE') %>% dplyr::select(`ASCAT SCA Ratio`) %>% pull)
 
 if (!dir.exists(datadir))
   stop(paste(datadir, "doesn't exist or isn't readable"))
@@ -106,35 +99,35 @@ medianFilter <- function(x,k){
 }
 ### ---------------------- ###
 
-
-chr.info = chr.info[1:22,]
+chr.info = BarrettsProgressionRisk:::chrInfo() %>% filter(chr %in% c(1:22))
 print(chr.info)
-if (is.null(chr.info)) stop("Failed to get chr info")
-chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
+#chr.info$chr = factor(sub('chr','',chr.info$chrom), levels=c(1:22), ordered = T)
 
 file = list.files(datadir,'^ascat.Rdata',full.names=T)
 print(file)
 load(file, verbose=T)
-sample.ploidy = round(ascat.output$ploidy,2)
-segraw = as_tibble(ascat.output$segments_raw)
-segraw = segraw %>% rowwise %>% dplyr::mutate( sample = sub('\\.LogR','',sample))
-names(sample.ploidy) =  sub('\\.LogR','',names(sample.ploidy))
-rm(ascat.pcf, ascat.gg, ascat.output)
+sample.ploidy = as_tibble(round(ascat.output$ploidy,3), rownames='sample') %>% 
+  dplyr::rename(ploidy='value') %>% mutate(sample = sub('\\.LogR','',sample))
 
-segraw = segraw %>% filter(chr %in% c(1:22)) %>% rowwise() %>% 
+segraw = as_tibble(ascat.output$segments_raw) %>% 
+  dplyr::mutate( sample = sub('\\.LogR','',sample))
+#rm(ascat.pcf, ascat.gg, ascat.output)
+
+segraw = 
+  segraw %>% left_join(sample.ploidy, by='sample') %>%
+  filter(chr %in% c(1:22)) %>%
   dplyr::mutate(
-    ploidy = sample.ploidy[sample],
-    # Adjust based on the summary values per CN that we get in WGS (mostly) NP Barrett's cases
     totalRaw = round(nAraw+nBraw,3),
     adjRaw = totalRaw-ploidy, 
     chr = factor(chr, levels=c(1:22), ordered=T)
-) %>% arrange(sample, chr, startpos)
+  ) %>% arrange(sample, chr, startpos)
 
 if (excludeLowSCA) 
   qcdata = qcdata %>% filter(SampleType == 'BE' & Samplename %in% intersect(Samplename, segraw$sample) & `ASCAT SCA Ratio` > lowSCACutoff  )
 
 m = (melt(segraw, measure.vars=c('adjRaw')))
-p = ggplot(m, aes(sample, value, fill=grepl('BLD|gastric',sample))) + geom_jitter() + geom_boxplot(alpha=0.8) + labs(y='Ploidy Adj. CN', x='', title=basename(datadir)) + theme(legend.position = 'none', axis.text.x = element_text(angle=45, hjust=1))
+p = ggplot(m, aes(sample, value, fill=grepl('BLD|gastric',sample))) + 
+  geom_jitter(alpha=0.5) + geom_boxplot(alpha=0.8, outlier.colour = NA) + labs(y='Ploidy Adj. CN', x='', title=basename(datadir)) + theme(legend.position = 'none', axis.text.x = element_text(angle=45, hjust=1))
 
 p2 = ggplot(chr.info, aes(x=1:chr.length)) + facet_grid(sample~chr, space='free_y', scales='free_x') + 
   geom_segment(data=segraw, aes(x=startpos,xend=endpos,y=adjRaw,yend=adjRaw), color='darkgreen') + 
@@ -177,8 +170,6 @@ if (byEndo) {
 }
 
 
-chr.info$chr = factor(sub('chr', '', chr.info$chrom), levels=c(1:22))
-
 allsamples = NULL; allarms = NULL
 plist = list()  
 for (i in 1:length(rowsPerSample)) {
@@ -186,29 +177,42 @@ for (i in 1:length(rowsPerSample)) {
   df = segraw[rowsPerSample[[i]],]
   
   #df$winsLRR = madWins(df$adjLRR,2.5,25)$ywin
-  valueCol = 'adjRaw'
+  valueCol = names(rowsPerSample)[i] 
   
-  tiled = tile.segmented.data(df[c('chr','startpos','endpos',valueCol)], chr.info=chr.info, verbose=F)
-  if (is.null(allsamples)) allsamples = tiled[c(1:3)]
-  allsamples[,names(rowsPerSample)[i]] = tiled[,4]
+  df = dplyr::select(df, 'sample','chr','startpos','endpos','adjRaw') 
+  colnames(df)[5] = valueCol
   
-  tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos',valueCol)], size='arms', chr.info=chr.info, verbose=F)
-  if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
-  allarms[,names(rowsPerSample)[i]] = tiled.arms[,4]
+  tiled = BarrettsProgressionRisk:::tileSegments(df, 5e6)$tiles
+  tiled.arms = BarrettsProgressionRisk:::tileSegments(df, 'arms')$tiles
+  
+  allsamples = rbind(allsamples, tiled)
+  allarms = rbind(allarms, tiled.arms)
+  
+  # tiled = tile.segmented.data(df[c('chr','startpos','endpos',valueCol)], chr.info=chr.info, verbose=F)
+  # if (is.null(allsamples)) allsamples = tiled[c(1:3)]
+  # allsamples[,names(rowsPerSample)[i]] = tiled[,4]
+  
+  # tiled.arms = tile.segmented.data(df[c('chr','startpos','endpos',valueCol)], size='arms', chr.info=chr.info, verbose=F)
+  # if (is.null(allarms)) allarms = tiled.arms[c(1:3)]
+  # allarms[,names(rowsPerSample)[i]] = tiled.arms[,4]
   
   #lims = c(-1,1)
   #if (max(tiled[[valueCol]],na.rm=T) > 1) lims[2] = max(tiled$winsLRR,na.rm=T)
   #if (min(tiled$winsLRR,na.rm=T) < -1) lims[1] = min(tiled$winsLRR,na.rT)
-  lims = range(tiled[[valueCol]], na.rm = T)
-  if (valueCol == 'adjRaw') lims=c(0,4)
   
-  tiled$chr = factor(tiled$chr, levels=chr.info$chr)
+  #mp = BarrettsProgressionRisk:::mountainPlots(BarrettsProgressionRisk:::subtractArms(tiled,tiled.arms),NULL,NULL,'hg19',F)
+  
+  tiled = as_tibble(t(tiled), rownames = 'loc') %>% separate(loc, c('chr','start','end'), sep=':|-') %>% 
+    mutate(start = as.double(start), end = as.double(end)) %>% 
+    left_join(chr.info, by='chr') %>% mutate(chr = factor(chr, levels=chr.info$chr, ordered = T))
+  
+  lims=c(-2,2)
+  p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(lims) + 
+    facet_grid(~chr,space='free_x',scales='free_x') +
+    geom_segment(data=tiled, aes(x=start,xend=end,y=tiled[[valueCol]], yend=tiled[[valueCol]]), size=3, color='darkgreen') +
+    theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) + labs(x='', y='ploidy adjusted CN', title=names(rowsPerSample)[i])
 
-  p = ggplot(chr.info, aes(x=1:chr.length)) + ylim(lims) + facet_grid(~chr,space='free_x',scales='free_x') + 
-    geom_segment(data=tiled, aes(x=start,xend=end,y=adjRaw,yend=adjRaw), size=3, color='darkgreen') + 
-    theme_bw() + theme(axis.text.x=element_blank(), panel.spacing.x=unit(0, 'lines')) + labs(x='', y=valueCol, title=names(rowsPerSample)[i])
-
-  plist[[ names(rowsPerSample)[i] ]] = p
+  plist[[ valueCol ]] = p
 }
 
 ggsave(filename = paste(plotdir,'tiled.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=5*length(plist), limitsize = F)

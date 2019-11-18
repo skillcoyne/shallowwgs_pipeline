@@ -8,41 +8,24 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-library(ggplot2)
+knitr::opts_chunk$set(echo = F, message = F, warning = F)
+library(tidyverse)
 library(gridExtra)
 library(glmnet)
-library(pander)
-library(readxl)
 library(pROC)
-library(ggfortify)
-library(preprocessCore)
+#library(ggfortify)
+library(BarrettsProgressionRisk)
 
-source('~/workspace/shallowwgs_pipeline/lib/data_func.R')
+#source('~/workspace/shallowwgs_pipeline/lib/data_func.R')
 source('~/workspace/shallowwgs_pipeline/lib/common_plots.R')
 
 
-library(BarrettsProgressionRisk)
-
 chr.info = BarrettsProgressionRisk:::chrInfo(build='hg19')
 
-adjust.cols<-function(mtx, means=NULL, sds=NULL, na.replace=0) {
-  if (!is.null(means)) {
-    if (ncol(mtx) != length(means))
-      stop("Vector of means needs to match the columns in the matrix")
-    for (i in 1:ncol(mtx)) 
-      mtx[,i] = unit.var(mtx[,i], means[i], sds[i])
-  } else {
-    for (i in 1:ncol(mtx)) 
-      mtx[,i] = unit.var(mtx[,i])
-  }
-  mtx[is.na(mtx)] = na.replace
-  
-  return(mtx)
-}
+model.dir = '~/Data/Ellie/Analysis/models_5e6_all/50kb'
+load(paste0(model.dir,'/model_data.Rdata'), verbose = F)
+load(paste0(model.dir,'/all.pt.alpha.Rdata'), verbose = F)
 
-load('~/Data/Ellie/Analysis/5e6_arms_all/model_data.Rdata', verbose = T)
-load('~/Data/Ellie/Analysis/5e6_arms_all/all.pt.alpha.Rdata', verbose = T)
-#alpha = '0'
 alpha = '0.9'
 fitV = models[[alpha]]
 l = performance.at.1se[[alpha]]$lambda
@@ -52,50 +35,45 @@ swgs_labels = labels
 
 rm(plots,performance.at.1se,models,cvs,labels)
 
-pv = var(dysplasia.df[swgs_labels == 1])  # P
-npv = var(dysplasia.df[swgs_labels == 0]) # NP
-
-range(dysplasia.df[swgs_labels == 1])
-range(dysplasia.df[swgs_labels == 0])
 
 load('~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata', verbose=T)
 
-qcdata = qcdata %>% rowwise %>% dplyr::mutate(
-  PatientID = unlist(strsplit(Samplename, '_'))[1],
-  SampleID = unlist(strsplit(Samplename, '_'))[2],
-  EndoID = unlist(strsplit(Samplename, '_'))[3],
-  Level = unlist(strsplit(Samplename, '_'))[4]
-)
+qcdata = qcdata %>% as_tibble %>% 
+  separate(Samplename, c('PatientID','SampleID','EndoID','Level'), sep='_', remove=F)
+
 segments.list = lapply(segments.list, function(pt) {
   pt$sample = sub('\\.LogR','',pt$sample)
-  pt
+  pt %>% as_tibble
 })
 
+qcdata[1,] -> s
+
+
+
 qcdata$ASCAT.SCA.ratio = apply(qcdata,1,function(s) {
-  smp = subset(segments.list[[ s[['PatientID']] ]], sample == s[['Samplename']] & chr %in% c(1:22))
-  smp = smp %>% rowwise %>% dplyr::mutate(
+  smp = filter( segments.list[[ s$PatientID ]], sample == s$Samplename & chr %in% c(1:22) )
+  smp = smp %>% #rowwise %>% 
+    dplyr::mutate(
       #'Total' = nAraw + nBraw,
       'Total' = nMajor + nMinor,
-      'CNV' = round(Total) - round(as.numeric(s[['Ploidy']])) )
+      'CNV' = round(Total) - round(as.numeric(s$Ploidy)) )
 
-  x = subset(smp, CNV != 0 & chr %in% c(1:22))
-  sum(x$endpos - x$startpos) / chr.info[22,'genome.length']
+  x = filter(smp, CNV != 0 & chr %in% c(1:22))
+  sum(x$endpos - x$startpos)/as.numeric(chr.info[22,'genome.length'])
 })
 
 qcdata$SampleType = 'BE'
 qcdata$SampleType[grep('BLD',qcdata$Level, ignore.case=T)] = 'Blood Normal'
 qcdata$SampleType[grep('gastric',qcdata$Level, ignore.case=T)] = 'Gastric Normal'
 
-patient.info = as.data.frame(read_xlsx('~/Data/Ellie/Analysis/SNP/metadata_T1T2.xlsx'))
-patient.info$UniqueSampleID = paste(patient.info$PatientID, patient.info$`Timepoint Code`, sep='_')
-patient.info$Path.Status = patient.info$Status
-patient.info[patient.info$PatientID %in% subset(patient.info, Pathology %in% c('IMC','HGD'), select='PatientID')[,1], 'Path.Status'] = 'P'
+patient.info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx') %>% 
+  mutate( UniqueSampleID = paste(PatientID, `Timepoint Code`, sep='_'), Path.Status = Status) %>% 
+  mutate(Path.Status = as.character(ifelse(Pathology %in% c('IMC','HGD'), 'P', Path.Status)))
 
-sample.list = read_xlsx('~/Data/Ellie/Analysis/SNP/20180604_Reid_1M_SampleList.xlsx', sheet = 2)
-nrow(sample.list)
+sample.list = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/20180604_Reid_1M_SampleList.xlsx', sheet = 2)
 colnames(sample.list)[3] = 'Total.SCA'
 
-sample.list$SCA.Ratio = sample.list$Total.SCA/max(chr.info$genome.length)
+sample.list = sample.list %>% mutate(SCA.Ratio = Total.SCA/max(chr.info$genome.length))
 
 sample.info = qcdata[,c('PatientID','SampleID','EndoID','Level','Samplename','ASCAT.SCA.ratio')]
 
@@ -110,12 +88,10 @@ get.ratio<-function(PID, SID) {
 }
 
 sample.info = sample.info %>% rowwise() %>% dplyr::mutate(
-  SCA.Ratio = ifelse(Level %in% c('BLD','GASTRIC'), 0, get.ratio(PatientID, SampleID))
+  SCA.Ratio = ifelse(Level %in% c('BLD','GASTRIC'), 0, get.ratio(PatientID, SampleID)), 
+  Endoscopy = ifelse(Timepoint == 'T1', 1, 2)
 )
 
-patient.info = patient.info %>% rowwise() %>% dplyr::mutate( Endoscopy = ifelse(Timepoint == 'T1', 1, 2) )
-
-sample.info
 ggplot(sample.info, aes(ASCAT.SCA.ratio, SCA.Ratio)) + geom_point() + facet_grid(~Status)
 
 # ASCAT and Xiahong's estimates correlate in 86% of samples, that suggests that the 14% missing is due to the LOH I'm not trying to call
@@ -130,7 +106,7 @@ cor.test(sample.info$ASCAT.SCA.ratio, sample.info$SCA.Ratio)
 Histology breakdown:
 
 ```{r, echo=F}
-sm = patient.info %>% group_by(Status, Endoscopy, Pathology) %>% dplyr::tally() %>% group_by(Status, Endoscopy) %>% dplyr::mutate(freq=n/sum(n) )
+sm = sample.info %>% group_by(Status, Endoscopy, Pathology) %>% dplyr::tally() %>% group_by(Status, Endoscopy) %>% dplyr::mutate(freq=n/sum(n) )
 sm$Pathology = factor(sm$Pathology, levels=c('NDBE','ID','LGD','HGD','IMC'), ordered = T)
 
 ggplot(sm, aes(Pathology, freq, group=Endoscopy, fill=factor(Endoscopy))) + facet_grid(~Status) + 
@@ -144,7 +120,7 @@ pander(chisq.test(table(patient.info$Pathology, patient.info$Status)['HGD',]), c
 pander(chisq.test(table(patient.info$Pathology, patient.info$Status)['NDBE',]), caption='NDBE')
 
 # Most progressors are HGD at timepoint 1
-pander( round(with(subset(patient.info, Endoscopy == 1), table(Pathology, Status))['HGD',]/table(subset(patient.info, Endoscopy == 1)$Status), 3)*100, caption='% at T1')
+pander( round(with(subset(sample.info, Endoscopy == 1), table(Pathology, Status))['HGD',]/table(subset(sample.info, Endoscopy == 1)$Status), 3)*100, caption='% HGD at T1')
 ```
 
 # Quick QC 
@@ -245,113 +221,6 @@ qcdata %>% dplyr::group_by( Status, SampleType) %>% dplyr::summarise( median(ASC
 ```
 
 
-```{r, echo=F, warning=F, fig.height=10, fig.width=8,eval=F}
-
-summary.file = '~/Data/Annalise/NonP/summary_logR.txt'
-smy = read.table(summary.file, sep = '\t', header = T)
-smy = subset(smy, Copy.number <= 12)
-
-a = as.data.frame(smy[,c('Copy.number','var.LRR')])
-colnames(a) = c('x','y')
-b = as.data.frame(smy[,c('Copy.number','median.LRR')])
-colnames(b) = c('x','y')
-b[b$x == 2,'y'] = 0
-
-fitSD = lm(x~y, data=a)
-autoplot(fitSD)
-fitM = lm(x~y, data=b)
-autoplot(fitM)
-
-fitCN = lm(y~x, data=b)
-
-# Adjust based on the summary values per CN that we get in WGS (mostly) NP Barrett's cases
-adjust.segraw<-function(segraw) {
-  segraw = segraw %>% rowwise() %>% dplyr::mutate( total = nAraw+nBraw )
-  segraw = subset(segraw, chr %in% c(1:22))
-
-  segraw$adjLRR = NA
-  #for (cn in unique(segraw$total)) {
-  #  rows = which(segraw$total == cn)
-  #  values = seg[rows, 'medLRR', drop=T]
-    
-    #newM = mean(values)
-    #newSD = sd(values)
-    
-    #if (cn != 2) {
-      #newM = predict(fitM, newdata=cbind.data.frame('x'=cn))
-      #newSD = predict(fitSD, newdata=cbind.data.frame('x'=cn))
-      
-    #newV = mean(values)
-      
-    #}
-    #segraw[rows,][['adjLRR']] = newM + (values - mean(values)) * (newSD/sd(values))
-   # smy
-    #median(predict(fitM, newdata=cbind.data.frame('y'=values)))-cn
-    
-    
-    new = predict(fitCN, newdata=cbind.data.frame('x'=segraw$total))
-    #plot(scale(new, center = T))
-    
-    segraw[,'adjLRR'] = scale(new,center=T)
-    
-   # segraw[rows,'adjLRR'] = (values * (predict(fitM, newdata=cbind.data.frame('y'=values)) - cn))
-  #}  
-segraw  
-}
-
-
-pt = '403'
-pfiles = list.files(paste('~/Data/Reid_SNP/PerPatient', pt, sep='/'), full.names = T)
-load(grep('ascat.Rdata', pfiles, value=T), verbose=F)
-
-seg = ascat.output$segments_raw
-seg = adjust.segraw(seg)
-
-m = (melt(seg, measure.vars=c('medLRR','adjLRR')))
-m$total = round(round(m$total, 1))
-ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot() + labs(title=pt)
-
-
-seg$chr = factor(seg$chr, levels=c(1:22))
-grid.arrange(
-  ggplot(seg) + facet_grid(sample~chr, space='free_x', scales='free_x') +
-    geom_segment(aes(x=startpos, xend=endpos, y=medLRR, yend=medLRR), color='darkgreen', size=3) + 
-    theme(axis.text.x=element_blank() ) + labs(title='Low SCA, medLRR', subtitle=paste('patient',pt)),
-  ggplot(seg) + facet_grid(sample~chr, space='free_x', scales='free_x') + 
-    geom_segment(aes(x=startpos, xend=endpos, y=adjLRR, yend=adjLRR), color='darkred', size=3) + 
-    theme(axis.text.x=element_blank() ) + labs(title='Low SCA, adjLRR', subtitle=paste('patient',pt))
-)
-
-
-
-pt = '512'
-pfiles = list.files(paste('~/Data/Reid_SNP/PerPatient', pt, sep='/'), full.names = T)
-load(grep('ascat.Rdata', pfiles, value=T), verbose=F)
-
-seg = ascat.output$segments_raw
-seg = adjust.segraw(seg)
-
-m = (melt(seg, measure.vars=c('medLRR','adjLRR')))
-m$total = round(round(m$total, 1))
-ggplot(m, aes(total, value, group=total)) + facet_grid(~variable) + geom_boxplot() + labs(title=pt)
-
-
-seg$chr = factor(seg$chr, levels=c(1:22))
-grid.arrange(
-  ggplot(seg) + facet_grid(sample~chr, space='free_x', scales='free_x') + 
-    geom_segment(aes(x=startpos, xend=endpos, y=medLRR, yend=medLRR), color='darkgreen', size=3) + 
-    theme(axis.text.x=element_blank() ) + labs(title='Mixed SCA, medLRR', subtitle=paste('patient',pt)),
-  ggplot(seg) + facet_grid(sample~chr, space='free_x', scales='free_x') + 
-    geom_segment(aes(x=startpos, xend=endpos, y=adjLRR, yend=adjLRR), color='darkred', size=3) + 
-    theme(axis.text.x=element_blank() ) + labs(title='Mixed SCA, adjLRR', subtitle=paste('patient',pt))
-)
-
-
-
-
-```
-
-
 # Load tiled data
 
 CN Adjustment uses Annalise's whole-genome non-progressor samples to generate a set of mean and SD values per copy-number state. The median LogR values are adjusted using the mean and SD based on the CN state.  The adjusted LogR values are then winsorize per sample, and tiled in 5Mb bins.
@@ -399,6 +268,7 @@ if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
   
   save(mergedSegs, mergedArms, file='tmp_seg_pt.Rdata')
 }
+
 rownames(mergedSegs) = sub('\\.LogR','', rownames(mergedSegs))
 rownames(mergedArms) = sub('\\.LogR','', rownames(mergedArms))
 
@@ -519,58 +389,49 @@ q.norm.by<-function(df, target) {
   return(as.matrix(dfq))
 }
 
-copySegs = q.norm.by(mergedSegs, raw.segs)
-copyArms = q.norm.by(mergedArms, raw.arms)
+#copySegs = q.norm.by(mergedSegs, raw.segs)
+#copyArms = q.norm.by(mergedArms, raw.arms)
+
+training = do.call(bind_rows, purrr::map(list.files('~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb', '5e06_tiled_segvals.txt', full.names = T, recursive = T), function(f) {
+  read_tsv(f, col_types = cols(.default=col_double(), 'X1'=col_character()))
+}))
+training.segs = as.matrix(training[,-1]); rownames(training.segs) = training$X1
+
+training = do.call(bind_rows, purrr::map(list.files('~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb', 'arms_tiled_segvals.txt', full.names = T, recursive = T), function(f) {
+  read_tsv(f, col_types = cols(.default=col_double(), 'X1'=col_character()))
+}))
+training.arms = as.matrix(training[,-1]); rownames(training.arms) = training$X1
+
+
+merged = rbind(mergedSegs, training.segs)
+merged.mean = apply(merged, 2, mean, na.rm=T)
+merged.sd = apply(merged, 2, sd, na.rm=T)
+
+for (i in 1:ncol(mergedSegs))
+  mergedSegs[,i] = BarrettsProgressionRisk:::unit.var(mergedSegs[,i], merged.mean[i], merged.sd[i])
+
+merged.arms = rbind(mergedArms, training.arms)
+merged.arms.mean = apply(merged.arms, 2, mean, na.rm=T)
+merged.arms.sd = apply(merged.arms, 2, sd, na.rm=T)
+
+for (i in 1:ncol(mergedArms))
+  mergedArms[,i] = BarrettsProgressionRisk:::unit.var(mergedArms[,i], merged.arms.mean[i], merged.arms.sd[i])
 
 
 
-grid.arrange(
-  ggplot( melt(raw.segs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, sWGS bins (no arms)'),
-  ggplot( melt(mergedSegs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, SNP bins (no arms)'),
-  ggplot( melt(copySegs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, SNP bins q-normed')
-)
+
+# grid.arrange(
+#   ggplot( melt(raw.segs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, sWGS bins (no arms)'),
+#   ggplot( melt(mergedSegs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, SNP bins (no arms)')
+#   ggplot( melt(copySegs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, SNP bins q-normed')
+# )
 
 
-```
+normal.ids = sample.info %>% filter(grepl('BLD|gastric', Level, ignore.case=T)) %>% dplyr::summarise(rows = paste0(PatientID, '_', EndoID)) %>% pull
+
+nm.rows = which(rownames(mergedSegs) %in% normal.ids)
 
 
-Adjust the variance of each genomic region by the mean and sd extracted when I trained on the sWGS data. This seems to be a more fair comparison than scaling all the new data to itself, but the predictions don't really change.
-
-Using the mean bin values (merged during tiling).
-```{r, warning=F, message=F, fig.width=10, fig.height=8}
-
-#ns = adjust.cols(normalSegs, z.mean, z.sd)
-#ns = adjust.cols(normalSegs)
-#range(ns)
-
-#na = adjust.cols(normalArms, z.arms.mean, z.arms.sd)
-#na = adjust.cols(normalArms)
-#range(na)
-
-#ms = adjust.cols(mergedSegs, z.mean, z.sd)
-#ms = adjust.cols(mergedSegs)
-ms = adjust.cols(copySegs)
-range(ms)
-dim(ms)
-
-# mergedSegs['997_122V',which(mergedSegs['997_122V',] <= 0)]
-# ms['997_122V',which(mergedSegs['997_122V',] <= 0)]
-
-#ma = adjust.cols(mergedArms, z.arms.mean, z.arms.sd)
-#ma = adjust.cols(mergedArms)
-ma = adjust.cols(copyArms)
-range(ma)
-dim(ma)
-
-nm = melt(ms[nm.rows,])
-be = melt(ms[-nm.rows,])
-
-lims = range(nm$value, be$value, na.rm = T)
-grid.arrange(
-  ggplot(nm, aes(Var2, value, group=Var2, color=Var1)) + geom_point() + labs(title='Blood/gastric') + 
-    theme(axis.text.x=element_blank(),legend.position='none') +ylim(lims),
-  ggplot(be, aes(Var2, value, group=Var2, color=Var1)) + geom_point() + labs(title='BE samples') + 
-    theme(axis.text.x=element_blank(),legend.position='none') + ylim(lims), top='Unit scaled')
 
 ```
 
@@ -588,11 +449,11 @@ grid.arrange(
 #preds.normal = cbind.data.frame(rownames(probN),probN, predict(fitV, newx=arrayDfNorm, s=l, type='link'))
 #colnames(preds.normal) = c('Samplename','Prob', 'RR')
 
-cx = score.cx(ms, 1)
+cx = BarrettsProgressionRisk:::scoreCX(mergedSegs, 1)
 #arrayDf = cbind(ms,ma)
-arrayDf = subtract.arms(ms, ma)
+arrayDf = BarrettsProgressionRisk:::subtractArms(mergedSegs, mergedArms)
 #arrayDf = cbind(arrayDf, 'cx'=unit.var(cx, mn.cx, sd.cx))
-arrayDf = cbind(arrayDf, 'cx'=unit.var(cx))
+arrayDf = cbind(arrayDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx, mn.cx, sd.cx))
 
 lims=range(arrayDf, dysplasia.df,na.rm=T)
 grid.arrange(
@@ -615,14 +476,21 @@ rr = predict(fitV, newx=arrayDf, s=l, type='link')
 preds = cbind.data.frame(rownames(prob),prob, rr, stringsAsFactors=F)
 colnames(preds) = c('Samplename','Prob', 'RR')
 
+preds = preds %>% mutate(Status = as.character(ifelse(Pathology %in% c('HGD','IMD'), 'P', Status)))
+
+preds %>% filter(grepl('BLD|gastric',Level,ignore.case=T)) %>% group_by(Risk, Level) %>% tally %>% spread(Risk,n)
+
+preds %>% filter(!grepl('BLD|gastric',Level,ignore.case=T)) %>% group_by(Status, Risk, Pathology) %>% tally %>% spread(Risk,n)
+
 # offset = log(0.0225)
 # preds = preds %>% dplyr::mutate(
 #   'Adj. RR'=RR+offset,
 #   'Adj. Prob'=1/(1+exp(-RR+abs(offset)) )
 # )
 
-pnr = grep('BLD|gastric', preds$Samplename, ignore.case = T)
-preds.normal = preds[pnr,]
+preds.normal = preds %>% filter(grepl('BLD|gastric', Level, ignore.case=T)) 
+
+preds.normal %>% group_by(Risk) %>% tally
 
 length(which(preds.normal$Prob > 0.5))/nrow(preds.normal) # FPR
 length(which(preds.normal$Prob < 0.5))/nrow(preds.normal) 
@@ -647,9 +515,31 @@ grid.arrange(
   #   labs(title='Predictions, all samples model', y='n Samples', x='Adjusted Probability'),
 top='Probability') 
 
-#randNormal = paste(unlist(strsplit(randNormal, '_'))[c(1,3)], collapse='_')
-#randBE = paste(unlist(strsplit(randBE, '_'))[c(1,3)], collapse='_')
 
+preds = sample.info %>% mutate(Sample = paste(PatientID,EndoID,sep='_')) %>% left_join(preds, by=c('Sample'='Samplename'))
+
+summary(preds$Prob)
+
+preds = preds %>% 
+  mutate(Risk = ifelse(Prob > 0.5, 'High', 'Low')) %>% 
+  mutate(Risk = factor(Risk, levels=c('Low','High'), ordered=T))
+
+
+
+preds %>% group_by(Status, Risk) %>% tally %>% spread(Risk, n) %>%
+  left_join(preds %>% group_by(Status) %>% tally, by='Status') %>%
+  mutate_if(is.numeric, funs( round(./n,2))) %>% 
+  dplyr::select(-n)
+
+
+
+roc = pROC::roc(Status ~ Prob, data=preds, auc=T, ci=T, of='thresholds',transpose=T)
+roc.plot(roc) + labs(title='SNP AUC by (P)')
+pROC::coords(roc, 'best')
+
+rocR = pROC::roc(Status ~ Risk, data=preds, auc=T, ci=T, of='thresholds',transpose=T)
+roc.plot(rocR) + labs(title='SNP AUC by discretized risks (low/high)')
+pROC::coords(rocR, 'best')
 
 ```
 
