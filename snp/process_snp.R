@@ -218,14 +218,12 @@ for (i in 1:length(rowsPerSample)) {
 
 ggsave(filename = paste(plotdir,'tiled.png',sep='/'), plot = do.call(grid.arrange, c(plist, ncol=1)), width=10, height=5*length(plist), limitsize = F)
 
-filename1 = paste(basename(datadir), '_wins_tiled',sep='') 
-filename2 = paste(basename(datadir), '_wins_arms_tiled',sep='') 
-if (excludeLowSCA) {
-  filename1 = paste(filename1, '_exLOW',sep='') 
-  filename2 = paste(filename2, '_exLOW',sep='') 
-}
-filename1 = paste(filename1, '.txt',sep='') 
-filename2 = paste(filename2, '.txt',sep='') 
+filename1 = paste0(datadir, '/', paste0(basename(datadir), '_wins_tiled.txt') )
+filename2 = paste0(datadir, '/', paste0(basename(datadir), '_wins_arms_tiled.txt') )
+# if (excludeLowSCA) {
+#   filename1 = paste(filename1, '_exLOW',sep='') 
+#   filename2 = paste(filename2, '_exLOW',sep='') 
+# }
 
 write.table(allsamples, sep='\t', quote=F, row.names=F, file=filename1)
 write.table(allarms, sep='\t', quote=F, row.names=F, file=filename2)
