@@ -58,8 +58,6 @@ Per alpha value and kb segment size the overall performance per cross-validated 
 ```{r, fig.width=8,fig.height=7}
 kb.models = list.files(data)
 
-#list.files(f,full.names = T)
-
 kb.perf = do.call(bind_rows, lapply(list.files(data,full.names = T), function(f) {
   load(paste0(f,'/all.pt.alpha.Rdata'),verbose=F)
 

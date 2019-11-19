@@ -188,17 +188,28 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NUL
   
   if (is.null(label)) label = labeller(chr=label_both)
   
-  p = ggplot(df, aes(x=chr.length)) + facet_grid(Status~chr, scales='free_x', labeller=label) +
+  p = ggplot(df, aes(x=chr.length)) + facet_grid(Status~chr, scales='free_x', labeller=label)
+  
+  if (!is.null(info)) {
+    info = info[which(info$chrom == chrom),]
+    p = p + geom_vline(data=info, aes(xintercept=chr.cent-cent.gap), color='grey78', size=2 ) 
+  }
+  
+  p = p +
     geom_rect(data=rangeDf[arms,], aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=F, alpha=0.3 ) + 
     geom_rect(data=rangeDf[-arms,], aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=T, alpha=0.8 ) + 
     geom_rect(data=medDf, aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=F ) + 
     scale_fill_manual(values=colors, limits=c( levels(rangeDf$cuts)[1], levels(medDf$cuts), levels(rangeDf$cuts)[2]), name='') 
   
-  if (!is.null(info)) {
-    info = info[which(info$chrom == chrom),]
-    p = p + geom_vline(data=info, aes(xintercept=chr.cent-cent.gap), color='grey39', linetype='longdash' ) +
-      geom_label(data=info, aes(x=chr.cent-cent.gap*3, y=max(df$mean.value)), label='p-arm') +
-      geom_label(data=info, aes(x=chr.cent+cent.gap*2, y=max(df$mean.value)), label='q-arm')
+  if (!is.null(haz)) {
+    haz = subset(haz, chr == chrom)
+    if (nrow(haz) > 0 & length(grep('loss',unique(haz$gl))) > 0 ) {
+      p = p + geom_rect(data=subset(haz, gl == 'loss'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='blue3', alpha=0, show.legend=F, linetype='dotted',size=0.5) 
+    } 
+    
+    if (nrow(haz) > 0 & length(grep('gain',unique(haz$gl))) > 0) {
+      p = p + geom_rect(data=subset(haz, gl == 'gain'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='goldenrod2', alpha=0, show.legend=F, linetype='dotted', size=0.5) 
+    }
   }
   
   if (!is.null(genes)) {
@@ -206,15 +217,14 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NUL
     if (nrow(genes) > 0) p = p + geom_point(data=genes, aes(x=start,  y=value), color='darkblue', size=3) +
         geom_text_repel(data=genes, aes(x=start, y=value, label=`Gene Symbol`), color='darkblue', fontface='italic') 
   }
-  if (!is.null(haz)) {
-    haz = subset(haz, chr == chrom)
-    if (nrow(haz) > 0 & length(grep('loss',unique(haz$gl))) > 0 ) {
-      p = p + geom_rect(data=subset(haz, gl == 'loss'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='blue3', alpha=0, show.legend=F, size=1) 
-    } 
-    if (nrow(haz) > 0 & length(grep('gain',unique(haz$gl))) > 0) {
-      p = p + geom_rect(data=subset(haz, gl == 'gain'), aes(xmin=start, xmax=end, ymin=0, ymax=max), color='goldenrod2', alpha=0, show.legend=F, size=1) 
-    }
+  
+  if (!is.null(info)) {
+    info = info[which(info$chrom == chrom),]
+    p = p + #geom_vline(data=info, aes(xintercept=chr.cent-cent.gap), color='grey45', size=2, alpha=0.5 ) +
+      geom_label(data=info, aes(x=chr.cent-cent.gap*3, y=max(df$mean.value)), label='p-arm') +
+      geom_label(data=info, aes(x=chr.cent+cent.gap*1.5, y=max(df$mean.value)), label='q-arm')
   }
+  
   p + plot.theme + 
     labs(x='', y='Mean adj. segmentation value') +
     theme(axis.text.x=element_blank(), legend.position='none', panel.grid=element_blank(), panel.background=element_blank())  
@@ -304,7 +314,8 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
   if (is.null(pal))
     pal = RColorBrewer::brewer.pal(length(limits), 'Set2')
   
-  df = merge(df, b[,c('Samplename','Endoscopy.Year','months.before.final','Block','ogj')], by.x='variable',by.y='Samplename')
+  df = left_join(df, b %>% dplyr::select('Samplename','Endoscopy.Year','months.before.final','Block','ogj'), by=c('variable' = 'Samplename'))
+  
   df$ogj = factor(df$ogj, ordered = T)
   df$ogj = factor(df$ogj, levels=rev(levels(df$ogj)), ordered = T)
   #pal = pal[which(limits %in% levels(df$nl))]
@@ -323,8 +334,8 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
   p = ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
     geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
     scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
-    labs(title=title, x='') + min.theme  
-  
+    labs(title=title, x='') + min.theme + theme(axis.line = element_blank(), strip.background=element_rect(fill="white"), strip.text.x = element_text(size = 11) )
+
   legend = get.legend(p)
   p = p + theme(legend.position = 'none')
   
@@ -359,8 +370,11 @@ plot.risk.by.path<-function(preds) {
   rp = ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) + 
     scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) +
     geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), position=position_stack(), size=4) +
-    geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
-    facet_grid(~Status) + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + theme(legend.position = 'bottom', text=element_text(size=10))
+    geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), ), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
+    #geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
+    facet_grid(~Status, scales = 'free_x', space = 'free_x') + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + 
+    theme(legend.position = 'bottom', text=element_text(size=14))
+  
   return(rp)
 }
 
