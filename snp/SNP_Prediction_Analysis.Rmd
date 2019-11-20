@@ -15,6 +15,7 @@ library(glmnet)
 library(pROC)
 #library(ggfortify)
 library(BarrettsProgressionRisk)
+library(kableExtra)
 
 #source('~/workspace/shallowwgs_pipeline/lib/data_func.R')
 source('~/workspace/shallowwgs_pipeline/lib/common_plots.R')
@@ -33,54 +34,55 @@ features = coefs[[alpha]]
 
 swgs_labels = labels
 
-rm(plots,performance.at.1se,models,cvs,labels)
+patient.info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx') %>% 
+  mutate( UniqueSampleID = paste(PatientID, `Timepoint Code`, sep='_'), Path.Status = Status, PatientID = as.character(PatientID)) %>% 
+  mutate(Path.Status = as.character(ifelse(Pathology %in% c('IMC','HGD'), 'P', Path.Status))) 
 
+patient.info %>% filter(PatientID == 524)
+
+rm(plots,performance.at.1se,models,cvs,labels)
 
 load('~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata', verbose=T)
 
-qcdata = qcdata %>% as_tibble %>% 
+qcdata = qcdata %>% as_tibble %>%  mutate(Samplename = sub('_$','',Samplename)) %>%
   separate(Samplename, c('PatientID','SampleID','EndoID','Level'), sep='_', remove=F)
+
+qcdata[749, 'Level'] = 'BLD' # Making an assumption here but this is what it looks like
 
 segments.list = lapply(segments.list, function(pt) {
   pt$sample = sub('\\.LogR','',pt$sample)
   pt %>% as_tibble
 })
 
-qcdata[1,] -> s
-
-
-
-qcdata$ASCAT.SCA.ratio = apply(qcdata,1,function(s) {
-  smp = filter( segments.list[[ s$PatientID ]], sample == s$Samplename & chr %in% c(1:22) )
-  smp = smp %>% #rowwise %>% 
-    dplyr::mutate(
+calc.ratio<-function(PatientID, Samplename,Ploidy) {
+  smp = filter( segments.list[[ PatientID ]], sample == Samplename & chr %in% c(1:22) )
+  smp = smp %>% dplyr::mutate(
       #'Total' = nAraw + nBraw,
       'Total' = nMajor + nMinor,
-      'CNV' = round(Total) - round(as.numeric(s$Ploidy)) )
-
+      'CNV' = round(Total) - round(as.numeric(Ploidy)) )
   x = filter(smp, CNV != 0 & chr %in% c(1:22))
-  sum(x$endpos - x$startpos)/as.numeric(chr.info[22,'genome.length'])
-})
+  return(sum(x$endpos - x$startpos)/as.numeric(chr.info[22,'genome.length']))
+}
 
-qcdata$SampleType = 'BE'
-qcdata$SampleType[grep('BLD',qcdata$Level, ignore.case=T)] = 'Blood Normal'
-qcdata$SampleType[grep('gastric',qcdata$Level, ignore.case=T)] = 'Gastric Normal'
+qcdata = qcdata %>% mutate(
+  ASCAT.SCA.ratio = purrr::pmap_dbl(list(PatientID, Samplename, Ploidy), .f=calc.ratio),
+  Level = toupper(Level),
+  SampleType = case_when(
+    grepl('BLD', Level, ignore.case = T) ~ 'Blood Normal',
+    grepl('gastric', Level, ignore.case = T) ~ 'Gastric Normal',
+    TRUE ~ 'BE'
+)) 
 
-patient.info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx') %>% 
-  mutate( UniqueSampleID = paste(PatientID, `Timepoint Code`, sep='_'), Path.Status = Status) %>% 
-  mutate(Path.Status = as.character(ifelse(Pathology %in% c('IMC','HGD'), 'P', Path.Status)))
+sample.list = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/20180604_Reid_1M_SampleList.xlsx', sheet = 2) %>%
+  dplyr::rename('Total.SCA' = 3) %>% mutate(SCA.Ratio = Total.SCA/max(chr.info$genome.length))
 
-sample.list = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/20180604_Reid_1M_SampleList.xlsx', sheet = 2)
-colnames(sample.list)[3] = 'Total.SCA'
-
-sample.list = sample.list %>% mutate(SCA.Ratio = Total.SCA/max(chr.info$genome.length))
-
-sample.info = qcdata[,c('PatientID','SampleID','EndoID','Level','Samplename','ASCAT.SCA.ratio')]
+sample.info = dplyr::select(qcdata, c('PatientID','SampleID','EndoID','Level','Samplename','ASCAT.SCA.ratio'))
 
 message(paste(length(unique(sample.info$PatientID)), 'patients listed in metadata file'))
 message(paste(nrow(qcdata), 'samples available'))
 
-sample.info = base::merge(sample.info, patient.info[,c('PatientID','Timepoint','Timepoint Code','Status','Pathology')], by.x=c('PatientID','EndoID'), by.y=c('PatientID','Timepoint Code'))
+sample.info = left_join(sample.info, patient.info[,c('PatientID','Timepoint','Timepoint Code','Status','Pathology')], by=c('PatientID','EndoID' = 'Timepoint Code')) %>%
+  mutate(Status = factor(as.character( ifelse(is.na(Status) & Level %in% c('BLD','GASTRIC'), 'Normal', Status))))
 head(sample.info)
 
 get.ratio<-function(PID, SID) {
@@ -94,10 +96,13 @@ sample.info = sample.info %>% rowwise() %>% dplyr::mutate(
 
 ggplot(sample.info, aes(ASCAT.SCA.ratio, SCA.Ratio)) + geom_point() + facet_grid(~Status)
 
-# ASCAT and Xiahong's estimates correlate in 86% of samples, that suggests that the 14% missing is due to the LOH I'm not trying to call
-cor.test(sample.info$ASCAT.SCA.ratio, sample.info$SCA.Ratio)
 
+ct = cor.test(sample.info$ASCAT.SCA.ratio, sample.info$SCA.Ratio)
+ct$estimate
 ```
+
+ASCAT and Xiahong's estimates show a `r round(ct$estimate,2)` correlation. That suggests that the remainder is due to the LOH I'm not trying to call.
+
 
 ## Patient info 
 

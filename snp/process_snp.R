@@ -38,7 +38,7 @@ sampletype<-function(level) {
   return(type)
 }
 
-qcdata = qcdata %>% separate(Samplename, c('PatientID','SampleID','EndoID','Level'), remove=F) %>%
+qcdata = as_tibble(qcdata) %>% separate(Samplename, c('PatientID','SampleID','EndoID','Level'), remove=F) %>%
   mutate( Samplename = sub('_$', '', Samplename),  SampleType = purrr::map(Level, sampletype))
 
 segments.list = lapply(segments.list, function(pt) {
@@ -46,16 +46,25 @@ segments.list = lapply(segments.list, function(pt) {
   pt
 })
 
-qcdata$`ASCAT SCA Ratio` = apply(qcdata,1,function(s) {
-  smp = subset(segments.list[[ s[['PatientID']] ]], sample == s[['Samplename']] & chr %in% c(1:22))
-  smp = smp %>% rowwise %>% dplyr::mutate(
+calc.ratio<-function(PatientID, Samplename,Ploidy) {
+  smp = filter( segments.list[[ PatientID ]], sample == Samplename & chr %in% c(1:22) )
+  smp = smp %>% dplyr::mutate(
     #'Total' = nAraw + nBraw,
     'Total' = nMajor + nMinor,
-    'CNV' = round(Total) - round(as.numeric(s[['Ploidy']])) )
-  
-  x = subset(smp, CNV != 0 & chr %in% c(1:22))
-  sum(x$endpos - x$startpos) / chr.info[22,'genome.length',drop=T]
-})
+    'CNV' = round(Total) - round(as.numeric(Ploidy)) )
+  x = filter(smp, CNV != 0 & chr %in% c(1:22))
+  return(sum(x$endpos - x$startpos)/as.numeric(chr.info[22,'genome.length']))
+}
+
+qcdata = qcdata %>% mutate(
+  `ASCAT SCA Ratio` = purrr::pmap_dbl(list(PatientID, Samplename, Ploidy), .f=calc.ratio),
+  Level = toupper(Level),
+#  SampleType = case_when(
+#    grepl('BLD', Level, ignore.case = T) ~ 'Blood Normal',
+#    grepl('gastric', Level, ignore.case = T) ~ 'Gastric Normal',
+#    TRUE ~ 'BE'
+#  )
+) 
 
 lowSCACutoff = median(qcdata %>% filter(SampleType != 'BE') %>% dplyr::select(`ASCAT SCA Ratio`) %>% pull)
 
@@ -225,8 +234,8 @@ filename2 = paste0(datadir, '/', paste0(basename(datadir), '_wins_arms_tiled.txt
 #   filename2 = paste(filename2, '_exLOW',sep='') 
 # }
 
-write.table(allsamples, sep='\t', quote=F, row.names=F, file=filename1)
-write.table(allarms, sep='\t', quote=F, row.names=F, file=filename2)
+write.table(allsamples, sep='\t', quote=F, row.names=T, col.names = NA, file=filename1)
+write.table(allarms, sep='\t', quote=F, row.names=T, col.names = NA, file=filename2)
 
 print("Finished")
 
