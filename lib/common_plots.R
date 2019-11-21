@@ -280,17 +280,17 @@ vig.plot<-function(df, info, cols=c('green3','orange','red3'), pathology=F, add.
   df$Risk = factor(df$Risk, levels=c('Low','Moderate','High'), ordered = T)
   df$p53.Status = factor(df$p53.Status, levels=c(0,1), ordered = T)
 
-  p = ggplot(df, aes(Endoscopy.Year, nl)) + 
-    geom_tile(aes(fill=Risk), color='white', size=1.5) + scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') 
+  p = ggplot(df, aes(Endoscopy.Year, nl)) + geom_tile(aes(fill=Risk), color='white', size=1.5) + 
+    scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') 
   
   if (!pathology) {
-    p = p + geom_point(aes(shape=Pathology), color='white', size=5) + 
-    scale_shape_manual(values=c(1,0,15,24,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='white', color='white'))) 
+    p = p + geom_point(aes(shape=Pathology), color='white', fill='white', size=5) + 
+    scale_shape_manual(values=c(1,0,15,17,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='white', color='white'))) 
     #scale_shape_manual(values=c('B','I','L','H','C'), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='black', color='black'))) +
   } else {
     p = p + geom_text(aes(label=Pathology, color=Risk), show.legend=F) + scale_color_manual(values=c('white','black','white')) 
   }
-    p = p + labs(y='Oesophageal Location',x='Months Prior to Endpoint') + scale_x_continuous(breaks=scale) + 
+    p = p + labs(y='Oesophageal Location',x='Endoscopies') + scale_x_continuous(breaks=scale) + 
         plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='right',  legend.key = element_rect(fill='grey39')) 
     if (add.title)
       p = p + labs(title=paste('Patient',unique(info$Patient)), subtitle=subtitle)

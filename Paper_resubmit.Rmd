@@ -1125,11 +1125,14 @@ ggsave('plots/heatmaps/npg_heatmap.png', plot=p2, width=52, height=24, units="in
 p11 = filter(globalCNdf, chr == 17 &  start == 1 & seg.type == 'arms')
 p11Loss = p11 %>% filter(value < -1)
   
-p11Loss %>% filter(value < -1) %>% group_by(Status) %>% tally(name='p11 Loss') %>% full_join(
-  p11 %>% group_by(Status) %>% tally(name='Total Samples') ) %>% 
+p11Loss %>% filter(value <= -1) %>% group_by(Status) %>% tally(name='p11 Loss') %>% 
+  full_join( p11 %>% group_by(Status) %>% tally(name='Total Samples') ) %>% 
   kable(caption='Chr17 p11 loss') %>% kable_styling(full_width = F)
 
-p11Loss %>% group_by(Status, Hospital.Research.ID) %>% tally
+p11Loss %>% filter(value <= -1) %>% dplyr::select(Patient, Status) %>% distinct %>%
+  group_by(Status) %>%  tally(name='p11 Loss') %>%
+  kable(caption='Patients showing p53 loss & p53 IHC') %>% kable_styling(full_width = F)
+
 
 p11Path = patient.info %>% filter(Samplename %in% p11Loss$variable) %>% dplyr::group_by(Pathology) %>% tally(name='samples')
 
@@ -1145,28 +1148,31 @@ Ratio of progressor patients with a p11 loss in at least 1 sample: `r length(uni
 
 ```{r}
 patient.info %>% filter(Samplename %in% p11Loss$variable) %>% group_by(forcats::fct_explicit_na(p53.Status)) %>% tally %>% 
-  set_names(c('p53 Status', 'n samples')) %>% kable(caption='p53 status for samples with p11 loss') %>% kable_styling(full_width = F)
+  set_names(c('p53 Status', 'n samples')) %>% kable(caption='p53 IHC status for samples with p11 loss') %>% kable_styling(full_width = F)
 
 pi = patient.info
 pi$p11Loss = as.numeric(pi$Samplename %in% p11Loss$variable)
 #plot(table(p11=pi$p11Loss, ihc=pi$p53.Status))
 
-cor.test(pi$p11Loss, (as.numeric(pi$p53.Status)-1))
+ct = cor.test(pi$p11Loss, (as.numeric(pi$p53.Status)-1))
 ```
+
+17p11 loss and p53 IHC correlation  R=`r round(ct$estimate,2)`. 
 
 ## Top Features
 
-## Chr 17 Predictive TODO
+## Chr 17 Predictive 
 
 One way of looking at the p53 prediction (e.g. Adam Bass) is to see how predictive the p-arm loss in chr17 is.
-```{r, echo=F, warning=F, message=F, fig.height=5, fig.width=10, eval=F}
+```{r, echo=F, warning=F, message=F, fig.height=5, fig.width=10, eval=T}
 ccgenes = read_tsv('~/Data/CosmicCensusGenes.tsv', col_types = cols(.default = col_character())) %>% 
   filter(!grepl('^X|Y',`Genome Location`)) %>% 
   separate(`Genome Location`, c('chr','start','end'),':|-', remove=F) %>%
   dplyr::filter(start != '' | end != '') %>%
   dplyr::select(`Gene Symbol`, `Genome Location`, `Role in Cancer`, `Mutation Types`, chr, start, end)
 
-genes = ccgenes %>% dplyr::filter(grepl('TSG|oncogene', `Role in Cancer`) | `Mutation Types` != 'T') %>% 
+# leave out the translocations
+genes = ccgenes %>% dplyr::filter(grepl('TSG|oncogene', `Role in Cancer`) & `Mutation Types` != 'T') %>% 
   dplyr::select(`Gene Symbol`, `Genome Location`, chr, start, end) %>%
   dplyr::mutate(value = min(globalCNdf$value), Patient = '', chr = factor(chr,levels=levels(chr.lengths$chr),ordered=T), start = as.numeric(start), end=as.numeric(end)) %>% arrange(chr, start)
                           
@@ -1179,6 +1185,7 @@ chGR = makeGRangesFromDataFrame(features, keep.extra.columns = T)
 g17 = plot.cn.chr(globalCNdf, chrom='17', chr.lengths, haz=features, genes=genes, label=labeller(chr=label_both, Status=n.status)) + 
   labs(title="Chromosome 17") + scale_y_continuous(breaks = seq(-30,25,10), labels = c('-30', '','',0,'',20)) +
   theme(legend.position = 'none', strip.text = element_blank(), text=element_text(size=14))
+g17
 
 ggsave(filename='plots/hazards/chr17.png', plot=g17, width=8, height=4, units='in', dpi=300)
 
@@ -1193,7 +1200,7 @@ for (hit in unique(queryHits(ov))) {
 }
 
 for (chr in unique(features$chr)) {  
-  print(chr)
+  #print(chr)
   p = plot.cn.chr(globalCNdf,  chrom=chr, info=chr.lengths, haz=features, genes=genes, label=labeller(chr=label_both, Status=n.status)) +
     scale_y_continuous(breaks = seq(-30,25,10), labels = c('-30', '','',0,'',20)) +
     theme(strip.text.x = element_blank(), text=element_text(size=14)) + labs(title=paste('Chromosome',chr))
@@ -1274,7 +1281,8 @@ val.info = readxl::read_xlsx(patient.file, 'Final Validation Samples') %>%
   mutate(Samplename = paste(`SLX-ID`, `Index Sequence`, sep='.')) %>%
   separate(`Block ID`, c('PID','Block'), sep='-|[:blank:]', remove=F) %>% dplyr::rename(PathID = `Block ID`) %>%
   dplyr::select(-matches('SLX|Index'), -`Path Notes`) %>%
-  mutate(Status = factor(Status, levels=levels(pg.samp$Status))) %>% ungroup %>% group_by(`Hospital Research ID`) %>% 
+  mutate(Pathology = recode(Pathology, 'GM'='NDBE'), Status = factor(Status, levels=levels(pg.samp$Status))) %>% 
+  ungroup %>% group_by(`Hospital Research ID`) %>% 
   dplyr::mutate(`Weeks Follow Up` = as.double(difftime(`Last Endoscopy`, `Endoscopy`, units='weeks'))) 
 
 val.info$Block = sapply(strsplit(val.info$Block, ''), function(x) {
@@ -1366,12 +1374,15 @@ all.val.preds = do.call(bind_rows, purrr::map(list.files(vdir, 'predictions.tsv'
 
 oac.preds = all.val.preds %>% filter(`Hospital Research ID` %in% unique(oac.info$`Hospital Research ID`))
 
+oac.preds %>% group_by(`Hospital Research ID`) %>% 
+  dplyr::summarise( Probability = max(Probability), `Relative Risk` = max(`Relative Risk`), Risk = max(Risk)) %>%
+  group_by(Risk) %>% tally %>% kable(caption='OAC samples used as a positive control') %>% kable_styling(full_width = F)
+
 all.val.preds = all.val.preds %>% filter( !Sample %in% failedQC$samplename &  
                                             !`Hospital Research ID` %in% unique(oac.info$`Hospital Research ID`) )
 
-val.preds = left_join(all.val.preds, val.info, by=c('Hospital Research ID', 'Sample'='Samplename')) %>% dplyr::select(Patient, everything())
-
-val.preds = val.preds %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','GM','ID','LGD'), ordered=T)) %>% 
+val.preds = left_join(all.val.preds, val.info, by=c('Hospital Research ID', 'Sample'='Samplename')) %>% 
+  dplyr::select(Patient, everything()) %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','ID','LGD'), ordered=T)) %>% 
   mutate(Final.Endoscopy = `Last Endoscopy`, Endoscopy.Year = Endoscopy, Block = factor(Block, ordered=T))  
 
 ```  
@@ -1412,10 +1423,8 @@ val.preds = do.call(bind_rows, lapply(unique(val.preds$Patient) %>%
                                  ), transform.by.time, info=val.info) ) 
 
 
-
 dir.create('plots/validation/heatmaps/P/tiny',recursive = T, showWarnings = F)
 dir.create('plots/validation/heatmaps/NP/tiny',recursive = T, showWarnings = F)
-
 
 for (pt in unique(val.preds$Patient)) {
 #print(pt)
@@ -1431,14 +1440,13 @@ for (pt in unique(val.preds$Patient)) {
     ggsave(paste0('plots/validation/heatmaps/',unique(patient$Status),'/tiny/pt_',pt,'.png'), plot = p, height=ht, width=length(unique(patient$months.before.final)), units='in', dpi=150, limitsize=F) 
 
     patient = val.preds %>% filter(Patient == pt) %>% 
-    dplyr::select(Patient, Status, Endoscopy, months.before.final, Pathology,Block,Risk) %>% 
-    dplyr::rename(GEJ.Distance = Block)
+      dplyr::select(Patient, Status, Endoscopy, months.before.final, Pathology,Block,Risk) %>% 
+      dplyr::rename(GEJ.Distance = Block)
 
   p = BarrettsProgressionRisk::patientRiskTilesPlot(patient, 'months.before.final', 'rev') + labs(x='months', y='location') + theme(legend.position = 'none',plot.title = element_text(face = 'bold', size=16))
 
     ggsave(paste0('plots/validation/heatmaps/',unique(patient$Status),'/pt_',pt,'.png'), plot = p, height=length(unique(patient$GEJ.Distance))+1, width=length(unique(patient$months.before.final))+1, units='in', dpi=300, limitsize=F) 
 }
-
 
 sq = c(0, 1, 1*12, 2*12, 4*12, 6*12, 8*12, 10*12, 15*12)
 val.preds = val.preds %>% mutate(months.before.final = ifelse(months.before.final > sq[length(sq)], sq[length(sq)], months.before.final))
@@ -1447,8 +1455,6 @@ v.prog = val.preds %>% filter(Status == 'P') %>% mutate(
   brks = cut(months.before.final, breaks=sq, 
                  labels=c(c('Endpoint',apply(cbind(sq[-1], sq[-1]+11), 1, function(x) paste(x, collapse='-')))[-c(length(sq)-1,length(sq))], '>120'), include.lowest = T, ordered_result = T),
 ) %>% dplyr::mutate(brks = factor(brks, rev(levels(brks))))
-
-
 
 endos = v.prog %>% dplyr::group_by(Status, months.before.final, brks, PID) %>% 
   dplyr::summarise('pred.endo'=ifelse(length(which(Risk == 'High')) > 0, 1, 0), 
@@ -1477,6 +1483,55 @@ rp
 ggsave(filename='plots/validation/pred_endo.png', plot=rp, width=6, height=5, units='in', dpi=300)
 ```
 
+# Risk Categories KM
+
+```{r, fig.width=6, fig.height=8}
+require(survival)
+require(survminer)
+require(GGally)
+
+
+ps = pg.samp %>% dplyr::select(Patient, Status,months.before.final, Risk) %>%
+  group_by(Patient) %>% mutate(Diagnosis = as.integer(Status)-1)
+
+sfit = survfit( Surv(months.before.final, Diagnosis, type='right') ~ Risk, data=ps, conf.int=0.95, conf.type='log', na.action=na.omit)
+names(sfit$strata) = sub('.*=','', names(sfit$strata))
+
+kmp = survminer::ggsurvplot(sfit, size=1, linetype="strata",risk.table=T, risk.table.col='strata',
+                      conf.int=T, censor=T, legend='none', title='Progression risk over time', xlab='Time (months prior to progression)',
+                      ylab = 'Progression risk',
+                      ggtheme=theme_minimal(), palette=as.vector(BarrettsProgressionRisk::riskColors()), font.legend=c(14,'bold'))
+
+kmp 
+
+#ggsave('plots/risk_km.png', plot=print(kmp), height=9, width=8, units = 'in', dpi = 300)
+
+```
+
+```{r}
+vp = val.preds %>% dplyr::select(Patient, Status, months.before.final, Risk) %>% mutate(Patient = as.factor(Patient)) %>% 
+  group_by(Patient) %>% mutate(Diagnosis = as.integer(Status)-1) 
+
+merged = bind_rows(ps,vp)
+
+
+sfit = survfit( Surv(months.before.final, Diagnosis, type='right') ~ Risk, data=merged, conf.int=0.95, conf.type='log', na.action=na.omit)
+names(sfit$strata) = sub('.*=','', names(sfit$strata))
+
+kmp = survminer::ggsurvplot(sfit, size=1, linetype="strata",risk.table=T, risk.table.col='strata',
+                      conf.int=T, censor=T, legend='none', title='Progression Risk', 
+                      subtitle='Training & Validation predictions', xlab='Time (months prior to progression)',
+                      ylab = 'Progression risk',
+                      ggtheme=theme_minimal(), palette=as.vector(BarrettsProgressionRisk::riskColors()), font.legend=c(14,'bold'))
+
+kmp 
+
+ggsave('plots/risk_km.png', plot=print(kmp), height=9, width=8, units = 'in', dpi = 300)
+
+```
+
+
+
 
 # Clinical Story
 
@@ -1500,26 +1555,25 @@ create.desc<-function(pt,age,sex,smk,len,date) {
 sum.patient.data$desc = sum.patient.data %>% group_by(Patient) %>% rowwise() %>% dplyr::summarise(desc = create.desc(Patient, age.diagnosis, gender, smoking_str, M, initial.endo))
 
 pt = 34
-p34 = vig.plot(df=subset(pg.samp, Patient == pt),info= subset(patient.info, Patient == pt),cols=riskCols) + 
+p34 = vig.plot(df=filter(pg.samp, Patient == pt),info= filter(patient.info, Patient == pt),cols=riskCols) + 
     theme(legend.position = 'bottom') + labs(title = filter(sum.patient.data, Patient == pt)$desc) + 
     theme(legend.position = 'none', text = element_text(size=12))
 ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p34, width=6.35, height=4.5,dpi=72)
 
 
 pt = 3
-p3 = vig.plot(df=subset(pg.samp, Patient == pt),info= subset(patient.info, Patient == pt),cols=riskCols) + 
+p3 = vig.plot(df=filter(pg.samp, Patient == pt),info= filter(patient.info, Patient == pt),cols=riskCols) + 
     theme(legend.position = 'bottom') + labs(title = filter(sum.patient.data, Patient == pt)$desc) + 
     theme(legend.position = 'none', text = element_text(size=12))
 ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p3, width=6.35, height=4,dpi=72)
 
 
 pt = 68
-p68 = vig.plot(df=subset(pg.samp, Patient == pt),info= subset(patient.info, Patient == pt),cols=riskCols) + 
+p68 = vig.plot(df=filter(pg.samp, Patient == pt),info= filter(patient.info, Patient == pt),cols=riskCols) + 
     theme(legend.position = 'bottom') + labs(title = filter(sum.patient.data, Patient == pt)$desc) + 
     theme(legend.position = 'none', text = element_text(size=12))
 ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p68, width=6.35, height=5,dpi=72)
 
-  
   
 for (pt in c(56,20,86,23,33,49,51,6,25)) {
   length = sum.patient.data %>% ungroup %>% filter(Patient == pt) %>% dplyr::summarise(years = final.endo-initial.endo) %>% pull
@@ -1576,35 +1630,43 @@ pg.samp = pg.samp %>% mutate(p53.Status = factor(p53.Status, levels=c(0,1), orde
 maxP = pg.samp %>% dplyr::group_by(Patient, Status, brks) %>% 
   dplyr::summarise( 'maxP'=max(Prediction), 'Risk'=max(Risk), 'Pathology'=max(Pathology), 'p53'=max(p53.Status,na.rm=T) )
 
-rules = do.call(rbind, lapply(unique(maxP$Patient), function(pt) {
+pt.counts = maxP %>% group_by(Patient, Status) %>% dplyr::filter( length(which(grepl('Endpoint', brks))) > 0  & length(brks) > 1) %>% 
+  ungroup %>% dplyr::select(Patient, Status) %>% distinct %>% group_by(Status) %>% tally
+
+
+rules = do.call(bind_rows, purrr::map(unique(maxP$Patient), function(pt) {
   r = with(arrange(subset(maxP, Patient == pt), brks), rx(pt, brks,maxP,Pathology,Risk,p53))
   r$Status = unique(subset(maxP, Patient == pt)$Status)
-  r
-}))
+  return(as_tibble(r))
+})) %>% dplyr::mutate(t1 = factor(t1, levels=levels(pg.samp$brks), ordered=T), t2 = factor(t2, levels=levels(pg.samp$brks), ordered=T)) %>% arrange(Patient, t2)
 
-rules$t1 = factor(rules$t1, levels=levels(pg.samp$brks), ordered=T)
-rules$t2 = factor(rules$t2, levels=levels(pg.samp$brks), ordered=T)
+rules %>% group_by(Patient, Status) %>% dplyr::filter(t2 == 'Endpoint' & length(t1) > 2) %>% 
+  dplyr::select(Patient, Status) %>% distinct %>%  group_by(Status) %>% tally
 
-penult = filter(rules, t2 != 'Endpoint' & (t1 == rev(levels(pg.samp$brks))[2] | t2 == rev(levels(pg.samp$brks))[2] ))
+
+ids = rules %>% group_by(Patient, Status) %>% dplyr::filter(t2 == 'Endpoint' & length(t1) > 2) %>% dplyr::select(Patient) %>% pull
+
+penult = rules %>% dplyr::filter(Patient %in% ids & t2 != 'Endpoint') %>% arrange(Patient, desc(t1)) %>% group_by(Patient, Status) %>% 
+  dplyr::mutate(gid = 1:n() ) %>% dplyr::filter(gid == 1) 
+
+#penult = filter(rules, t2 != 'Endpoint' & (t1 %in% rev(levels(pg.samp$brks))[2] | t2 == rev(levels(pg.samp$brks))[2] ))
+
+penult %>% dplyr::select(Patient, Status) %>% distinct %>% group_by(Status) %>% tally
 
 penult %>% filter(Status == 'P' & rule %in% c(3,4)) %>% kable(caption='Patients that would be missed if we moved Moderate to Low risk') %>% kable_styling(full_width = F)
 
+penult %>% filter(Status == 'NP' & rule == 1) %>% kable(caption='NP patients for RFA') %>% kable_styling(full_width = F)
+
+penult %>% group_by(Status) %>% tally(name='total')
 
 penult %>% group_by(Status, rule) %>% tally %>% spread(rule,n) %>% 
-  left_join(penult %>% group_by(Status) %>% tally(name='total'), by='Status') %>%
-  mutate_if(is.numeric, funs(  round((./total)*100,1)  )) %>% dplyr::select(-total) %>%
-  kable(caption='Penult Endoscopy: % patients by rx rules based on the max (P) per endoscopy') %>% kable_styling(full_width=F)
+  kable(caption='Penult Endoscopy: # patients by rx rules based on the max (P) per endoscopy') %>% kable_styling(full_width=F)
 
 
-endpoint = subset(rules,  t2 != 'Endpoint') %>% 
-  dplyr::group_by(Patient, Status) %>% 
-  dplyr::summarise(  max(t2), 'rule'=rule[t2 == max(t2)]  )
 
+penult = rules %>% dplyr::filter(Patient %in% ids & t2 != 'Endpoint') %>% arrange(Patient, desc(t1)) %>% group_by(Patient, Status) %>% 
+  dplyr::mutate(gid = 1:n() ) %>% dplyr::filter(gid == 1) 
 
-endpoint %>% group_by(Status, rule) %>% tally %>% spread(rule,n) %>% 
-  left_join(endpoint %>% group_by(Status) %>% tally(name='total'), by='Status') %>%
-  mutate_if(is.numeric, funs(  round((./total)*100,1)  )) %>% dplyr::select(-total) %>%
-  kable(caption='Final endoscopy: % patients by recommendation rule based on the max (P) per endoscopy') %>% kable_styling(full_width=F)
 
 path.rx<-function(Patient, brks, Pathology) {
   rules = as.data.frame(matrix(ncol=0, nrow=0))
