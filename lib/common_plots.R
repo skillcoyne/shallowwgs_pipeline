@@ -356,10 +356,11 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
 
 
 plot.risk.by.path<-function(preds) {
-  riskPath = preds %>% dplyr::group_by(Status, Pathology, Risk) %>% tally(name='Freq') %>%
+  riskCols = BarrettsProgressionRisk:::riskColors()
+  riskPath = preds %>% dplyr::group_by(Status, Pathology, Risk) %>% tally(name='Freq') %>% ungroup %>%
     mutate(Status = recode_factor(Status, NP = 'Non-Progressor', P = 'Progressor', .ordered = T))
   
-  pathTotal = preds %>% dplyr::group_by(Status, Pathology) %>% tally(name='nPath') %>%
+  pathTotal = preds %>% dplyr::group_by(Status, Pathology) %>% tally(name='nPath') %>% ungroup %>%
     mutate(Status = recode_factor(Status, NP = 'Non-Progressor', P = 'Progressor', .ordered = T))
   
   riskPath = full_join(riskPath, pathTotal, by=c('Status','Pathology')) %>% 

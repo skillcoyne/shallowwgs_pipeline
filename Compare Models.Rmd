@@ -305,43 +305,6 @@ do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Training p
 
 ```
 
-
-# Test Data
-
-Using the alpha=0.9 model for each and evaluate the risks based on the LOO performance.
-
-```{r fig.height=10,fig.width=10, eval=F}
-## 0.5
-test.preds.per.kb05 = purrr::map(list.files(data,full.names = T), function(f) {
-  read_tsv(list.files(f, 'test_patients_preds_0.5.tsv', full.names = T), col_types = 'cdccdccclddccccccddccccdddccdddcdd') %>% dplyr::select(Hospital.Research.ID, Status, Endoscopy.Year, Pathology, Prediction, RR) %>% mutate(kb = basename(f))
-}) 
-names(test.preds.per.kb05) = basename(list.files(data))
-
-test.preds.per.kb05 = lapply(test.preds.per.kb05, function(kb) {
-  kb %>% mutate(quants = cut(Prediction, breaks=seq(0,1,0.1), include.lowest = T)) %>% left_join(loo.pred.confidence[[unique(kb$kb)]] %>% dplyr::select(quants, Risk), by='quants') %>%
-      mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T)) 
-})
-
-test.samples = all.patient.info %>% filter(Set == 'Test') %>% group_by(Status) %>% tally
-
-test.counts05 = lapply(test.preds.per.kb05, function(kb) {
-  kb %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>%
-    mutate(kb = unique(kb$kb)) %>% left_join(test.samples, by='Status') %>% 
-    mutate_if(is.numeric, funs(./n))
-})
-
-plist = lapply(test.counts05, function(kb) {
-  tt = unique(kb$kb)
-  kb = kb  %>% ungroup %>% dplyr::select(-kb,-n)
-
-  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
-    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
-    labs(title=tt, x='', y='ratio') + theme_minimal()
-})
-
-do.call(grid.arrange, c(plist, top='Alpha=0.5'))
-```
-
 ## Per-sample alpha=0.9
 
 ```{r, fig.width=8, fig.height=12, eval=F}
@@ -484,59 +447,6 @@ plist = lapply(val.endo, function(kb) {
 
 do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Validation per Endoscopy'))
 
-
-```
-
-# Downsampled Data
-
-
-## Per-sample alpha=0.9
-```{r, fig.width=8, fig.height=12, eval=F}
-
-ds.info = read_excel('~/Data/BarrettsProgressionRisk/QDNAseq/all_downsampled/downsampled_ids.xlsx')
-
-ddir = '~/Data/BarrettsProgressionRisk/Analysis/downsampled/'
-
-ds.preds =   purrr::map(list.files(ddir, recursive = F, full.names = T), function(dir) {
-    read_tsv(list.files(paste0(dir,'/predictions/0.9'), 'predictions.tsv', full.names = T), col_types = cols(
-  Sample = col_character(), Probability = col_double(), `Relative Risk` = col_double(),
-  Risk = col_character(), PatientID = col_character(), Status = col_character(),
-  Tissue = col_character(), `Expected Risk` = col_character(), Grade_patient = col_character(),
-  Grade_biopsy = col_character(), Study = col_character(), Type = col_character(), Endoscopy = col_date(format = "")
-)) %>% dplyr::select(-Risk, -Status) %>% mutate(quants = cut(Probability, breaks=seq(0,1,0.1), include.lowest = T)) %>% 
-  left_join(loo.pred.confidence[['50kb']] %>% dplyr::select(quants, Risk), by='quants') %>%
-    mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T), kb = basename(dir)) %>% left_join(ds.info %>% dplyr::select(`Illumina ID`, Status), by=c('Sample' = 'Illumina ID'))
-})
-names(ds.preds) = list.files(ddir)
-
- 
-
-ds.counts = lapply(ds.preds, function(kb) {
-  totals = kb %>% group_by(Status) %>% tally
-  
-  kb %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>%
-    mutate(kb = unique(kb$kb)) %>% left_join(totals, by='Status') %>% 
-    mutate_if(is.numeric, funs(./n)) %>% dplyr::select(-n) %>% 
-    mutate_if(is.numeric, funs(ifelse(is.na(.), 0, .)))
-})
-
-plist = lapply(ds.counts, function(kb) {
-  tt = unique(kb$kb)
-  kb = kb  %>% ungroup %>% dplyr::select(-kb)
-  
-  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
-    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
-    labs(title=tt, x='', y='ratio') + theme_minimal()
-})
-
-do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Downsampled'))
-
-```
-
-```{r}
-
-ds.preds$`50kb` %>% group_by(Type, Risk) %>% tally %>% spread(Risk,n) %>% mutate_if(is.numeric, funs(ifelse(is.na(.), 0, .))) %>% 
-  kable(caption = 'Downsampled types') %>% kable_styling(full_width = F)
 
 ```
 

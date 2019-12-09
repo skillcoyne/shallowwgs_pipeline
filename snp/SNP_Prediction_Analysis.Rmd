@@ -22,14 +22,17 @@ library(reshape2)
 #source('~/workspace/shallowwgs_pipeline/lib/data_func.R')
 source('~/workspace/shallowwgs_pipeline/lib/common_plots.R')
 
+dir.create('plots/snp',recursive = T, showWarnings = F)
 
+ggplot2::theme_set(theme_minimal())
 
 chr.info = BarrettsProgressionRisk:::chrInfo(build='hg19')
 
-model.dir = '~/Data/Ellie/Analysis/models_5e6_all/50kb'
-load(paste0(model.dir,'/model_data.Rdata'), verbose = F)
+model.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb'
+load(paste0(model.dir,'/model_data.Rdata'), verbose = T)
 load(paste0(model.dir,'/all.pt.alpha.Rdata'), verbose = F)
 
+train.labels = labels
 alpha = '0.9'
 fitV = models[[alpha]]
 l = performance.at.1se[[alpha]]$lambda
@@ -38,8 +41,11 @@ features = coefs[[alpha]]
 swgs_labels = labels
 
 patient.info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx') %>% 
-  mutate( UniqueSampleID = paste(PatientID, `Timepoint Code`, sep='_'), Path.Status = Status, PatientID = as.character(PatientID)) %>% 
-  mutate(Path.Status = as.character(ifelse(Pathology %in% c('IMC','HGD'), 'P', Path.Status))) 
+  mutate( UniqueSampleID = paste(PatientID, `Timepoint Code`, sep='_'), Path.Status = Status, PatientID = as.character(PatientID))
+#%>%  group_by(PatientID) %>% mutate(Path.Status = as.character(ifelse(length(which(grepl('IMC|HGD',Pathology))) > 0, 'P', Path.Status))) 
+
+path.np.ids = patient.info %>% filter(Pathology %in% c('HGD', 'IMC') & Status == 'NP') %>% dplyr::select(PatientID) %>% distinct %>% pull
+patient.info = patient.info %>% mutate(Path.Status = ifelse(PatientID %in% path.np.ids, 'P', Path.Status)) 
 
 patient.info %>% filter(PatientID == 524)
 
@@ -57,6 +63,19 @@ segments.list = lapply(segments.list, function(pt) {
   pt %>% as_tibble
 })
 
+# swgs.seg.count = read_tsv('~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/segment_counts.tsv', col_types = 'dc')
+# 
+# # All segments
+# seg.counts = do.call(bind_rows, purrr::map(segments.list, function(sl) {
+#   sl %>% dplyr::mutate(Total = nMajor+nMinor) %>% group_by(sample, Total) %>% 
+#     tally %>% #filter(Total != 2) %>% 
+#     ungroup %>% group_by(sample) %>% dplyr::summarise(n = sum(n))
+# }))
+
+#plot(seg.counts$n)
+#points(swgs.seg.count$`n segs`, col='red')
+
+
 calc.ratio<-function(PatientID, Samplename,Ploidy) {
   smp = filter( segments.list[[ PatientID ]], sample == Samplename & chr %in% c(1:22) )
   smp = smp %>% dplyr::mutate(
@@ -71,8 +90,7 @@ qcdata = qcdata %>% mutate(
   ASCAT.SCA.ratio = purrr::pmap_dbl(list(PatientID, Samplename, Ploidy), .f=calc.ratio),
   Level = toupper(Level),
   SampleType = case_when(
-    grepl('BLD', Level, ignore.case = T) ~ 'Blood Normal',
-    grepl('gastric', Level, ignore.case = T) ~ 'Gastric Normal',
+    grepl('BLD|gastric', Level, ignore.case = T) ~ 'Blood/Gastric Normal',
     TRUE ~ 'BE'
 )) 
 
@@ -84,7 +102,7 @@ sample.info = dplyr::select(qcdata, c('PatientID','SampleID','EndoID','Level','S
 message(paste(length(unique(sample.info$PatientID)), 'patients listed in metadata file'))
 message(paste(nrow(qcdata), 'samples available'))
 
-sample.info = left_join(sample.info, patient.info[,c('PatientID','Timepoint','Timepoint Code','Status','Pathology')], by=c('PatientID','EndoID' = 'Timepoint Code')) %>%
+sample.info = left_join(sample.info, dplyr::select(patient.info,c('PatientID','Timepoint','Timepoint Code','Status','Pathology')), by=c('PatientID','EndoID' = 'Timepoint Code')) %>%
   mutate(Status = factor(as.character( ifelse(is.na(Status) & Level %in% c('BLD','GASTRIC'), 'Normal', Status))))
 head(sample.info)
 
@@ -99,12 +117,20 @@ sample.info = sample.info %>% rowwise() %>% dplyr::mutate(
 
 ggplot(sample.info, aes(ASCAT.SCA.ratio, SCA.Ratio)) + geom_point() + facet_grid(~Status)
 
+#seg.counts %>% dplyr::summarise_at(vars(-`2`), )
+#seg.counts = left_join(seg.counts, dplyr::select(qcdata,c(Samplename, Ploidy, Purity, ASCAT.SCA.ratio, SampleType)), by=c('sample'='Samplename'))
+# seg.counts %>% filter(ASCAT.SCA.ratio < 0.01 & Purity > 0.98)
+# ggplot(filter(seg.counts, !is.na(Ploidy)), aes(n,ASCAT.SCA.ratio)) + facet_grid(~SampleType) + ylim(0,0.05) + xlim(0,200) +
+#  geom_point(aes(color = ASCAT.SCA.ratio < 0.01 & Purity > 0.98)) + theme(legend.position = 'none')
 
 ct = cor.test(sample.info$ASCAT.SCA.ratio, sample.info$SCA.Ratio)
 ```
 
-ASCAT and Xiahong's estimates show a `r round(ct$estimate,2)` correlation. That suggests that the remainder is due to the LOH I'm not trying to call.
+# Brief processing notes
 
+ASCAT was run on each SNP sample to obtain SCA calls. ASCAT and Xiahong's estimates show a `r round(ct$estimate,2)` correlation. 
+
+Prior to predicting the samples, in the step where I create 5Mb bins across the genome I merge the samples per endoscopy due to differences in the sampling. The sWGS had multiple biopsies aggregated per-level, while the SNP data was a single 'research' biopsy per level.  
 
 ## Patient info 
 
@@ -113,7 +139,8 @@ ASCAT and Xiahong's estimates show a `r round(ct$estimate,2)` correlation. That 
 Histology breakdown:
 
 ```{r, echo=F}
-sm = sample.info %>% group_by(Status, Endoscopy, Pathology) %>% dplyr::tally() %>% group_by(Status, Endoscopy) %>% dplyr::mutate(freq=n/sum(n) )
+sm = sample.info %>% group_by(Status, Endoscopy, Pathology) %>% dplyr::tally() %>% 
+  group_by(Status, Endoscopy) %>% dplyr::mutate(freq=n/sum(n) ) 
 sm$Pathology = factor(sm$Pathology, levels=c('NDBE','ID','LGD','HGD','IMC'), ordered = T)
 
 ggplot(sm %>% filter(!Status == 'Normal'), aes(Pathology, freq, group=Endoscopy, fill=factor(Endoscopy))) + facet_grid(~Status) + 
@@ -121,114 +148,100 @@ ggplot(sm %>% filter(!Status == 'Normal'), aes(Pathology, freq, group=Endoscopy,
 ```
 
 
-There's a significant difference in the numbers of NDBE or HGD samples between the groups
+There's a significant difference in the numbers of NDBE or HGD samples between the groups at T1.
 ```{r, echo=F}
-pander(chisq.test(table(patient.info$Pathology, patient.info$Status)['HGD',]), caption='HGD')
-pander(chisq.test(table(patient.info$Pathology, patient.info$Status)['NDBE',]), caption='NDBE')
+#pander(chisq.test(table(patient.info$Pathology, patient.info$Status)['HGD',]), caption='HGD')
+#pander(chisq.test(table(patient.info$Pathology, patient.info$Status)['NDBE',]), caption='NDBE')
 
 # Most progressors are HGD at timepoint 1
-pander( round(with(subset(sample.info, Endoscopy == 1), table(Pathology, Status))['HGD',]/table(subset(sample.info, Endoscopy == 1)$Status), 3)*100, caption='% HGD at T1')
+sample.info %>% filter(Timepoint == 'T1') %>% group_by(Status, Pathology) %>% tally %>% spread(Pathology,n) %>% kable(caption='Number of samples by pathology at T1') %>% kable_styling(full_width = F)
+
 ```
 
 # Quick QC 
 
 Purity, ploidy and goodnessoffit from single sample (not paired) ASCAT.
 
+`r qcdata %>% group_by(SampleType) %>% tally %>% spread(SampleType,n) %>% kable(caption='Sample numbers') %>% kable_styling(full_width=F)`
+
 ```{r, echo=F, warning=F, message=F}
-qcdata = left_join(qcdata, sample.info[,c('Samplename','Status','Timepoint','SCA.Ratio')], by='Samplename')
+
+qcdata = left_join(qcdata, dplyr::select(sample.info,c('Samplename','Status','Timepoint','SCA.Ratio')), by='Samplename')
 
 ggplot(qcdata, aes(Status, ASCAT.SCA.ratio, color=Status, group=Status)) + geom_boxplot() + facet_grid(~SampleType)
 
-low = subset(qcdata, SampleType == 'BE' & ASCAT.SCA.ratio <= median(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio))
+low = filter(qcdata, SampleType == 'BE' & ASCAT.SCA.ratio <= median(filter(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio))
 
-anno = cbind.data.frame(table(subset(qcdata, SampleType == 'BE' & ASCAT.SCA.ratio <= median(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio))$Status)/table(subset(qcdata, SampleType == 'BE')$Status))
-colnames(anno) = c('Status','Ratio')
-anno$label='median(normal SCA)'
-anno$x = 0.4
-anno$y = median(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio)
+low %>% group_by(Status, Timepoint) %>% tally %>% spread(Timepoint,n) %>% kable(caption='BE Samples with an ASCAT SCA ratio below the median ratio of the blood/gastric normal samples') %>%
+  kable_styling(full_width = F)
 
 
-ggplot(subset(qcdata,SampleType == 'BE'), aes(Purity, ASCAT.SCA.ratio, color=Status, group=Status)) + geom_point() + facet_grid(~Status, scales = 'free') + ylim(0,0.01) + 
-  geom_hline(yintercept = anno$y[1]) + geom_text(data=anno, aes(x, y, label=label), nudge_y = 0.0001) +
-  geom_text(data=anno, aes(x, y, label=paste(round(Ratio,2)*100,'% samples',sep='')), nudge_y = -0.0001)
+qcdata = qcdata %>% mutate(SampleType = case_when(grepl('Normal',SampleType) ~ 'Blood/Gastric Normal', TRUE ~ 'BE'),) 
 
-ggplot(qcdata, aes(Ploidy, ASCAT.SCA.ratio, color=Status)) + geom_point() + facet_grid(~SampleType)
+anno = qcdata %>% group_by(SampleType) %>% dplyr::summarise(Ratio = median(ASCAT.SCA.ratio) ) %>% rowwise %>% 
+  mutate(label = paste0('median(',SampleType,')','=',round(Ratio,3)))
 
-ggplot(qcdata, aes(Ploidy, ASCAT.SCA.ratio, color=Status)) + geom_point() + facet_grid(~Status)
 
-ggplot(subset(qcdata,SampleType == 'BE'), aes(Timepoint, ASCAT.SCA.ratio, color=PatientID, group=Timepoint)) + geom_boxplot() + 
-  facet_wrap(~Status, scales='free_x', ncol=2) + labs(title='SCA Ratio by Timepoint') + theme(legend.position = 'none')
+ggplot(qcdata, aes(Status, ASCAT.SCA.ratio)) + ylim(0,0.05) + 
+  facet_grid(~SampleType, scales='free_x') +
+  geom_jitter(width=0.1, aes(color=Status)) + 
+  geom_hline(data=dplyr::rename(anno, Status=SampleType), aes(yintercept = Ratio, linetype=Status), color='grey42') +
+  geom_label(data=dplyr::rename(anno, Status=SampleType), aes(x='NP', y=Ratio, label=label), alpha=0.5)
 
-ggplot(qcdata, aes(round(Ploidy,2))) + geom_histogram() + 
-  facet_wrap(~SampleType, ncol=1) + labs(x='Ploidy', title='Ploidy, normal vs BE')
+
+ggplot(filter(qcdata, !is.na(Ploidy)), aes(factor(round(Ploidy)), ASCAT.SCA.ratio, color=Status)) + 
+  facet_grid(~SampleType, scales = 'free_x', space='free') + geom_boxplot() + labs(x='Ploidy')
+
+ggplot(filter(qcdata,SampleType == 'BE'), aes(Timepoint, ASCAT.SCA.ratio, fill=Timepoint, group=Timepoint)) + geom_jitter(width=0.2) +
+  geom_boxplot(alpha=0.5) + facet_wrap(~Status, scales='free_x', ncol=2) + labs(title='SCA Ratio by Timepoint') + theme(legend.position = 'none')
 
 ggplot(qcdata, aes(round(Purity,2))) + geom_histogram() + 
   facet_wrap(~SampleType, scales='free', ncol=1) + labs(x='Purity', title='Purity, normal vs BE')
 
-#x=median(qcdata$SCA.Ratio,na.rm=T)+sd(qcdata$SCA.Ratio,na.rm=T)
-x=0.05
-y=median(qcdata$Purity,na.rm=T)-sd(qcdata$Purity,na.rm=T)/2
+x = 0.01
+y = round(mean(filter(qcdata, SampleType != 'BE')$Purity) - sd(filter(qcdata, SampleType != 'BE')$Purity),2)
 
-ggplot(qcdata, aes(Purity, ASCAT.SCA.ratio, color=ASCAT.SCA.ratio < 0.2)) + geom_point() + 
-         facet_wrap(~Status, ncol=1) + labs(title='Purity~SCA.Ratio') + geom_vline(xintercept=y, color='grey')
-
-ggplot(qcdata, aes(ASCAT.SCA.ratio, Purity, color=Status)) + geom_point() + 
-  facet_wrap(~Status) + labs(x='SCA', title='SCA vs Purity') + 
-  geom_vline(xintercept = x, color='grey') + geom_hline(yintercept = y, color='grey')
-
-table(unique(subset(qcdata, Purity > y & ASCAT.SCA.ratio < x & SampleType == 'BE', select=c('Status','PatientID')))$Status)
-
-ggplot(qcdata, aes(Purity)) + geom_histogram() + geom_vline(xintercept = y, col='red') + 
-  facet_wrap(~SampleType, scales = 'free') + labs(title='Purity by sampletype')
+p = ggplot(qcdata, aes(Purity, ASCAT.SCA.ratio)) + facet_wrap(~SampleType, nrow=1) + 
+  geom_point(aes(color=ASCAT.SCA.ratio < x | Purity > y), show.legend = F) + 
+  geom_vline(xintercept=y, color='grey') + 
+  geom_hline(yintercept=x, color='grey') +
+  labs(title='Purity~SCA.Ratio') + theme(text = element_text(size=12))
+p
+ggsave('plots/snp/purity_v_sca.png', plot=p, height=4, width=4, units = 'in', dpi=300)
 
 ggplot(qcdata, aes(Purity, Goodnessoffit, color=Status)) + geom_point() + 
          facet_wrap(~SampleType, ncol=1) + labs(title='Purity~fit, normal vs BE') + geom_vline(xintercept=y, color='grey')
 
-ggplot(subset(qcdata, SampleType == 'BE'), aes(round(Ploidy,2), Purity, color=Status)) + geom_point() + facet_grid(~Status) + 
-  labs(title='BE only, purity vs ploidy') + geom_hline(yintercept=y, color='grey')
-
-ggplot(qcdata, aes(ASCAT.SCA.ratio, color=Status, fill=Status)) + facet_wrap(~Status, scales='free_y',nrow=1) +  geom_density(alpha=0.5) + labs(x='SCA Ratio', title='SCA Ratio, NP vs P') 
-
-ggplot(qcdata, aes(ASCAT.SCA.ratio, color=Status, fill=Status)) + facet_wrap(Status~SampleType, scales='free_y',nrow=2) +  geom_density(alpha=0.5) + labs(title='SCA Ratio, NP vs P') 
-
-summary(subset(qcdata, SampleType == 'BE')$ASCAT.SCA.ratio)
-summary(subset(qcdata, SampleType != 'BE')$ASCAT.SCA.ratio)
-
-ggplot(subset(qcdata, SampleType == 'BE'), aes(Purity, ASCAT.SCA.ratio, color=Status)) + facet_grid(~Status) +
-  geom_point() + geom_vline(xintercept = y, color='darkgreen') + geom_hline(yintercept = x, color='red') + 
-  labs(title='Barretts only')
-
 ggplot(subset(qcdata, SampleType == 'BE'), aes(Ploidy, ASCAT.SCA.ratio, color=Status)) + facet_grid(~Status) + geom_point() + 
-  geom_hline(yintercept = 0.02, color='red') + labs(title='Barretts only')
+  geom_hline(yintercept = x, color='red') + labs(title='Barretts only')
 
 ## PER ENDOSCOPY
-qcdata.endo = qcdata %>% group_by(PatientID, EndoID, Status, Timepoint, SampleType) %>% dplyr::summarise_if(is.numeric, c('mean','max','min','sd')) %>% mutate_if(is.numeric, round, digits=3)
-qcdata %>% dplyr::group_by( Status, SampleType) %>% dplyr::summarise( median(ASCAT.SCA.ratio), sd(ASCAT.SCA.ratio) )
+qcdata.endo = qcdata %>% group_by(PatientID, EndoID, Status, Timepoint, SampleType) %>% 
+  dplyr::summarise_if(is.numeric, c('mean','max','min','sd')) %>% mutate_if(is.numeric, round, digits=3)
 
+#qcdata %>% dplyr::group_by( Status, SampleType) %>% dplyr::summarise( median(ASCAT.SCA.ratio), sd(ASCAT.SCA.ratio) )
+# lowsca = filter(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_mean < 0.01 & Purity_max > 0.98 )
+# nrow(lowsca)
+# nrow(filter(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_mean >= 0.01 & Purity_max <= 0.98))
 
-#ggplot(subset(qcdata.endo, SampleType == 'BE'), aes(ASCAT.SCA.ratio_max, Purity_max)) + geom_point() + facet_grid(~Status) + geom_hline(yintercept = 0.95)  + geom_vline(xintercept = 0.001)
-
-lowsca = subset(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_max <= 0.01 & Purity_max > 0.98 )
-
-#table(unique(lowsca[,c('PatientID','Status')])$Status)/table(unique(qcdata.endo[,c('PatientID','Status')])$Status)
-
-#table(unique(subset(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_max <= 0.001, select=c('PatientID','Status')))$Status)
-  
-
-ggplot(subset(qcdata.endo,SampleType == 'BE'), aes(Status, ASCAT.SCA.ratio_max, group=Status)) + geom_boxplot() + geom_hline(yintercept = 0.002, color='red')
-
-qcdata %>% dplyr::group_by( Status, SampleType) %>% dplyr::summarise( median(ASCAT.SCA.ratio))
-
+tmp = qcdata.endo %>% filter(!is.na(Ploidy_mean)) %>% mutate(Ploidy_mean = factor(round(Ploidy_mean)))
+p = ggplot(tmp, aes(Ploidy_mean, ASCAT.SCA.ratio_mean, group=Ploidy_mean)) + 
+  facet_grid(~SampleType) +
+  geom_jitter(width=0.2, aes(color=Ploidy_mean)) + 
+  geom_boxplot(outlier.colour = NA, alpha=0.5) + 
+  geom_hline(yintercept = 0.01, color='grey39') + labs(title='Merged per endoscopy', x='Mean ploidy') + 
+  theme(text=element_text(size=12), legend.position = 'none')
+ggsave('plots/snp/sca_v_ploidy.png', plot=p, height=4, width=4, units = 'in', dpi=300)
 
 ```
 
 
 # Load tiled data
 
-CN Adjustment uses Annalise's whole-genome non-progressor samples to generate a set of mean and SD values per copy-number state. The median LogR values are adjusted using the mean and SD based on the CN state.  The adjusted LogR values are then winsorize per sample, and tiled in 5Mb bins.
+I use the raw ASCAT total CN values, adjusted for the sample ploidy, to create the weighted average values in each 5Mb and arm bin of the genome. Note again that at this point the tiled values are per *endoscopy* not per sample.
 
 ```{r, warning=F, echo=F, message=F, fig.height=10, fig.width=8}
-
+# Adjust for ploidy -- this was done in the processing script
 if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
   load('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata', verbose=T) 
 } else {
@@ -243,7 +256,6 @@ if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
       next
     }
   
-    
     segvals = read_tsv(list.files(pt, '*wins_tiled.txt', full.names=T), col_types = cols(.default = col_double(), 'X1'= col_character())) %>% dplyr::rename(Samplename = X1)
     armvals = read_tsv(list.files(pt, '*arms_tiled.txt', full.names=T), col_types = cols(.default = col_double(), 'X1'= col_character())) %>% dplyr::rename(Samplename = X1)
     #samplenames = segvals$Samplename
@@ -251,7 +263,6 @@ if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
     segvals = segvals %>% set_rownames(.$Samplename) %>% dplyr::select(-Samplename) %>% as.matrix 
     armvals = armvals %>% set_rownames(.$Samplename) %>% dplyr::select(-Samplename) %>% as.matrix 
     
-
     #segvals[is.na(segvals)] = mean(segvals,na.rm=T)
     #armvals[is.na(armvals)] = mean(armvals,na.rm=T)
   
@@ -279,62 +290,33 @@ rownames(mergedArms) = sub('\\.LogR','', rownames(mergedArms))
 dim(mergedSegs)
 dim(mergedArms)
 
-# Adjust for ploidy -- this was done in the processing
-# for (i in 1:nrow(mergedSegs)) {
-#   sample = rownames(mergedSegs)[i]
-#   x = unlist(strsplit(sample, '_'))
-#   #ploidy = mean(subset(qcdata, SampleType == 'BE' & PatientID == x[1] & EndoID == x[2])$Ploidy)
-#   ploidy = subset(qcdata.endo, PatientID == x[1] & EndoID == x[2] & SampleType == 'BE')$Ploidy_mean
-#   if (grepl('BLD|gastric', sample, ignore.case = T)) ploidy = 2
-#   mergedSegs[i,] = mergedSegs[i,]-(ploidy-1)
-#   mergedArms[i,] = mergedArms[i,]-(ploidy-1)
-# }
-
 segmentVariance = apply(mergedSegs, 1, var)
 
-
 nm.rows = grep('BLD|GASTRIC', rownames(mergedSegs))
-#normalSegs = mergedSegs[nm.rows,]
-#normalArms = mergedArms[nm.rows,]
 
-# nrow(normalSegs) == nrow(normalArms)
-# 
-# mergedSegs = mergedSegs[-nm.rows,]
-# mergedArms = mergedArms[-nm.rows,]
-# 
-# nrow(mergedSegs) == nrow(mergedArms)
+
+lowSeg = mergedSegs[grep('^1001', rownames(mergedSegs), value=T),,drop=F]
+p1 = ggplot(melt(lowSeg), aes(Var2, value)) + ylim(-1,1) + facet_grid(~Var1) + geom_point() + 
+  theme(axis.text.x=element_blank() ) + labs(title='Low SCA samples', subtitle='patient 1001 NP', y='5Mb bins')
+
 
 lowSeg = mergedSegs[grep('^403', rownames(mergedSegs), value=T),,drop=F]
-p1 = ggplot(melt(lowSeg), aes(Var2, value)) + facet_grid(~Var1, space='free_x', scales='free') + geom_point() +
-  theme(axis.text.x=element_blank() ) + labs(title='Low SCA samples', subtitle='patient 403')
-
-highSeg = mergedSegs[grep('^512', rownames(mergedSegs), value=T),,drop=F]
-p2 = ggplot(melt(highSeg), aes(Var2, value)) + facet_grid(~Var1, space='free_x', scales='free') + geom_point() +
-  theme(axis.text.x=element_blank() ) + labs(title='Mixed SCA samples', subtitle='patient 512')
+p2 = ggplot(melt(lowSeg), aes(Var2, value)) +  ylim(-1,1) + facet_grid(~Var1) + geom_point() + 
+  theme(axis.text.x=element_blank() ) + labs(title='Low SCA samples', subtitle='patient 403 P', y='5Mb bins')
 
 grid.arrange(p1,p2,ncol=1)
-```
 
-# Values in the binned segments
+highSeg = mergedSegs[grep('^1114', rownames(mergedSegs), value=T),,drop=F]
+p3 = ggplot(melt(highSeg), aes(Var2, value)) +  ylim(-1,1) + facet_grid(~Var1) + geom_point() + 
+  theme(axis.text.x=element_blank() ) + labs(title='Mixed SCA samples', subtitle='patient 1114 NP', y='5Mb bins')
 
-Blood/gastric normals have very little variance compared to all of the BE samples (no idea which is P vs NP)
+highSeg = mergedSegs[grep('^512', rownames(mergedSegs), value=T),,drop=F]
+p4 = ggplot(melt(highSeg), aes(Var2, value)) +  ylim(-1,1) + facet_grid(~Var1) + geom_point() + 
+  theme(axis.text.x=element_blank() ) + labs(title='Mixed SCA samples', subtitle='patient 512 P', y='5Mb bins')
 
-```{r normals, message=F, fig.height=10, fig.width=8}
-#nm = melt(normalSegs)
-nm = melt(mergedSegs[nm.rows,])
-be = melt(mergedSegs[-nm.rows,])
-
-lims = range(nm$value, be$value, na.rm=T)
-
-grid.arrange(
-  ggplot(nm, aes(Var2, value, group=Var2)) + geom_point() + labs(title='Blood/gastric',subtitle=paste('variance=',var(nm$value),sep=''),x='') + 
-    theme(axis.text.x = element_blank()) + ylim(lims),
-  ggplot(be, aes(Var2, value, group=Var2)) + geom_point() + labs(title='BE samples',subtitle=paste('variance=',var(be$value,na.rm=T),sep=''),x='') + 
-    theme(axis.text.x = element_blank()) + ylim(lims)
-)
+grid.arrange(p1,p2,p3,p4,ncol=1)
 
 ```
-
 
 
 ## Compare the binned values to the median LRR from ASCAT
@@ -368,8 +350,6 @@ grid.arrange(
   ggplot(melt(as.matrix(mergedSegs[sub('\\.LogR','',randNormal),])), aes(Var1, value)) + geom_point() +
         theme(axis.text.x=element_blank()) + labs(title='Ploidy adjusted CN, binned'),
 
-   ggplot(melt(t(adjust.cols(mergedSegs, z.mean, z.sd)[randNormal,])), aes(x=Var2, y=value)) + geom_point() + 
-    theme(axis.text.x=element_blank()) + labs(title='Col adjusted CN, binned'),
  top='Random BLD or gastric normal', bottom=randNormal)
 
 
@@ -388,8 +368,6 @@ grid.arrange(
   ggplot(melt(as.matrix(mergedSegs[sub('\\.LogR','',randBE),])), aes(Var1, value)) + geom_point() +
     theme(axis.text.x=element_blank()) + labs(title='Ploidy adjusted CN, binned'),
 
-   ggplot(melt(t(adjust.cols(mergedSegs, z.mean, z.sd)[randBE,])), aes(x=Var2, y=value)) + geom_point() + 
-    theme(axis.text.x=element_blank()) + labs(title='Col adjusted CN, binned'),
 top='BE', bottom=randBE)
 
 ```
@@ -399,23 +377,9 @@ top='BE', bottom=randBE)
 
 ## Adjust per column
 
-Adjust using the RAW values...
-
-```{r raw.adjust, fig.height=16, fig.width=4, echo=T}
-q.norm.by<-function(df, target) {
-  dfq = do.call(cbind.data.frame,lapply(1:ncol(df), function(i) {
-    as.data.frame(normalize.quantiles.use.target(df[,i,drop=F], as.vector(target[,i])))
-  }))
-  
-  colnames(dfq) = colnames(df)
-  rownames(dfq) = rownames(df)
-  
-  return(as.matrix(dfq))
-}
-
-#copySegs = q.norm.by(mergedSegs, raw.segs)
-#copyArms = q.norm.by(mergedArms, raw.arms)
-
+The ploidy adjusted values now need to be mean normalized to match the means of the training data. The training data mean is equivalent to the diploid state and the same is true of the adjusted CN data.
+So the mean normalization is simply adding the difference of the means to the SNP bins.
+```{r}
 training = do.call(bind_rows, purrr::map(list.files('~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb', '5e06_tiled_segvals.txt', full.names = T, recursive = T), function(f) {
   read_tsv(f, col_types = cols(.default=col_double(), 'X1'=col_character()))
 }))
@@ -425,26 +389,28 @@ training = do.call(bind_rows, purrr::map(list.files('~/Data/BarrettsProgressionR
   read_tsv(f, col_types = cols(.default=col_double(), 'X1'=col_character()))
 }))
 training.arms = as.matrix(training[,-1]); rownames(training.arms) = training$X1
+```
 
+
+
+```{r raw.adjust, fig.height=16, fig.width=4, echo=T}
 median(training.segs)
 median(mergedSegs)
-median(mergedSegs + 0.98)
-
 
 median(training.arms)
 median(mergedArms)
-median(mergedArms + 0.98)
 
-
+# difference between the two is 0.98 so...
 mergedSegs = mergedSegs + 0.98
 mergedArms = mergedArms + 0.98
 
+# Also, for the z-adjust values get a mean+sd from both the training and SNP cohort jointly, due to the difference in the variance
 merged = rbind(mergedSegs, training.segs)
 merged.mean = apply(merged, 2, mean, na.rm=T)
 merged.sd = apply(merged, 2, sd, na.rm=T)
 
 for (i in 1:ncol(mergedSegs))
-  mergedSegs[,i] = BarrettsProgressionRisk:::unit.var(mergedSegs[,i], merged.mean[i], merged.sd[i])
+ mergedSegs[,i] = BarrettsProgressionRisk:::unit.var(mergedSegs[,i], merged.mean[i], merged.sd[i])
 
 merged.arms = rbind(mergedArms, training.arms)
 merged.arms.mean = apply(merged.arms, 2, mean, na.rm=T)
@@ -453,340 +419,248 @@ merged.arms.sd = apply(merged.arms, 2, sd, na.rm=T)
 for (i in 1:ncol(mergedArms))
   mergedArms[,i] = BarrettsProgressionRisk:::unit.var(mergedArms[,i], merged.arms.mean[i], merged.arms.sd[i])
 
-# grid.arrange(
-#   ggplot( melt(raw.segs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, sWGS bins (no arms)'),
-#   ggplot( melt(mergedSegs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, SNP bins (no arms)')
-#   ggplot( melt(copySegs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, SNP bins q-normed')
-# )
-
-
-normal.ids = sample.info %>% filter(grepl('BLD|gastric', Level, ignore.case=T)) %>% dplyr::summarise(rows = paste0(PatientID, '_', EndoID)) %>% pull
-
-nm.rows = which(rownames(mergedSegs) %in% normal.ids)
-
-
-
+#normal.ids = sample.info %>% filter(grepl('BLD|gastric', Level, ignore.case=T)) %>% dplyr::summarise(rows = paste0(PatientID, '_', EndoID)) %>% pull
+#nm.rows = which(rownames(mergedSegs) %in% normal.ids)
 ```
 
 
 ```{r echo=F,message=F, fig.width=10, fig.height=8}
-#cxN = score.cx(ns, 1)
-#arrayDfNorm = subtract.arms(ns, na)
-#arrayDfNorm = cbind(ns, na)
-#arrayDfNorm = cbind(arrayDfNorm, 'cx'=unit.var(cxN, mn.cx, sd.cx))
-
-#probN = predict(fitV, newx=arrayDfNorm, s=l, type='response')
-#length(which(probN > 0.5))/nrow(probN) # FPR
-#length(which(probN <= 0.5))/nrow(probN)
-
-#preds.normal = cbind.data.frame(rownames(probN),probN, predict(fitV, newx=arrayDfNorm, s=l, type='link'))
-#colnames(preds.normal) = c('Samplename','Prob', 'RR')
-
 cx = BarrettsProgressionRisk:::scoreCX(mergedSegs, 1)
-#arrayDf = cbind(ms,ma)
+
 arrayDf = BarrettsProgressionRisk:::subtractArms(mergedSegs, mergedArms)
-#arrayDf = cbind(arrayDf, 'cx'=unit.var(cx, mn.cx, sd.cx))
 arrayDf = cbind(arrayDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx, mn.cx, sd.cx))
+
+melted = melt(arrayDf) %>% left_join(patient.info %>% dplyr::select(UniqueSampleID, Status), by=c('Var1'='UniqueSampleID')) 
+
+train.melt = melt(dysplasia.df) %>% 
+  left_join(as_tibble(train.labels) %>% mutate(label = names(train.labels)), by=c('Var1'='label')) %>%
+  mutate(value.y = as.factor(value.y))
 
 lims=range(arrayDf, dysplasia.df,na.rm=T)
 grid.arrange(
-  ggplot(melt(arrayDf), aes(Var2, value)) + geom_point() + ylim(lims) +
+  ggplot(melted, aes(Var2, value,color=Status)) + geom_point() + ylim(lims) +
     geom_point(data=melt(arrayDf[,589:634]), col='red') + labs(title='SNP'),
-  ggplot(melt(dysplasia.df), aes(Var2, value)) + geom_point() + ylim(lims) +
-      geom_point(data=melt(dysplasia.df[,589:634]), col='red') + labs(title='sWGS'),
+  ggplot() + geom_point(data=train.melt, aes(Var2, value.x, color=value.y)) + ylim(lims) +
+      geom_point(data=melt(dysplasia.df[,589:634]), aes(Var2, value), col='red') + labs(title='sWGS'),
 nrow=1)
 
 ```
 
+The SNP and sWGS data is comparable, but it's also clear that the variance is fairly different.  Given our experience with other data this is expected.
+
 
 # Predictions
 
-```{r, warning=F, fig.height=8}
+For simplicity here I'm not bothering with the 'moderate' category, so the cutoff for high ~ low is a probability of  low<0.5>=high
 
+It's worth noting here that the relative risks are much higher, again I'd attribute this to the variance.  
+
+```{r, warning=F, fig.height=8}
 prob = predict(fitV, newx=arrayDf, s=l, type='response')
 rr = predict(fitV, newx=arrayDf, s=l, type='link')
 
 preds = bind_cols('Samplename'=rownames(prob),'Prob'=prob[,1],'RR'=rr[,1]) %>%
   mutate(Risk = case_when(
-    Prob <= 0.3 ~ 'Low',
-    Prob > 0.3 & Prob < 0.5 ~ 'Moderate',
+    Prob < 0.5 ~ 'Low',
     Prob >= 0.5 ~ 'High' 
 ))
 
 normals = filter(preds, grepl('BLD|gastric', Samplename, ignore.case=T))
-table(normals$Risk)
 
 preds = filter(preds, !grepl('BLD|gastric', Samplename, ignore.case=T))
 
-preds = preds %>% left_join(patient.info %>% dplyr::select(UniqueSampleID, Pathology, Status), by=c('Samplename'='UniqueSampleID')) %>%
-   mutate(Status = as.character(ifelse(Pathology %in% c('HGD','IMD'), 'P', Status)))
+preds = preds %>% left_join(patient.info %>% dplyr::select(PatientID, UniqueSampleID, Pathology, Status, Path.Status), by=c('Samplename'='UniqueSampleID')) 
+
+# NP patients who are likely P
+np.wgd.pid = qcdata.endo %>% filter(Ploidy_mean > 2.7 & Status == 'NP') %>% ungroup %>% dplyr::select(PatientID) %>% pull
+preds = preds %>% dplyr::mutate(Path.Status = as.character(ifelse(PatientID %in% np.wgd.pid, 'P', Path.Status)))
 
 preds %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n)
 
-hist(preds$Prob)
-
-length(which(normals$Prob > 0.5))/nrow(normals) # FPR
-length(which(normals$Prob < 0.5))/nrow(normals) 
+preds %>% group_by(Path.Status, Risk) %>% tally %>% spread(Risk,n)
 
 myPal = rev(RColorBrewer::brewer.pal(11, 'RdYlBu'))
-grid.arrange(
-  ggplot(preds, aes(RR)) + geom_histogram(aes(fill=..x..), bins=15, show.legend = F) +
-    scale_fill_gradientn(colors = myPal,  name='') + 
-    labs(y='n Samples', x='Relative Risk', title='Unadjusted relative risk'),
-  # ggplot(preds, aes(`Adj. RR`)) + geom_histogram(aes(fill=..x..), bins=15, show.legend = F) +
-  #   scale_fill_gradientn(colors = myPal,  name='') +
-  #   labs(y='n Samples', x='Relative Risk', title='Adjusted relative risk'),
-top='Relative risk')
+ggplot(bind_rows(preds,normals), aes(RR)) + geom_histogram(aes(fill=..x..), bins=15, show.legend = F) +
+  scale_fill_gradientn(colors = myPal,  name='') + 
+  labs(y='n Samples', x='Relative Risk', title='Unadjusted relative risk', subtitle='All SNP samples')
 
+ggplot(bind_rows(preds,normals), aes(Prob)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
+  scale_fill_gradientn(colors = myPal,  name='') + 
+  labs(title='Predictions, all samples model', y='n Samples', x='Unadjusted Probability', subtitle='All SNP samples')
+```
 
-grid.arrange(
-  ggplot(preds, aes(Prob)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
-    scale_fill_gradientn(colors = myPal,  name='') + 
-    labs(title='Predictions, all samples model', y='n Samples', x='Unadjusted Probability'),
-  # ggplot(preds, aes(`Adj. Prob`)) + geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
-  #   scale_fill_gradientn(colors = myPal,  name='') +
-  #   labs(title='Predictions, all samples model', y='n Samples', x='Adjusted Probability'),
-top='Probability') 
+The best false positive rate can be assessed from the blood/gastric normals.  So in this case ~17%
+`r normals %>% group_by(Risk) %>% tally %>% mutate(ratio = round(n/nrow(normals),2))  %>% kable(caption='Blood & gastric normals') %>% kable_styling(full_width = F)`
 
-
-#preds = sample.info %>% mutate(Sample = paste(PatientID,EndoID,sep='_')) %>% left_join(preds, by=c('Sample'='Samplename'))
-
-summary(preds$Prob)
-
+We see a higher FPR rate in the full dataset. 
+```{r echo=F}
 preds %>% group_by(Status, Risk) %>% tally %>% spread(Risk, n) %>%
   left_join(preds %>% group_by(Status) %>% tally, by='Status') %>%
-  mutate_if(is.numeric, list( round(./n,2))) %>% 
-  dplyr::select(-n)
+  mutate_if(is.numeric, list( ~round(./n,2))) %>% 
+  dplyr::select(-n) %>% kable(caption='Ratio of samples per risk category (excluding normals)') %>% 
+  kable_styling(full_width = F)
+```
 
+Despite that, we still see a fairly consistent high/low risk prediction for NP vs P.  However, HGD in NP patients predicts at a rate consistent with progression.
+```{r echo=F}
+preds = preds %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','ID','LGD','HGD','IMC'), ordered = T))
+rp = plot.risk.by.path(preds) 
+rp
 
-roc = pROC::roc(Status ~ Prob, data=preds, auc=T, ci=T, of='thresholds',transpose=T)
-roc.plot(roc) + labs(title='SNP AUC by (P)')
-pROC::coords(roc, 'best')
+ggsave('plots/snp/path_risk.png', plot=rp, width=7, height=6, units='in', dpi=300)
+```
 
-preds = preds %>%
-  mutate(LH = ifelse(Prob > 0.5, 'High', 'Low')) %>%
-  mutate(LH = factor(LH, levels=c('Low','High'), ordered=T))
+### ROC 
+```{r}
+roc = pROC::roc(Status ~ Prob, data=bind_rows(preds, normals %>% mutate(Status = 'NP')), auc=T, ci=T, of='thresholds',transpose=T)
+roc.plot(roc) + labs(title='SNP ROC', subtitle='All samples')
+pROC::ci.auc(roc$auc)
+pROC::coords(roc, 'best', transpose=F)
+ggsave(filename = 'plots/snp/all_samp_roc.png', plot = roc.plot(roc) + labs(title='SNP ROC', subtitle='All samples') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
-
-rocR = pROC::roc(Status ~ LH, data=preds, auc=T, ci=T, of='thresholds',transpose=T)
-roc.plot(rocR) + labs(title='SNP AUC by discretized risks (low/high)')
-pROC::coords(rocR, 'best')
-
+rocBE = pROC::roc(Status ~ Prob, data=preds, auc=T, ci=T, of='thresholds',transpose=T)
+roc.plot(rocBE) + labs(title='SNP ROC', subtitle='BE samples only')
+pROC::ci.auc(rocBE$auc)
+pROC::coords(rocBE, 'best', transpose=F)
+ggsave(filename = 'plots/snp/be_roc.png', plot = roc.plot(rocBE) + labs(title='SNP ROC', subtitle='BE samples only') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 ```
 
 A quick look at the two random samples from earlier.  
-`r pander(subset(normals, Samplename == randNormal), caption='Random normal')`
+`r filter(normals, Samplename == randNormal) %>% kable(caption='Random normal') %>% kable_styling(full_width=F)`
 
 The random BE should show a very high probability, and it does...
-`r pander(subset(preds, Samplename == randBE), caption='Random BE')`
-
-In the gastric/blood normals `r signif(length(which(preds.normal$Prob < 0.5))/nrow(preds.normal),2)` are predicted to have <50% probability (TPR).
-
-For blood normals only `r signif(nrow(subset(preds.normal, grepl('BLD',Samplename) & Prob < 0.5))/nrow(subset(preds.normal, grepl('BLD',Samplename) )),2)` have a <50% probabilitye (TPR).
-
+`r filter(preds, Samplename == randBE) %>% dplyr::select(Samplename, Prob, RR, Risk) %>% kable(caption='Random BE') %>% kable_styling(full_width=F)`
 
 ## Evaluating predictions
 
 ```{r, warning=F, fig.height=8}
-#qcdata.be = subset(qcdata, SampleType == 'BE')
-# get.qcinfo<-function(vec) {
-#   endo = vec[2]
-#   pt = vec[1]
-#   y = subset(qcdata.be, PatientID == pt & EndoID == endo)
-#   y = y %>% group_by(Status, Timepoint) %>%  dplyr::summarise( mean(Ploidy), mean(Purity), mean(Goodnessoffit), mean(SCA.Ratio) )
-#   cbind.data.frame('PatientID'=pt, 'EndoID'=endo, y, stringsAsFactors = F)
-# }
 preds = preds %>% dplyr::group_by(Samplename) %>% dplyr::mutate(
   PatientID = unlist(strsplit(Samplename,'_'))[1],
   EndoID = unlist(strsplit(Samplename,'_'))[2]
 )
 
-#pred.qc = left_join(preds, qcdata.endo %>% dplyr::select(-SampleType), by=c('PatientID', 'EndoID', 'Status')) %>% data.frame
+pred.qc = left_join(preds, qcdata.endo %>% dplyr::select(-SampleType), by=c('PatientID', 'EndoID', 'Status')) 
 
+grid.arrange(
+  ggplot(pred.qc, aes(ASCAT.SCA.ratio_mean, Prob, color=Status)) + geom_point(),
+  ggplot(pred.qc, aes(Ploidy_max, Prob, color=Status)) + geom_point(),
+ncol=2)
 
-#grid.arrange(
-#  ggplot(pred.qc, aes(ASCAT.SCA.ratio_mean, Prob, color=Status)) + geom_point(),
- # ggplot(pred.qc, aes(Ploidy_max, Prob, color=Status)) + geom_point(),
-#ncol=2)
-
-#pander(cor.test(pred.qc$ASCAT.SCA.ratio_mean, pred.qc$Prob))
+ct = cor.test(pred.qc$ASCAT.SCA.ratio_mean, pred.qc$Prob)
 ```
 
-```{r, warning=F, fig.height=8, eval=F}
-prog = subset(pred.qc, Status == 'P')
+The ASCAT mean SCA ratio across the genome correlates with the predicted probabilites in the BE samples, but not incredibly highly: R=`r round(ct$estimate,2)`, 
+
+```{r, warning=F, fig.height=8}
+prog = filter(pred.qc, Status == 'P')
 p1 = ggplot(prog, aes(Prob)) + facet_wrap(~Timepoint, scales='free_y',nrow=1) + 
   geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
   scale_fill_gradientn(colors = myPal,  name='') + 
-  labs(title='Predictions on progressors', y='n Samples', x='Unadjusted Probability')
+  labs(title='Predictions on progressors', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
 
 nonprog = subset(pred.qc, Status == 'NP')
 p2 = ggplot(nonprog, aes(Prob)) + facet_wrap(~Timepoint, scales='free_y', nrow=1) + 
   geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
   scale_fill_gradientn(colors = myPal,  name='') + 
-  labs(title='Predictions on non-progressors', y='n Samples', x='Unadjusted Probability')
+  labs(title='Predictions on non-progressors', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
 
-preds.normal = preds.normal %>% dplyr::mutate(Type = ifelse(grepl('BLD',Samplename), 'Blood','Gastric'))
+normals = normals %>% dplyr::mutate(Type = ifelse(grepl('BLD',Samplename), 'Blood','Gastric'))
 
-p3 = ggplot(preds.normal, aes(Prob)) + facet_wrap(~Type, ncol=2, scales = 'free') +
+p3 = ggplot(normals, aes(Prob)) + facet_wrap(~Type, ncol=2, scales = 'free') +
   geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
   scale_fill_gradientn(colors = myPal,  name='') +
-  labs(title='Predictions on BLD/Gastric', y='n Samples', x='Unadjusted Probability')
+  labs(title='Predictions on Blood/Gastric normals', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
 
 grid.arrange(p1,p2,p3,ncol=1)
 
+ggsave('plots/snp/probability_dists.png', plot = grid.arrange(p1,p2,p3,ncol=1), width=6, height=10, units='in', dpi=300)
 ```
 
 
 # Compare predictions to known status
+```{r roc, echo=T, eval=T}
+pred.qc = pred.qc %>% mutate(Status = factor(Status))
 
-Using my thresholds
-
-```{r roc, echo=T, eval=F}
-pred.qc = base::merge( pred.qc, patient.info[,c('PatientID', 'Timepoint Code','Pathology')], by.x=c('PatientID', 'EndoID'), by.y=c('PatientID','Timepoint Code') )
-
-# Three groups, prog, non prog (max LGD), non prog (max HGD)
-# pred.qc = pred.qc %>% group_by(Status, PatientID) %>% dplyr::mutate( 
-#   exclude=(Status == 'NP' & (length(which(Pathology == 'HGD')) > 0 | `mean(Ploidy)` > 2.7 )) )
-pred.qc$Status = factor(pred.qc$Status)
-
-pred.qc = pred.qc %>% group_by(Status, PatientID) %>% dplyr::mutate(
-  exclude=(Status == 'NP' & (length(which(Pathology == 'HGD')) > 0)),
-  wgd = (Status == 'NP' & Ploidy_max > 2.7 )
+pred.qc = pred.qc %>% group_by(Status, Samplename) %>% 
+  dplyr::mutate(
+    hgd.NP = (Status == 'NP' & (length(which(Pathology == 'HGD')) > 0)),
+    wgd.NP = (Status == 'NP' & Ploidy_max > 2.7 ),
+    lowsca = (ASCAT.SCA.ratio_mean < 0.01 & Purity_mean > 0.95)
 )
 
-# pred.qc = pred.qc %>% group_by(Status, Samplename) %>% dplyr::mutate(
-#   lowsca = ( Status == 'P' & (`mean(SCA.Ratio)` < 0.03 & `mean(Purity)` >= 0.95))
-# )
-
-pred.qc = pred.qc %>% group_by(Status, Samplename) %>% dplyr::mutate(
-  lowsca = ( ASCAT.SCA.ratio_mean < 0.02 & Purity_mean > 0.95)
-)
+ascat.normals = qcdata %>% filter(grepl('Normal',SampleType)) %>% data.frame
+ggplot(ascat.normals, aes(ASCAT.SCA.ratio, Purity, color=Status)) + geom_point()
 
 ggplot(pred.qc, aes(ASCAT.SCA.ratio_mean, Purity_mean, color=lowsca)) + geom_point() + facet_grid(~Status) + 
-  geom_vline(xintercept=0.02) + geom_hline(yintercept = 0.95)
+  geom_vline(xintercept=0.01) + geom_hline(yintercept = 0.95)
 
+pred.qc %>% group_by(Status, lowsca) %>% tally(name='n Samples') %>% spread(Status, `n Samples`) %>% kable(caption = 'LOWSCA high purity samples') %>% kable_styling(full_width = F)
 
-pander(
-  rbind(rbind('n.Samples'=table(subset(pred.qc, !lowsca )$Status)),
-  rbind('n.Patients'=table(unique(subset(pred.qc, !lowsca, select=c('PatientID','Status')))$Status))),
-caption='Number of samples and patients that pass the low SCA:high purity thresholds')
-
-
-
-pander(
-  rbind(rbind('n.Samples'=table(subset(pred.qc, !lowsca & !exclude & !wgd)$Status)),
-  rbind('n.Patients'=table(unique(subset(pred.qc, !lowsca  & !exclude & !wgd, select=c('PatientID','Status')))$Status))),
-caption='Number of samples and patients that pass the low SCA:high purity & NP thresholds')
-
-
+filter(pred.qc, !lowsca & !wgd.NP) %>% group_by(Status) %>% tally(name='n Samples') %>% kable(caption='Number of samples that pass the low SCA:high purity & NP (wgd) thresholds') %>% kable_styling(full_width = F)
 ```
 
+### ROC after exclusions
 
-```{r echo=F, eval=F}
-pred.qc.ex = subset(pred.qc, SampleType == 'BE' & !exclude & !wgd & !lowsca)
-cuts = seq(0,1,0.1)
+In this case the status has changed slightly. All patients that had a HGD/IMC path report are considered as progressors to match the sWGS cohort.  After that I include exclusions for low SCA and WGD in NP.
 
-pred.qc.ex$quants = with(pred.qc.ex, cut(Prob, breaks=cuts))
-qt = as.data.frame.matrix(table(pred.qc.ex$quants, pred.qc.ex$Status))
-qt$quant = rownames(qt)
-qt$P = round(qt$P/sum(qt$P),2)
-qt$NP = round(qt$NP/sum(qt$NP), 2)
-pander(qt, caption='Excluding HGD NP, WGD NP, low SCA P')
+```{r echo=F}
+# Set Path.Status = P for all patient where a sample was WGD
+#wgd.ids = filter(pred.qc, wgd.NP) %>% ungroup %>% dplyr::select(PatientID) %>% distinct %>% pull 
+#pred.qc = pred.qc %>% mutate(wgd.NP = PatientID %in% wgd.ids) %>% mutate(Path.Status = ifelse(wgd.NP, 'P', Path.Status) )
 
-# These are the cutoffs from the sWGS data
-get.risk<-function(prob) {
-  if (prob < 0.3) return('Low')
-  if (prob >= 0.3 & prob < 0.7) return('Moderate')
-  if (prob >= 0.7) return('High')
-}
 
-# All data
-pred.qc = pred.qc %>% dplyr::rowwise() %>% dplyr::mutate(
-  Risk = get.risk(Prob)
-)
-pred.qc$Risk = factor(pred.qc$Risk, levels=c('Low','Moderate','High'), ordered = T)
+rocEX = pROC::roc( Path.Status ~ Prob, data=pred.qc, auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(rocEX) + labs(title='BE samples', subtitle='Path status (HGD/IMC)')
+pROC::ci.auc(rocEX)
+ggsave(filename='plots/snp/path_status_roc.png', plot = roc.plot(rocEX) + labs(title='BE samples', subtitle='Path status (HGD/IMC)') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
-norm.pred = subset(pred.qc, SampleType != 'BE')
-
-pred.qc = subset(pred.qc, SampleType == 'BE')
-
-roc = pROC::roc(Status ~ Prob, data=pred.qc, auc=T, ci=T, of='thresholds')
-roc.plot(roc) + labs(title='All, Prob')
-pander(pROC::coords(roc, 'best'), caption='All samples, ROC best')
-
-# Exclude HGD NP patients
-roc = pROC::roc(Status ~ Prob, data=subset(pred.qc, !exclude), auc=T, ci=T, of='thresholds')
-roc.plot(roc) + labs(title='Excluded HGD NP patients')
-
-# Exclude the WGD NP
-rocpp = pROC::roc(Status ~ Prob, data=subset(pred.qc, !wgd), auc=T, ci=T, of='thresholds')
-roc.plot(rocpp) + labs(title='Both endos - excluded WGD NP')
-pROC::coords(rocpp, 'best')
-
-roc = pROC::roc(Status ~ Prob, data=subset(pred.qc, !exclude & !wgd), auc=T, ci=T, of='thresholds')
-roc.plot(roc) + labs(title='Excluded HGD & WGD NP patients')
+notlow = filter(pred.qc, !lowsca)
+pid = notlow %>% ungroup %>%dplyr::select(PatientID) %>% distinct %>% pull 
+length(pid)
+qcdata %>% filter(PatientID %in% pid & SampleType != 'Blood/Gastric Normal')
 
 # Exclude the low SCA patients
-rocpp = pROC::roc(Status ~ Prob, data=subset(pred.qc, !lowsca), auc=T, ci=T, of='thresholds')
-roc.plot(rocpp) + labs(title='Both endos - excluded low SCA')
-pROC::coords(rocpp, 'best')
+rocpp = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca), auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(rocpp) + labs(title='BE samples', subtitle='excluding low SCA samples')
+ggsave(filename='plots/snp/auc_ex_lowsca_roc.png', plot = roc.plot(rocpp) + labs(title='BE samples', subtitle='excluding low SCA samples') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 # Exclude all of the above
-rocpp = pROC::roc(Status ~ Prob, data=subset(pred.qc, !exclude & !lowsca & !wgd), auc=T, ci=T, of='thresholds')
-roc.plot(rocpp) + labs(title='Both endos - excluded low SCA P & HGD NP & WGD NP')
-pROC::coords(rocpp, 'best')
+rocexall = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(rocexall) + labs(title='BE samples', subtitle='excluding low SCA & WGD NP')
+ggsave(filename='plots/snp/auc_ex_lowsca_wgs_roc.png', plot =roc.plot(rocexall) + labs(title='BE samples', subtitle='excluding low SCA & WGD NP') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
+# Timepoint 1 only
+roct1 = pROC::roc(Status ~ Prob, data=filter(pred.qc, Timepoint == 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(roct1) + labs(title='BE samples', subtitle='Timepoint T1')
+ggsave(filename='plots/snp/auc_t1_roc.png', plot=roc.plot(roct1) + labs(title='BE samples', subtitle='Timepoint T1') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 # Timepoint 2 only
-roct2 = pROC::roc(Status ~ Prob, data=subset(pred.qc, Timepoint != 'T1' & !exclude & !lowsca & !wgd), auc=T, ci=T, of='thresholds')
-roc.plot(roct2) + labs(title='T2, Prob')
+roct2 = pROC::roc(Status ~ Prob, data=subset(pred.qc, Timepoint != 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(roct2) + labs(title='BE samples', subtitle='Timepoint T2')
+ggsave(filename='plots/snp/auc_t2_roc.png', plot=roc.plot(roct2) + labs(title='BE samples', subtitle='Timepoint T2') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
+ggplot(filter(pred.qc, !wgd.NP & !lowsca), aes(Prob)) +
+  geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
+  scale_fill_gradientn(colors = myPal,  name='') +
+  labs(title='Excluding WGD NP & low SCA', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
 
-ggplot(subset(pred.qc, !exclude & !wgd & !lowsca), aes(ASCAT.SCA.ratio_mean,Prob, color=Risk, shape=Status)) + 
-  facet_grid(~Status) + geom_point()
-
-
-ex.pred = subset(pred.qc, !exclude & !wgd & !lowsca)
-
-write.table(subset(pred.qc, lowsca, select=c('PatientID','EndoID','Status','ASCAT.SCA.ratio_mean','SCA.Ratio_mean','Purity_mean')),
-            sep='\t', quote=F, row.names=F, file='lowsca_pts.txt')
-
-
-head(qcdata)
-
-x = subset(qcdata, ASCAT.SCA.ratio < 0.02 & Purity > 0.95)
-table(x$SampleType)/table(qcdata$SampleType)
-
-write.table(subset(x, SampleType == 'BE', select=c('PatientID','EndoID','Samplename','ASCAT.SCA.ratio','SCA.Ratio','Purity')), quote=F, sep='\t', row.names = F, file='lowsca_samples.txt')
-
-#x = subset(qcdata, ASCAT.SCA.ratio < 0.02 & Purity > 0.95 & SampleType == 'BE')
-
-
-# Quick check
-# nrow(subset(ex.pred, Prob > 0.5 & Status == 'P'))/table(ex.pred$Status)['P']
-# nrow(subset(ex.pred, Prob < 0.5 & Status == 'P'))/table(ex.pred$Status)['P'] #False negatives
-# 
-# nrow(subset(ex.pred, Prob > 0.5 & Status == 'NP'))/table(ex.pred$Status)['NP'] # False pos
-# nrow(subset(ex.pred, Prob < 0.5 & Status == 'NP'))/table(ex.pred$Status)['NP'] #
-
-ct = cor.test(pred.qc.ex$Prob, pred.qc.ex$ASCAT.SCA.ratio_mean)
-ct2 = cor.test(pred.qc$Prob, pred.qc$ASCAT.SCA.ratio_mean)
+ct = cor.test(pred.qc$Prob, pred.qc$SCA.Ratio_mean)
+ct2 = cor.test(filter(pred.qc, !wgd.NP & !hgd.NP & !lowsca)$Prob, filter(pred.qc, !wgd.NP & !hgd.NP & !lowsca)$SCA.Ratio_mean)
 ```
 
-The risk probability is correlated with the % of the genome that's been altered as identified by Xiahong, R=`r ct$estimate` and that's true even when no patients are excluded (R=`r ct2$estimate`).
+The risk probability is correlated with the % of the genome that's been altered as identified by Xiahong, at about the same rate as the correlation between ASCAT and the probabilites: R=`r ct$estimate`. And that's true even when patients are excluded, though at a slightly higher rate (R=`r ct2$estimate`).
 
-
-# Regression using SNP Data
 
 ```{r regression, echo=F, message=F, eval=F}
+# Regression using SNP Data
 folds = 10; splits = 5
 ## ----- All ----- ##
-cache.dir = '~/Data/Ellie/Analysis/SNP/no-low/'
+cache.dir = '~/Data/BarrettsProgressionRisk//Analysis/SNP/no-low/'
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
  message(paste("loading", file))
  load(file, verbose=T)
- model.performance(performance.at.1se, coefs)$plot + labs(title='SNP CV models')
+ model.performance(performance.at.1se, coefs, folds, splits)$plot + labs(title='SNP CV models')
 } else {
   warning("Run 'snp-regression.R' first")
 }
@@ -795,54 +669,22 @@ if (file.exists(file)) {
 #do.call(grid.arrange, c(plots))
 ```
 
-```{r compare.coefs, echo=F, eval=F}
-# Matching
-snp.features = coefs$`0.5`
-
-intersect(rownames(snp.features), rownames(features)) 
-
-cxisft = grep('cx',rownames(snp.features))
-
-length(which(rowSums(snp.features[,-1])/50 > 0.5))
-
-snp.features = do.call(rbind.data.frame, c(strsplit(rownames(snp.features)[-cxisft], ':|-'), stringsAsFactors=F))
-colnames(snp.features) = c('chr','start','end')
-
-swgs.features = do.call(rbind.data.frame, c(strsplit(rownames(features), ':|-'), stringsAsFactors=F))
-colnames(swgs.features) = c('chr','start','end')
-
-snp.features = makeGRangesFromDataFrame(snp.features)
-snp.features = snp.features[-which(width(snp.features) > 5e6)] # No arms
-
-swgs.features = makeGRangesFromDataFrame(swgs.features)
-
-dist = distanceToNearest(swgs.features,snp.features)
-
-swgs.features[queryHits(dist)]
-snp.features[subjectHits(dist)]
-
-match = dist[elementMetadata(dist)$distance != 0]
-elementMetadata(dist)$bins = round(elementMetadata(dist)$distance/5e6)
-
-x1 = dist[elementMetadata(dist)$bins <= 2]
-
-swgs.features[queryHits(x1)]
-snp.features[subjectHits(x1)]
-```
-
-
 ```{r loo, eval=F}
-
-
 file = paste(cache.dir, 'loo.Rdata', sep='/')
 if (file.exists(file)) {
   load(file, verbose=T)
 } else {
-  stop("Run snp-regression.R first")
+  snp.preds = do.call(bind_rows, purrr::map(list.files(cache.dir, 'loo.Rdata', recursive = T, full.names = T), function(f) {
+    load(f)
+    as_tibble(preds, rownames = 'UniqueID')
+  }))
+  
+  #stop("Run snp-regression.R first")
 }
 
+snp.preds = left_join(snp.preds, dplyr::select(slabels, c(UniqueID, Status)), by='UniqueID') %>% filter(!is.na(Prob))
 
-snp.roc = pROC::roc(Status~Prediction,slabels, auc=T, ci=T, of='thresholds')
+snp.roc = pROC::roc(Status~Prob,snp.preds, auc=T, ci=T, of='thresholds')
 roc.plot(snp.roc, title="SNP LOO Model ROC")
 
 ggplot(cbind.data.frame('performance'=performance.at.1se, 'type'='snp'), aes(y=performance, x=type, group=type,fill=type)) + 

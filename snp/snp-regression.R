@@ -4,7 +4,6 @@ library(glmnet)
 library(readxl)
 library(pROC)
 library(ggfortify)
-library(preprocessCore)
 
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_func.R'))
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/common_plots.R'))
@@ -15,47 +14,50 @@ adjust.cols<-function(mtx, means=NULL, sds=NULL, na.replace=0) {
     if (ncol(mtx) != length(means))
       stop("Vector of means needs to match the columns in the matrix")
     for (i in 1:ncol(mtx)) 
-      mtx[,i] = unit.var(mtx[,i], means[i], sds[i])
+      mtx[,i] = BarrettsProgressionRisk:::unit.var(mtx[,i], means[i], sds[i])
   } else {
     for (i in 1:ncol(mtx)) 
-      mtx[,i] = unit.var(mtx[,i])
+      mtx[,i] = BarrettsProgressionRisk:::unit.var(mtx[,i])
   }
   mtx[is.na(mtx)] = na.replace
   
   return(mtx)
 }
 
-chr.info = get.chr.lengths(file='/tmp/hg19_info.txt')
+chr.info = BarrettsProgressionRisk:::chrInfo(build = 'hg19')
 
-load('~/Data/Ellie/Analysis/5e6_arms_all/model_data.Rdata', verbose = T)
+load('~/Data/BarrettsProgressionRisk//Analysis/5e6_arms_all/model_data.Rdata', verbose = T)
 rm(labels, dysplasia.df,mn.cx,sd.cx,z.mean,z.sd,z.arms.mean,z.arms.sd)
 
 load('~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata', verbose=T)
-qcdata = qcdata %>% rowwise %>% dplyr::mutate(
-  PatientID = unlist(strsplit(Samplename, '_'))[1],
-  SampleID = unlist(strsplit(Samplename, '_'))[2],
-  EndoID = unlist(strsplit(Samplename, '_'))[3],
-  Level = unlist(strsplit(Samplename, '_'))[4]
-)
+
+qcdata = qcdata %>% as_tibble %>%  mutate(Samplename = sub('_$','',Samplename)) %>%
+  separate(Samplename, c('PatientID','SampleID','EndoID','Level'), sep='_', remove=F)
+qcdata[749, 'Level'] = 'BLD' # Making an assumption here but this is what it looks like
+
 segments.list = lapply(segments.list, function(pt) {
   pt$sample = sub('\\.LogR','',pt$sample)
-  pt
+  pt %>% as_tibble
 })
 
-qcdata$ASCAT.SCA.ratio = apply(qcdata,1,function(s) {
-  smp = subset(segments.list[[ s[['PatientID']] ]], sample == s[['Samplename']] & chr %in% c(1:22))
-  smp = smp %>% rowwise %>% dplyr::mutate(
+calc.ratio<-function(PatientID, Samplename,Ploidy) {
+  smp = filter( segments.list[[ PatientID ]], sample == Samplename & chr %in% c(1:22) )
+  smp = smp %>% dplyr::mutate(
     #'Total' = nAraw + nBraw,
     'Total' = nMajor + nMinor,
-    'CNV' = round(Total) - round(as.numeric(s[['Ploidy']])) )
-  
-  x = subset(smp, CNV != 0 & chr %in% c(1:22))
-  sum(x$endpos - x$startpos) / chr.info[22,'genome.length']
-})
+    'CNV' = round(Total) - round(as.numeric(Ploidy)) )
+  x = filter(smp, CNV != 0 & chr %in% c(1:22))
+  return(sum(x$endpos - x$startpos)/as.numeric(chr.info[22,'genome.length']))
+}
 
-qcdata$SampleType = 'BE'
-qcdata$SampleType[grep('BLD',qcdata$Level, ignore.case=T)] = 'Blood Normal'
-qcdata$SampleType[grep('gastric',qcdata$Level, ignore.case=T)] = 'Gastric Normal'
+qcdata = qcdata %>% mutate(
+  ASCAT.SCA.ratio = purrr::pmap_dbl(list(PatientID, Samplename, Ploidy), .f=calc.ratio),
+  Level = toupper(Level),
+  SampleType = case_when(
+    grepl('BLD', Level, ignore.case = T) ~ 'Blood Normal',
+    grepl('gastric', Level, ignore.case = T) ~ 'Gastric Normal',
+    TRUE ~ 'BE'
+  )) 
 
 patient.info = as.data.frame(read_xlsx('~/Data/Ellie/Analysis/SNP/metadata_T1T2.xlsx'))
 patient.info$UniqueSampleID = paste(patient.info$PatientID, patient.info$`Timepoint Code`, sep='_')
@@ -85,7 +87,8 @@ patient.info = patient.info %>% rowwise() %>% dplyr::mutate( Endoscopy = ifelse(
 qcdata = base::merge(qcdata, sample.info[,c('Samplename','Status','UniqueSampleID','Timepoint','SCA.Ratio','Pathology')], by='Samplename')
 
 ## PER ENDOSCOPY
-qcdata.samples = qcdata %>% group_by(PatientID, EndoID, UniqueSampleID, Status, Timepoint, SampleType, Pathology) %>% dplyr::summarise_if(is.numeric, c('mean','max','min','sd')) %>% mutate_if(is.numeric, round, digits=3)
+qcdata.samples = qcdata %>% group_by(PatientID, EndoID, UniqueSampleID, Status, Timepoint, SampleType, Pathology) %>% 
+  dplyr::summarise_if(is.numeric, c('mean','max','min','sd')) %>% mutate_if(is.numeric, round, digits=3)
 
 info = qcdata.samples %>% group_by(Status, PatientID, UniqueSampleID) %>% dplyr::mutate(
   exclude=(Status == 'NP' & (length(which(Pathology == 'HGD')) > 0)),
@@ -93,12 +96,12 @@ info = qcdata.samples %>% group_by(Status, PatientID, UniqueSampleID) %>% dplyr:
   lowsca = (ASCAT.SCA.ratio_mean < 0.02 & Purity_mean > 0.95)
 )
 
-table(unique(info[,c('PatientID','Status')])$Status)
-table(unique(subset(info, !exclude & !wgd & !lowsca, select=c('PatientID','Status')))$Status)
+#table(unique(info[,c('PatientID','Status')])$Status)
+#table(unique(subset(info, !exclude & !wgd & !lowsca, select=c('PatientID','Status')))$Status)
 
 #info = subset(info, !exclude & !wgd & !lowsca & SampleType == 'BE')
 #info = subset(info, !exclude & !wgd & SampleType == 'BE')
-info = subset(info, SampleType == 'BE')
+info = filter(info, SampleType == 'BE')
 nrow(info)
 
 if (file.exists('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata')) {
@@ -155,34 +158,19 @@ dim(mergedSegs)
 dim(mergedArms)
 
 
-# Adjust for ploidy
-for (i in 1:nrow(mergedSegs)) {
-  sample = rownames(mergedSegs)[i]
-  x = unlist(strsplit(sample, '_'))
-  ploidy = round(subset(info, UniqueSampleID == sample)$Ploidy_mean)
-  if (grepl('BLD|gastric', sample, ignore.case = T)) ploidy = 2
-  mergedSegs[i,] = mergedSegs[i,]-(ploidy-1)
-  mergedArms[i,] = mergedArms[i,]-(ploidy-1)
-}
+# Adjust for ploidy -- this was done in the processing
+# for (i in 1:nrow(mergedSegs)) {
+#   sample = rownames(mergedSegs)[i]
+#   x = unlist(strsplit(sample, '_'))
+#   ploidy = round(subset(info, UniqueSampleID == sample)$Ploidy_mean)
+#   if (grepl('BLD|gastric', sample, ignore.case = T)) ploidy = 2
+#   mergedSegs[i,] = mergedSegs[i,]-(ploidy-1)
+#   mergedArms[i,] = mergedArms[i,]-(ploidy-1)
+# }
 segmentVariance = apply(mergedSegs, 1, var)
 
-# Q-norm
-q.norm.by<-function(df, target) {
-  dfq = do.call(cbind.data.frame,lapply(1:ncol(df), function(i) {
-    as.data.frame(normalize.quantiles.use.target(df[,i,drop=F], as.vector(target[,i])))
-  }))
-  
-  colnames(dfq) = colnames(df)
-  rownames(dfq) = rownames(df)
-  
-  return(as.matrix(dfq))
-}
-
-copySegs = q.norm.by(mergedSegs, raw.segs)
-copyArms = q.norm.by(mergedArms, raw.arms)
-
-#copySegs = mergedSegs
-#copyArms = mergedArms
+copySegs = mergedSegs
+copyArms = mergedArms
 
 # grid.arrange(
 #   ggplot( melt(raw.segs), aes(sample=value)) + stat_qq() + labs(title='Normal Q-Q plot, sWGS bins (no arms)'),

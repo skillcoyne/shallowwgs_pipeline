@@ -17,7 +17,7 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 
 
 data = args[1]
-# data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/100kb/'
+# data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
 outdir = args[2]
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6/100kb/'
 infodir = args[3]
@@ -37,7 +37,6 @@ logT = F
 cache.dir = outdir
 if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
 
-#if (dir.exists(cache.dir)) stop(paste0("Output directory ",cache.dir," exists. Exiting."))
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 ## Hospital.Research.ID info file
@@ -54,40 +53,12 @@ if (set != 'All') {
 } else {
   patient.info = all.patient.info
 }
-
 length(unique(patient.info$Hospital.Research.ID))
-
-# fncols <- function(data, cname, default=NA) {
-#   add <-cname[!cname%in%names(data)]
-#   
-#   if(length(add)!=0) data[add] <- default
-#   data
-# }
-# pastefun<-function(x) {
-#   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
-#   return(x)
-# }
-# val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
-# sheets = readxl::excel_sheets(val.file)[8:13]
-# all.val = do.call(bind_rows, lapply(sheets, function(s) {
-#   readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% dplyr::filter(!is.na(`SLX-ID`)) %>% mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% fncols('Collection', 'Biopsy')
-# })) %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup %>% mutate(
-#   `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'),
-#   `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
-#   Samplename = paste(`SLX-ID`,`Index Sequence`,sep='.')
-# )
-
-#patient.info = patient.info %>% dplyr::select(Hospital.Research.ID, Path.ID, Status, Samplename) 
-#%>% bind_rows( all.val %>% dplyr::select(`Hospital Research ID`, `Block ID`, Status, Samplename ) %>% dplyr::rename(Hospital.Research.ID = `Hospital Research ID`, Path.ID = `Block ID`) )
 
 sum.patient.data = as_tibble(summarise.patient.info(patient.info))
 
 cleaned = list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T)
-#cleaned = c(list.files(path=data, pattern='tiled_segvals', full.names=T, recursive=T),
-#            grep('MSE|\\.R',list.files(path='~/Data/BarrettsProgressionRisk/Analysis/validation/multipcf/', pattern='tiles', full.names=T, recursive=T),invert=T,value=T ))
-
 cleaned = grep(paste(sum.patient.data$Hospital.Research.ID, collapse = '|'), cleaned, value=T)
-#cleaned = grep(paste(unique(patient.info$Hospital.Research.ID), collapse = '|'), cleaned, value=T)
 
 arm.files = c(grep('arm', cleaned, value=T))
 seg.files = c(grep('arm', cleaned, value=T, invert=T))
