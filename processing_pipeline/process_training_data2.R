@@ -14,7 +14,7 @@ source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R')
 data = args[1]
 patient.file = args[2]
 outdir = args[3]
-# data = '~/Data/Ellie/QDNAseq/training/merged/100kb'
+# data = '~/Data/Ellie/QDNAseq/training/merged/50kb'
 # patient.file = '~/Data/Ellie/QDNAseq/training/All_patient_info.xlsx'
 # outdir = '~/Data/Ellie/Analysis/'
 
