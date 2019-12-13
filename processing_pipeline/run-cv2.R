@@ -19,7 +19,7 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt
 data = args[1]
 # data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
 outdir = args[2]
-# outdir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6/100kb/'
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb/'
 infodir = args[3]
 # infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 set = 'All'
@@ -30,12 +30,7 @@ select.alpha = 0.9
  if (length(args) == 4)
    select.alpha = as.numeric(args[4])
 
-logT = F
-# if (length(args) == 4)
-#   logT = as.logical(args[4])
-
 cache.dir = outdir
-if (logT) cache.dir = paste(cache.dir, '_logR', sep='')
 
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
@@ -76,8 +71,6 @@ dim(seg.tiles)
 per.samp.sd = apply(seg.tiles, 1, sd)
 per.samp.mean = apply(seg.tiles,1,mean)
 
-#if (logT) seg.tiles = t(apply(seg.tiles, 1, BarrettsProgressionRisk:::.logTransform))
-
 # After mean centering set all NA values to 0
 segsList = prep.matrix(seg.tiles,scale=T, MARGIN=2)
 #segsList = prep.matrix(seg.tiles,scale=F)
@@ -86,12 +79,8 @@ z.sd = segsList$z.sd
 segs = segsList$matrix
 dim(segs)
 
-#round(apply(logS, 2, mean),2)
-#round(apply(logS, 2, sd),2)
-
 # Complexity score
 cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
-#cx.score = as.matrix(scale(cx.score))
 mn.cx = mean(cx.score)
 sd.cx = sd(cx.score)
 
@@ -102,20 +91,18 @@ dim(arm.tiles)
 samples = arm.tiles$sample
 arm.tiles = as.matrix(arm.tiles[,-1])
 rownames(arm.tiles) = samples
-#if (logT) arm.tiles = t(apply(arm.tiles, 1, logTransform))
 
 armsList = prep.matrix(arm.tiles,scale=T,MARGIN=2)
-#armsList = prep.matrix(arm.tiles,scale=F)
 arms = armsList$matrix
 z.arms.mean = armsList$z.mean
 z.arms.sd = armsList$z.sd
 
+# Merge segments and arms, subtract arms
 allDf = BarrettsProgressionRisk::subtractArms(segs, arms)
 mn.cx = sqrt(mean(cx.score^2))
-#allDf = cbind(allDf, 'cx'=cx.score/sqrt(mean(cx.score^2)))
-allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx))
 
-#all.val = all.val %>% mutate(Status = ifelse(Status == 'OAC', 'P', Status)) %>% mutate(Status == factor(Status))
+# Add complexity score
+allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx))
 
 ## labels: binomial: prog 1, np 0
 sampleStatus = patient.info %>% filter(Samplename %in% rownames(allDf)) %>% dplyr::select(Samplename,Status) %>% 
@@ -133,14 +120,7 @@ save(dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, f
 #rm(raw.segs, raw.arms)
 
 nl = 1000;folds = 10; splits = 5 
-
-#file = list.files(data, pattern='patient_folds.tsv', recursive=T, full.names=T)
-#if (length(file) == 1 && !allPts) {
-#  message(paste("Reading folds file", file))
-#  sets = read.table(file, header=T, sep='\t')
-#} else {
 sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2)  
-#}
 
 alpha.values = c(0, 0.5,0.7,0.8,0.9,1)
 ## ----- All ----- ##
@@ -175,7 +155,6 @@ if (file.exists(file)) {
 }
 all.coefs = coefs
 # ----------------- #
-
 
 ## --------- No HGD --------- ##
 `%nin%` <- Negate(`%in%`)
@@ -268,9 +247,11 @@ if (file.exists(file)) {
   performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
   # Remove each patient (LOO)
   for (pt in unique(pg.samp$Hospital.Research.ID)) {
+    pt.path = paste0(cache.dir, '/plots/', pt)
+    dir.create(pt.path, recursive = T, showWarnings = F)
+    
   #for (pt in names(pg.samp)) {
     print(pt)
-    #samples = subset(patient.info, Hospital.Research.ID != pt)$Samplename
     samples = subset(pg.samp, Hospital.Research.ID != pt)$Samplename
     
     train.rows = which(rownames(dysplasia.df) %in% samples)
@@ -278,7 +259,7 @@ if (file.exists(file)) {
     test = as.matrix(dysplasia.df[-train.rows,,drop=F])
     if (ncol(test) <= 0) next # shouldn't be any but...
 
-    patient.samples = pg.samp %>% filter(Hospital.Research.ID == pt) %>% select(Samplename)
+    patient.samples = pg.samp %>% filter(Hospital.Research.ID == pt) %>% dplyr::select(Samplename)
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
     sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
                                 dimnames=list(rownames(test),colnames(training)), sparse=T)
@@ -306,24 +287,35 @@ if (file.exists(file)) {
       logit <- function(p){log(p/(1-p))}
       inverse.logit <- function(or){1/(1 + exp(-or))}
       
+      tmp.cvRR = tibble::enframe(BarrettsProgressionRisk:::non.zero.coef(fitLOO, cv$lambda.1se)[-1], name='label') %>% 
+        dplyr::rename(coef = 'value') %>%
+        mutate(cvRR = BarrettsProgressionRisk:::cvRR(test, as.matrix(BarrettsProgressionRisk:::non.zero.coef(fitLOO, cv$lambda.1se)[-1], ncol=1))) %>% 
+        arrange(desc(cvRR))
+      
+      mp = BarrettsProgressionRisk:::mountainPlots(tiles = test, coefs = as.matrix(coef(fitLOO, cv$lambda.1se)), cvRR = tmp.cvRR, build = 'hg19')
+      p = do.call(gridExtra::arrangeGrob, c(mp$plot.list, ncol=1))
+      for (pn in names(mp$plot.list)) { 
+        ggsave(filename=paste0(pt.path,'/',pn,'.png'), plot=mp$plot.list[[pn]],width=12,height=4,units='in')
+      }
+
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
-      colnames(pm) = 'Prediction'
+      colnames(pm) = 'Probability'
       
       rr = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
       colnames(rr) = 'RR'
       
       sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(patient.samples$Samplename, names(labels))])))
-      colnames(sy) = 'Prediction.Dev.Resid'
+      colnames(sy) = 'Prob.Dev.Resid'
       if (nrow(test) == 1) rownames(sy) = rownames(pm)
       
       patient = pg.samp %>% filter(Hospital.Research.ID == pt) %>% arrange(Samplename) 
       
-      patient$Prediction = pm[patient$Samplename,]
+      patient$Probability = pm[patient$Samplename,]
       patient$RR = rr[patient$Samplename,]
-      patient$Prediction.Dev.Resid = sy[patient$Samplename,]
+      patient$Prob.Dev.Resid = sy[patient$Samplename,]
       
       pg.samp[which(pg.samp$Hospital.Research.ID == pt),] = patient
-      
+
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
