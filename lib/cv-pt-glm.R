@@ -339,6 +339,7 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1, sampleID = 1, nfolds=10, 
               'lambda.min'=lambda.min, 'lambda.1se'=lambda.1se, 'lambdas'=lambdas, 'plot'=plots$performance, 'deviance.plot'=plots$deviance, 'non.zero.cf'=nzcf))
 }
 
+
 plot.patient.cv<-function(df, fit=NULL) {
   gp = ggplot(df, aes(y=mean,x=log.lambda)) + geom_point() + geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme)) + 
     geom_point(data=subset(df, lambda.min == T), aes(y=mean, x=log.lambda, colour="lambda.min"), size=2 ) +  

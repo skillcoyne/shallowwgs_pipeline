@@ -1359,16 +1359,7 @@ val.info %>% group_by(Status) %>% tally %>% spread(Status,n) %>% add_column(' ' 
   kable(caption='Validation cohort') %>% kable_styling(full_width = F)
 
 
-val.info %>% group_by(Status) %>% dplyr::summarise(
-  `Total Patients` = length(unique(Patient)),
-  `Total Samples` = length(Samplename),
-`max follow-up` = max(`Weeks Follow Up`/52),
-`min follow-up` = min(`Weeks Follow Up`/52),
-  `mean follow-up` = mean(`Weeks Follow Up`/52),
-  `sd follow-up` = sd(`Weeks Follow Up`/52)
-)
-
-val.info %>% group_by(Status, Pathology) %>% tally
+val.info
 
 ```
 
@@ -1433,8 +1424,6 @@ residuals = do.call(bind_rows, purrr::map(list.files( dirname(vdir), 'residuals.
 }))
 
 failedQC = residuals %>% filter(varMAD_median > 0.008)
-
-val.info %>% filter(Samplename %in% failedQC$samplename)
 
 
 all.val.preds = do.call(bind_rows, purrr::map(list.files(vdir, 'predictions.tsv', full.names = T, recursive = T), function(f) {
@@ -1776,7 +1765,39 @@ second %>% filter(Status == 'P' & Rule == '1') %>% ungroup %>% filter(months.bef
 
 second %>% filter(Status == 'NP' & Rule == '1') %>% ungroup  %>%
   dplyr::summarise_at(vars(months.before.final), list(~min(.), ~max(.), ~mean(.), ~median(.))) 
+```
 
+## Check COX
+
+```{r}
+cox.cache.dir = '~/Data/BarrettsProgressionRisk/Analysis/cox_5e6_all/50kb/'
+file = paste(cox.cache.dir, 'model_data.Rdata', sep='/')
+load(file, verbose=T)
+
+file = paste(cox.cache.dir, "all.pt.alpha.Rdata" , sep='/')
+load(file, verbose=T)
+
+do.call(grid.arrange, c(plots, nrow=2))
+
+file = paste0(cox.cache.dir, '/loo_0.9.Rdata')
+load(file, verbose=T)
+
+rocCox = pROC::roc(Status ~ FittedRR, data=pg.samp, auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(rocCox) + labs(title = 'Cox model ROC')
+
+first = pg.samp %>% group_by(Patient) %>% arrange(Endoscopy.Year) %>% filter(Endoscopy.Year == Endoscopy.Year[1])
+rocCox2 = pROC::roc(Status ~ FittedRR, data = first, auc = T, ci = T, of='thresholds', transpose=T)
+roc.plot(rocCox2) + labs(title = 'Cox model ROC, first endo')
+
+last = filter(pg.samp, Endoscopy.Year == Final.Endoscopy)
+rocCox3 = pROC::roc(Status ~ FittedRR, data = last, auc = T, ci = T, of='thresholds', transpose=T)
+roc.plot(rocCox3) + labs(title = 'Cox model ROC, last endo')
+
+rocPath = pROC::roc(Status ~ Pathology, data=pg.samp, auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(rocPath) + labs(title = 'Pathology status ROC')
+
+cor.test(pg.samp$FittedRR, as.integer(pg.samp$Pathology))
 
 ```
+
 
