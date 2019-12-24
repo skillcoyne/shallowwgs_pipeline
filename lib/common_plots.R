@@ -103,14 +103,19 @@ model.performance<-function(p1se, coeffs, folds, splits, lims=NULL) {
   return(list('performance'=performance, 'stable.coeffients'=coef.stable, 'cf.per.feature'=cfs,'plot'=p))
 }
 
-roc.plot <- function(roc,title="") {
+roc.plot <- function(roc,title="", incS = T) {
   df = cbind.data.frame('specificity'=rev(roc$specificities), 'sensitivity'=rev(roc$sensitivities))
-
+  
+  best = as_tibble(round(pROC::coords(roc, "best", transpose=F),2)) 
+  label = paste0('AUC:',round(roc$auc, 2))
+  if (incS) {
+    label = paste0('(FPR ', round((1-best$specificity),2),' TPR ', round(best$sensitivity,2),')\n', label )
+  }
+  
   ggplot(df, aes(specificity, sensitivity)) + geom_line() + scale_x_reverse() + 
     geom_label(data=as.data.frame(t(round(pROC::coords(roc, "best", transpose=T),2))), 
-               aes(x=specificity, y=sensitivity, 
-                   label=paste(' (FPR ', round((1-specificity),2),' TPR ', round(sensitivity,2),')\nAUC:',round(roc$auc, 2), sep='')), nudge_x=.25) +
-    labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme
+               aes(x=specificity, y=sensitivity,label=label), nudge_y=ifelse(incS,0.1,0), nudge_x = ifelse(incS, 0.15, 0)) +
+    labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)') + plot.theme
 }
 
 multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {

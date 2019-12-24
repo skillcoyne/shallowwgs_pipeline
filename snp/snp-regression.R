@@ -1,7 +1,6 @@
-library(ggplot2)
+library(tidyverse)
 library(gridExtra)
 library(glmnet)
-library(readxl)
 library(pROC)
 library(ggfortify)
 
@@ -26,8 +25,11 @@ adjust.cols<-function(mtx, means=NULL, sds=NULL, na.replace=0) {
 
 chr.info = BarrettsProgressionRisk:::chrInfo(build = 'hg19')
 
-load('~/Data/BarrettsProgressionRisk//Analysis/5e6_arms_all/model_data.Rdata', verbose = T)
+load('~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb/model_data.Rdata', verbose = T)
 rm(labels, dysplasia.df,mn.cx,sd.cx,z.mean,z.sd,z.arms.mean,z.arms.sd)
+load('~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb/all.pt.alpha.Rdata', verbose = T)
+rm(plots,performance.at.1se,dysplasia.df,models,cvs,labels)
+swgs.coefs = coefs
 
 load('~/Data/Reid_SNP/PerPatient/allpts_ascat.Rdata', verbose=T)
 
@@ -59,12 +61,12 @@ qcdata = qcdata %>% mutate(
     TRUE ~ 'BE'
   )) 
 
-patient.info = as.data.frame(read_xlsx('~/Data/Ellie/Analysis/SNP/metadata_T1T2.xlsx'))
+patient.info = as.data.frame(read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx'))
 patient.info$UniqueSampleID = paste(patient.info$PatientID, patient.info$`Timepoint Code`, sep='_')
 patient.info$Path.Status = patient.info$Status
 patient.info[patient.info$PatientID %in% subset(patient.info, Pathology %in% c('IMC','HGD'), select='PatientID')[,1], 'Path.Status'] = 'P'
 
-sample.list = read_xlsx('~/Data/Ellie/Analysis/SNP/20180604_Reid_1M_SampleList.xlsx', sheet = 2)
+sample.list = read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/20180604_Reid_1M_SampleList.xlsx', sheet = 2)
 nrow(sample.list)
 colnames(sample.list)[3] = 'Total.SCA'
 
@@ -186,26 +188,22 @@ ma = adjust.cols(mergedArms)
 range(ma)
 dim(ma)
 
-cx = score.cx(ms, 1)
-arrayDf = subtract.arms(ms, ma)
-arrayDf = cbind(arrayDf, 'cx'=unit.var(cx))
+cx = BarrettsProgressionRisk:::scoreCX(ms, 1)
+arrayDf = BarrettsProgressionRisk:::subtractArms(ms, ma)
+arrayDf = cbind(arrayDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx))
 
 
-slabels = as.data.frame(subset(info, !exclude & !wgd & !lowsca & SampleType == 'BE', select=c('PatientID','UniqueSampleID','Status')))
-slabels$Status = factor(slabels$Status)
-#slabels = as.data.frame(pred.qc, select=c('PatientID','Samplename','Status'))
-rownames(slabels) = slabels$UniqueSampleID
+pts = info %>% filter(SampleType == 'BE') %>% dplyr::select(PatientID, UniqueSampleID, Status)
+status = info %>% filter(SampleType == 'BE') %>% dplyr::select(PatientID, UniqueSampleID, Status) %>% ungroup %>% 
+  mutate(label = as.integer(factor(Status))-1) %>% dplyr::select(UniqueSampleID, label) %>% spread(UniqueSampleID, label) %>% unlist
 
-df = arrayDf[which(rownames(arrayDf) %in% slabels$UniqueSampleID),]
-
-status = as.integer(slabels$Status)-1
-names(status) = slabels$UniqueSampleID
+df = arrayDf[which(rownames(arrayDf) %in% names(status)),]
 
 nl = 1000;folds = 10; splits = 5 
-sets = create.patient.sets(slabels, folds, splits, 0.15)  
+sets = create.patient.sets(pts, folds, splits, 0.15)  
 ## ----- All ----- ##
 coefs = list(); plots = list(); performance.at.1se = list(); models = list(); cvs = list()
-cache.dir = '~/Data/Ellie/Analysis/SNP/no-low'
+cache.dir = '~/Data/BarrettsProgressionRisk/Analysis/SNP/model'
 dir.create(cache.dir, recursive = T, showWarnings = F)
 file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
@@ -217,11 +215,11 @@ if (file.exists(file)) {
   for (a in alpha.values) {
     message(paste('alpha=',a))
     fit0 <- glmnet(df, status, alpha=a, nlambda=nl, family='binomial', standardize=F)    
-    autoplot(fit0) + theme(legend.position="none")
+    #autoplot(fit0) + theme(legend.position="none")
     l = fit0$lambda
     if (a > 0) l = more.l(l)
     
-    cv.patient = crossvalidate.by.patient(x=df, y=status, lambda=l, pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
+    cv.patient = crossvalidate.by.patient(x=df, y=status, lambda=l, sampleID=2,  pts=sets, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
     lambda.opt = cv.patient$lambda.1se
     
@@ -239,15 +237,31 @@ if (file.exists(file)) {
   ggsave(paste(cache.dir, '/', 'all_samples_cv.png',sep=''), plot = p, scale = 2, width = 12, height = 10, units = "in", dpi = 300)
 }
 
-#do.call(grid.arrange, c(plots))
+p = model.performance(performance.at.1se, coefs, folds, splits)$plot + labs(title='SNP CV models') + theme(text = element_text(size = 12))
+ggsave(paste(cache.dir, '/', 'performance.png',sep=''), plot = p, width = 5, height = 5, units = "in", dpi = 300)
 
-#model.performance(performance.at.1se, coefs)$plot + labs(title='SNP CV models')
+length(intersect(rownames(coefs$`0.9`), rownames(swgs.coefs$`0.9`)))
+
+hazards = apply( exp(t(df[, rownames(coefs[['0.9']])]) *  coefs[['0.9']][,1]), 1, function(x) {
+  sd(x)/mean(x)
+})
+
+featureStability = rowSums(coefs[['0.9']][,-1])/(splits*folds)
+features = as_tibble(hazards, rownames = 'label') %>% dplyr::rename(hazards = value) %>% 
+  dplyr::mutate(coef = coefs[['0.9']][,1], stability = featureStability) %>% arrange(-hazards)
+
+qq = quantile(features$hazards, seq(0,1,.15))
+p = ggplot(features, aes(coef, hazards, col=hazards >= qq[length(qq)])) + 
+  geom_point(alpha=0.8, show.legend = F) + 
+  ggrepel::geom_text_repel(aes(x=coef, label=ifelse(hazards >= qq[length(qq)], label, '')),show.legend=F) +
+  scale_color_manual(values=c('firebrick3','darkblue')) +
+  labs(title='Top features by cv(RR)', subtitle='SNP only model', x='Coefficient value', y='cvRR') + plot.theme 
+p
+ggsave(paste0(cache.dir,'/haz_coef.png'), plot=p, height=5, width=5, units='in', dpi=300)
 
 
 ## Leave one out
-
-slabels$Prediction = NA
-slabels$RR = NA
+pts = pts %>% mutate(Prediction = NA, RR = NA)
 
 colnames(sets)[2] = 'Samplename'
 
@@ -255,13 +269,13 @@ file = paste(cache.dir, 'loo.Rdata', sep='/')
 # if (file.exists(file)) {
 #   load(file, verbose=T)
 # } else {
-  select.alpha = 1
+  select.alpha = 0.9
   secf = coefs[[select.alpha]]
   a = select.alpha
   
   performance.at.1se = c(); plots = list(); fits = list(); nzcoefs = list()
   # Remove each patient (LOO)
-  for (pt in unique(slabels$PatientID)) {
+  for (pt in unique(pts$PatientID)) {
     print(pt)
     samples = subset(slabels, PatientID != pt)[,2]
     

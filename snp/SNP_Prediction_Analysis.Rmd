@@ -139,11 +139,14 @@ Prior to predicting the samples, in the step where I create 5Mb bins across the 
 Histology breakdown:
 
 ```{r, echo=F}
-sm = sample.info %>% group_by(Status, Endoscopy, Pathology) %>% dplyr::tally() %>% 
-  group_by(Status, Endoscopy) %>% dplyr::mutate(freq=n/sum(n) ) 
-sm$Pathology = factor(sm$Pathology, levels=c('NDBE','ID','LGD','HGD','IMC'), ordered = T)
+sample.info = sample.info %>% mutate(Pathology = recode(Pathology, IMC = 'EAC')) 
 
-ggplot(sm %>% filter(!Status == 'Normal'), aes(Pathology, freq, group=Endoscopy, fill=factor(Endoscopy))) + facet_grid(~Status) + 
+sm = sample.info %>% group_by(Status, Endoscopy, Pathology) %>% dplyr::tally() %>% 
+  group_by(Status, Endoscopy) %>% dplyr::mutate(freq=n/sum(n) ) %>% 
+  mutate(Pathology = factor(Pathology, levels=c('NDBE','ID','LGD','HGD','EAC'), ordered = T))
+
+ggplot(sm %>% filter(!Status == 'Normal'), aes(Pathology, freq, group=Endoscopy, fill=factor(Endoscopy))) + 
+  facet_grid(~Status) + 
   geom_col(position = position_dodge()) + ylim(0,1) + labs(title='Pathology frequency per timepoint')
 ```
 
@@ -182,18 +185,35 @@ anno = qcdata %>% group_by(SampleType) %>% dplyr::summarise(Ratio = median(ASCAT
   mutate(label = paste0('median(',SampleType,')','=',round(Ratio,3)))
 
 
-ggplot(qcdata, aes(Status, ASCAT.SCA.ratio)) + ylim(0,0.05) + 
-  facet_grid(~SampleType, scales='free_x') +
-  geom_jitter(width=0.1, aes(color=Status)) + 
-  geom_hline(data=dplyr::rename(anno, Status=SampleType), aes(yintercept = Ratio, linetype=Status), color='grey42') +
-  geom_label(data=dplyr::rename(anno, Status=SampleType), aes(x='NP', y=Ratio, label=label), alpha=0.5)
+p = ggplot(qcdata %>% filter(grepl('Normal',SampleType)), aes(Purity,ASCAT.SCA.ratio)) + 
+  ylim(0,0.02) +
+  geom_point(color='steelblue' ) + labs(title='Blood/Gastric Normal ASCAT values')
+p
+ggsave('plots/snp/normal_sca_purity.png', p, height=4, width=4, units='in')
+
+
+ggplot(qcdata %>% filter(!grepl('Normal',SampleType)), aes(Purity,ASCAT.SCA.ratio)) + 
+  #ylim(0,0.5) +
+  geom_point(color='steelblue' ) + 
+  geom_point(data = qcdata %>% filter(!grepl('Normal',SampleType) & ASCAT.SCA.ratio < 0.01 & Purity < 0.98), color='lightgreen') +
+  labs(title='BE biopsy ASCAT values')
+
+
+# 
+# ggplot(qcdata, aes(Status, ASCAT.SCA.ratio)) + ylim(0,0.05) + 
+#   facet_grid(~SampleType, scales='free_x') +
+#   geom_jitter(width=0.1, aes(color=Status)) + 
+#   geom_hline(data=dplyr::rename(anno, Status=SampleType), aes(yintercept = Ratio, linetype=Status), color='grey42') +
+#   geom_label(data=dplyr::rename(anno, Status=SampleType), aes(x='NP', y=Ratio, label=label), alpha=0.5)
 
 
 ggplot(filter(qcdata, !is.na(Ploidy)), aes(factor(round(Ploidy)), ASCAT.SCA.ratio, color=Status)) + 
   facet_grid(~SampleType, scales = 'free_x', space='free') + geom_boxplot() + labs(x='Ploidy')
 
-ggplot(filter(qcdata,SampleType == 'BE'), aes(Timepoint, ASCAT.SCA.ratio, fill=Timepoint, group=Timepoint)) + geom_jitter(width=0.2) +
-  geom_boxplot(alpha=0.5) + facet_wrap(~Status, scales='free_x', ncol=2) + labs(title='SCA Ratio by Timepoint') + theme(legend.position = 'none')
+# ggplot(filter(qcdata,SampleType == 'BE'), aes(Timepoint, ASCAT.SCA.ratio, fill=Timepoint, group=Timepoint)) + 
+#   geom_jitter(width=0.2) + geom_boxplot(alpha=0.5) + 
+#   facet_wrap(~Status, scales='free_x', ncol=2) + 
+#   labs(title='SCA Ratio by Timepoint') + theme(legend.position = 'none')
 
 ggplot(qcdata, aes(round(Purity,2))) + geom_histogram() + 
   facet_wrap(~SampleType, scales='free', ncol=1) + labs(x='Purity', title='Purity, normal vs BE')
@@ -202,7 +222,7 @@ x = 0.01
 y = round(mean(filter(qcdata, SampleType != 'BE')$Purity) - sd(filter(qcdata, SampleType != 'BE')$Purity),2)
 
 p = ggplot(qcdata, aes(Purity, ASCAT.SCA.ratio)) + facet_wrap(~SampleType, nrow=1) + 
-  geom_point(aes(color=ASCAT.SCA.ratio < x | Purity > y), show.legend = F) + 
+  geom_point(aes(color=ASCAT.SCA.ratio < x & Purity > y), show.legend = F) + 
   geom_vline(xintercept=y, color='grey') + 
   geom_hline(yintercept=x, color='grey') +
   labs(title='Purity~SCA.Ratio') + theme(text = element_text(size=12))
@@ -213,7 +233,7 @@ ggplot(qcdata, aes(Purity, Goodnessoffit, color=Status)) + geom_point() +
          facet_wrap(~SampleType, ncol=1) + labs(title='Purity~fit, normal vs BE') + geom_vline(xintercept=y, color='grey')
 
 ggplot(subset(qcdata, SampleType == 'BE'), aes(Ploidy, ASCAT.SCA.ratio, color=Status)) + facet_grid(~Status) + geom_point() + 
-  geom_hline(yintercept = x, color='red') + labs(title='Barretts only')
+  geom_hline(yintercept = x, color='grey39', linetype = 'dashed') + labs(title='Barretts biopsies')
 
 ## PER ENDOSCOPY
 qcdata.endo = qcdata %>% group_by(PatientID, EndoID, Status, Timepoint, SampleType) %>% 
@@ -224,6 +244,12 @@ qcdata.endo = qcdata %>% group_by(PatientID, EndoID, Status, Timepoint, SampleTy
 # nrow(lowsca)
 # nrow(filter(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_mean >= 0.01 & Purity_max <= 0.98))
 
+p = ggplot(qcdata.endo, aes(Purity_mean, ASCAT.SCA.ratio_mean)) + facet_grid(~SampleType) +
+  geom_point(aes(color=ASCAT.SCA.ratio_mean < 0.01 & Purity_mean > 0.95 ), show.legend = F) + 
+  labs(title='Merged biopsies per-timepoint', y='mean(ASCAT.SCA.ratio)', x='mean(ASCAT purity)')
+p
+ggsave('plots/snp/sca_purity_per_tp.png', p, width=4, height=4, units='in')
+
 tmp = qcdata.endo %>% filter(!is.na(Ploidy_mean)) %>% mutate(Ploidy_mean = factor(round(Ploidy_mean)))
 p = ggplot(tmp, aes(Ploidy_mean, ASCAT.SCA.ratio_mean, group=Ploidy_mean)) + 
   facet_grid(~SampleType) +
@@ -231,6 +257,7 @@ p = ggplot(tmp, aes(Ploidy_mean, ASCAT.SCA.ratio_mean, group=Ploidy_mean)) +
   geom_boxplot(outlier.colour = NA, alpha=0.5) + 
   geom_hline(yintercept = 0.01, color='grey39') + labs(title='Merged per endoscopy', x='Mean ploidy') + 
   theme(text=element_text(size=12), legend.position = 'none')
+p
 ggsave('plots/snp/sca_v_ploidy.png', plot=p, height=4, width=4, units = 'in', dpi=300)
 
 ```
@@ -469,6 +496,8 @@ normals = filter(preds, grepl('BLD|gastric', Samplename, ignore.case=T))
 
 preds = filter(preds, !grepl('BLD|gastric', Samplename, ignore.case=T))
 
+patient.info = patient.info %>% mutate(Pathology = recode(Pathology, 'IMC' = 'EAC')) 
+
 preds = preds %>% left_join(patient.info %>% dplyr::select(PatientID, UniqueSampleID, Pathology, Status, Path.Status), by=c('Samplename'='UniqueSampleID')) 
 
 # NP patients who are likely P
@@ -503,7 +532,7 @@ preds %>% group_by(Status, Risk) %>% tally %>% spread(Risk, n) %>%
 
 Despite that, we still see a fairly consistent high/low risk prediction for NP vs P.  However, HGD in NP patients predicts at a rate consistent with progression.
 ```{r echo=F}
-preds = preds %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','ID','LGD','HGD','IMC'), ordered = T))
+preds = preds %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','ID','LGD','HGD','EAC'), ordered = T))
 rp = plot.risk.by.path(preds) 
 rp
 
@@ -512,17 +541,17 @@ ggsave('plots/snp/path_risk.png', plot=rp, width=7, height=6, units='in', dpi=30
 
 ### ROC 
 ```{r}
-roc = pROC::roc(Status ~ Prob, data=bind_rows(preds, normals %>% mutate(Status = 'NP')), auc=T, ci=T, of='thresholds',transpose=T)
-roc.plot(roc) + labs(title='SNP ROC', subtitle='All samples')
-pROC::ci.auc(roc$auc)
-pROC::coords(roc, 'best', transpose=F)
-ggsave(filename = 'plots/snp/all_samp_roc.png', plot = roc.plot(roc) + labs(title='SNP ROC', subtitle='All samples') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+# roc = pROC::roc(Status ~ Prob, data=bind_rows(preds, normals %>% mutate(Status = 'NP')), auc=T, ci=T, of='thresholds',transpose=T)
+# roc.plot(roc) + labs(title='SNP ROC', subtitle='All samples')
+# pROC::ci.auc(roc$auc)
+# pROC::coords(roc, 'best', transpose=F)
+# ggsave(filename = 'plots/snp/all_samp_roc.png', plot = roc.plot(roc) + labs(title='SNP ROC', subtitle='All samples') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 rocBE = pROC::roc(Status ~ Prob, data=preds, auc=T, ci=T, of='thresholds',transpose=T)
-roc.plot(rocBE) + labs(title='SNP ROC', subtitle='BE samples only')
+roc.plot(rocBE) + labs(title='SNP ROC', subtitle='BE biopsies')
 pROC::ci.auc(rocBE$auc)
 pROC::coords(rocBE, 'best', transpose=F)
-ggsave(filename = 'plots/snp/be_roc.png', plot = roc.plot(rocBE) + labs(title='SNP ROC', subtitle='BE samples only') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+ggsave(filename = 'plots/snp/be_roc.png', plot = roc.plot(rocBE) + labs(title='SNP ROC', subtitle='BE biopsies') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 ```
 
 A quick look at the two random samples from earlier.  
@@ -588,6 +617,8 @@ pred.qc = pred.qc %>% group_by(Status, Samplename) %>%
     lowsca = (ASCAT.SCA.ratio_mean < 0.01 & Purity_mean > 0.95)
 )
 
+pred.qc %>% filter(!lowsca | wgd.NP) %>% ungroup %>% dplyr::select(PatientID) %>% distinct
+
 ascat.normals = qcdata %>% filter(grepl('Normal',SampleType)) %>% data.frame
 ggplot(ascat.normals, aes(ASCAT.SCA.ratio, Purity, color=Status)) + geom_point()
 
@@ -610,9 +641,9 @@ In this case the status has changed slightly. All patients that had a HGD/IMC pa
 
 
 rocEX = pROC::roc( Path.Status ~ Prob, data=pred.qc, auc=T, ci=T, of='thresholds', transpose=T)
-roc.plot(rocEX) + labs(title='BE samples', subtitle='Path status (HGD/IMC)')
+roc.plot(rocEX) + labs(title='BE biopsies', subtitle='Path status (HGD/IMC)')
 pROC::ci.auc(rocEX)
-ggsave(filename='plots/snp/path_status_roc.png', plot = roc.plot(rocEX) + labs(title='BE samples', subtitle='Path status (HGD/IMC)') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+ggsave(filename='plots/snp/path_status_roc.png', plot = roc.plot(rocEX) + labs(title='BE biopsies', subtitle='Path status (HGD/IMC)') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 notlow = filter(pred.qc, !lowsca)
 pid = notlow %>% ungroup %>%dplyr::select(PatientID) %>% distinct %>% pull 
@@ -621,23 +652,23 @@ qcdata %>% filter(PatientID %in% pid & SampleType != 'Blood/Gastric Normal')
 
 # Exclude the low SCA patients
 rocpp = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca), auc=T, ci=T, of='thresholds', transpose=T)
-roc.plot(rocpp) + labs(title='BE samples', subtitle='excluding low SCA samples')
-ggsave(filename='plots/snp/auc_ex_lowsca_roc.png', plot = roc.plot(rocpp) + labs(title='BE samples', subtitle='excluding low SCA samples') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+roc.plot(rocpp) + labs(title='BE biopsies', subtitle='excluding low SCA samples')
+ggsave(filename='plots/snp/auc_ex_lowsca_roc.png', plot = roc.plot(rocpp) + labs(title='BE biopsies', subtitle='excluding low SCA samples') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 # Exclude all of the above
 rocexall = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
-roc.plot(rocexall) + labs(title='BE samples', subtitle='excluding low SCA & WGD NP')
-ggsave(filename='plots/snp/auc_ex_lowsca_wgs_roc.png', plot =roc.plot(rocexall) + labs(title='BE samples', subtitle='excluding low SCA & WGD NP') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+roc.plot(rocexall) + labs(title='BE biopsies', subtitle='excluding low SCA & WGD NP')
+ggsave(filename='plots/snp/auc_ex_lowsca_wgs_roc.png', plot =roc.plot(rocexall) + labs(title='BE biopsies', subtitle='excluding low SCA & WGD NP') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 # Timepoint 1 only
 roct1 = pROC::roc(Status ~ Prob, data=filter(pred.qc, Timepoint == 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
-roc.plot(roct1) + labs(title='BE samples', subtitle='Timepoint T1')
-ggsave(filename='plots/snp/auc_t1_roc.png', plot=roc.plot(roct1) + labs(title='BE samples', subtitle='Timepoint T1') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+roc.plot(roct1) + labs(title='BE biopsies', subtitle='Timepoint T1')
+ggsave(filename='plots/snp/auc_t1_roc.png', plot=roc.plot(roct1) + labs(title='BE biopsies', subtitle='Timepoint T1') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 # Timepoint 2 only
 roct2 = pROC::roc(Status ~ Prob, data=subset(pred.qc, Timepoint != 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
-roc.plot(roct2) + labs(title='BE samples', subtitle='Timepoint T2')
-ggsave(filename='plots/snp/auc_t2_roc.png', plot=roc.plot(roct2) + labs(title='BE samples', subtitle='Timepoint T2') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+roc.plot(roct2) + labs(title='BE biopsies', subtitle='Timepoint T2')
+ggsave(filename='plots/snp/auc_t2_roc.png', plot=roc.plot(roct2) + labs(title='BE biopsies', subtitle='Timepoint T2') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 ggplot(filter(pred.qc, !wgd.NP & !lowsca), aes(Prob)) +
   geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +

@@ -110,16 +110,24 @@ load(file, verbose=F)
 rm(plots, coefs, performance.at.1se, models)
 
 riskCols = brewer.pal(11, "RdYlBu")[c(10, 5, 1)]
+
+residuals = do.call(bind_rows, purrr::map(list.files(paste0(dir,'/Analysis/pcf_perPatient/50kb'), 'residuals', recursive = T, full.names = T), 
+                              function(f) { read_tsv(f, col_types = 'ccddddl') }
+))
+             
 ```
 
 We have `r table(labels)[1]` samples from non-progressors and `r table(labels)[2]` samples from progressors.
+
+A few samples failed our QC process and were excluded from the model training process.
+`r residuals %>% filter(!Pass) %>% kable(caption = 'Samples that failed post-QDNAseq QC') %>% kable_styling(full_width = F)`
 
 Example subset of the data matrix:
 `r dysplasia.df[1:5, 1:5] %>% kable(caption=paste("dimensions:", paste(dim(dysplasia.df), collapse=', '))) %>% kable_styling('striped')`
 
 ## Global copy number plots
 
-```{r echo=F, warning=F, message=F, eval=T, fig.height=12, fig.width=20}
+```{r echo=F, warning=F, message=F, eval=T, fig.height=6, fig.width=10}
 chr.lengths = BarrettsProgressionRisk:::chrInfo() %>% dplyr::filter(chr %in% c(1:22)) %>%
   dplyr::mutate(chrom = factor(sub('chr','', chrom), levels=c(1:22), ordered=T))
 
@@ -149,15 +157,13 @@ cnLegend = get.legend(globalCN.plot)
 globalCN.plot + theme(legend.position = 'none')
 
 ## NDBE
-nb.status <- c('Progressor'=paste0('Progressor (n=',length(unique(subset(globalCNdf, Status == 'Progressor' & Pathology == 'BE')$variable)), ')'),
-              'Non-Progressor'=paste0('Non-Progressor (n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor' & Pathology == 'BE')$variable)),')'))
+nb.status <- c('Progressor'=paste0('Progressor (n=',length(unique(subset(globalCNdf, Status == 'Progressor' & Pathology == 'NDBE')$variable)), ')'),
+              'Non-Progressor'=paste0('Non-Progressor (n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor' & Pathology == 'NDBE')$variable)),')'))
 
 globalBECN.plot = cn.mtn.plot(filter(globalCNdf, seg.type != 'arms' & Pathology == 'NDBE'), labeller(Status=nb.status, chr=label_value)) + labs(title='NDBE samples only')
 
-gp = globalCN.plot + theme(legend.position = 'none') + labs(y='mean adj. seg.', title='All samples')
 
-
-gp = globalCN.plot + theme(legend.position = 'none', axis.text = element_blank(), strip.text.y = element_blank(), strip.text.x = element_text(size=8)) + 
+gp = globalCN.plot +  labs(y='mean adj. seg.', title='All samples') + theme(legend.position = 'none', axis.text = element_blank(), strip.text.y = element_blank(), strip.text.x = element_text(size=8)) + 
   labs(y='',x='', title='All samples')
 ggsave(filename='plots/globalCN.png', plot=gp, width=8, height=2.3, units='in', dpi=300)
 
@@ -1317,7 +1323,7 @@ pastefun<-function(x) {
   return(x)
 }
 
-patient.file = '~/Data/Ellie/QDNAseq/validation/sWGS_validation_batches.xlsx'
+patient.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 
 oac.info = readxl::read_xlsx(patient.file, 'OAC Test Samples') %>% 
   dplyr::mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`)) %>%
@@ -1351,6 +1357,10 @@ bind_rows(val.info %>% dplyr::select(`Hospital Research ID`, Status) %>% distinc
   spread(Status,n) %>% add_column(' ' = 'n Patients', .before=1),
 val.info %>% group_by(Status) %>% tally %>% spread(Status,n) %>% add_column(' ' = 'n Samples', .before=1)) %>% 
   kable(caption='Validation cohort') %>% kable_styling(full_width = F)
+
+
+val.info
+
 ```
 
 ```{r, eval=F}
@@ -1755,7 +1765,39 @@ second %>% filter(Status == 'P' & Rule == '1') %>% ungroup %>% filter(months.bef
 
 second %>% filter(Status == 'NP' & Rule == '1') %>% ungroup  %>%
   dplyr::summarise_at(vars(months.before.final), list(~min(.), ~max(.), ~mean(.), ~median(.))) 
+```
 
+## Check COX
+
+```{r}
+cox.cache.dir = '~/Data/BarrettsProgressionRisk/Analysis/cox_5e6_all/50kb/'
+file = paste(cox.cache.dir, 'model_data.Rdata', sep='/')
+load(file, verbose=T)
+
+file = paste(cox.cache.dir, "all.pt.alpha.Rdata" , sep='/')
+load(file, verbose=T)
+
+do.call(grid.arrange, c(plots, nrow=2))
+
+file = paste0(cox.cache.dir, '/loo_0.9.Rdata')
+load(file, verbose=T)
+
+rocCox = pROC::roc(Status ~ FittedRR, data=pg.samp, auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(rocCox) + labs(title = 'Cox model ROC')
+
+first = pg.samp %>% group_by(Patient) %>% arrange(Endoscopy.Year) %>% filter(Endoscopy.Year == Endoscopy.Year[1])
+rocCox2 = pROC::roc(Status ~ FittedRR, data = first, auc = T, ci = T, of='thresholds', transpose=T)
+roc.plot(rocCox2) + labs(title = 'Cox model ROC, first endo')
+
+last = filter(pg.samp, Endoscopy.Year == Final.Endoscopy)
+rocCox3 = pROC::roc(Status ~ FittedRR, data = last, auc = T, ci = T, of='thresholds', transpose=T)
+roc.plot(rocCox3) + labs(title = 'Cox model ROC, last endo')
+
+rocPath = pROC::roc(Status ~ Pathology, data=pg.samp, auc=T, ci=T, of='thresholds', transpose=T)
+roc.plot(rocPath) + labs(title = 'Pathology status ROC')
+
+cor.test(pg.samp$FittedRR, as.integer(pg.samp$Pathology))
 
 ```
+
 
