@@ -132,10 +132,19 @@ if (file.exists(file)) {
 } else {
   for (a in alpha.values) {
     print(a)
-    te = dplyr::select(patient.info, Samplename, Endoscopy.Year, Final.Endoscopy, Status) %>% group_by(Samplename, Status) %>% 
+    te = dplyr::select(patient.info, Patient, Samplename, Endoscopy.Year, Final.Endoscopy, Status) %>% group_by(Samplename, Status) %>% 
       dplyr::mutate(time = Final.Endoscopy+1 - Endoscopy.Year, status = as.integer(Status)-1) %>% filter( Samplename %in% rownames(dysplasia.df))
     
     dysplasia.df = dysplasia.df[te$Samplename,]
+    
+    te %>% ungroup %>% dplyr::select(-Status) %>% write_tsv(path='~/Downloads/patient_info.tsv')
+    write.table(x, file='~/Downloads/data.tsv', sep='\t', quote=F, row.names = T, col.names = NA)
+    
+    te %>% ungroup %>% dplyr::select(-Status) -> info
+    cbind(te %>% ungroup %>% dplyr::select(time,status) , dysplasia.df) -> x
+    
+    save(info, x, file='sarah_data.Rdata')
+    
     
     fit0 <- glmnet(dysplasia.df, Surv(te$time, te$status), alpha = a, nlambda = nl, family = 'cox', standardize = F)
     #autoplot(fit0) + theme(legend.position = 'none')

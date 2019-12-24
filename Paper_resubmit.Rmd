@@ -189,7 +189,7 @@ complexity.score = tibble('Status'=labels, 'cx'=cx[names(labels)], 'Samplename' 
   mutate(Status = factor(Status, labels = c('Non-Progressor','Progressor'))) %>%
   left_join(patient.info[,c('Samplename','Pathology','Patient')],by=c('Samplename'))
 
-tt = t.test(subset(complexity.score, Status == 'Progressor')$cx, subset(complexity.score, Status == 'Non-Progressor')$cx)
+tt = wilcox.test(subset(complexity.score, Status == 'Progressor')$cx, subset(complexity.score, Status == 'Non-Progressor')$cx)
 pv = ggplot(complexity.score, aes(Status, cx, fill=Status)) + 
   geom_jitter(width=0.2, color='grey39') + 
   geom_boxplot(outlier.colour = NA, alpha=0.8) +
@@ -491,6 +491,7 @@ roc = pROC::roc(Status ~ Prediction, data=preds, auc=T, ci=T, of='thresholds',tr
 pROC::ci.auc(roc$auc)
 
 ggsave(filename='plots/auc/training_auc.png', plot=roc.plot(roc), width=6.5, height=4.5, units='in', dpi=300)
+ggsave(filename='plots/auc/training_auc_supp.png', plot=roc.plot(roc) + ggtitle('Per sample'), width=6, height=6, units='in', dpi=300)
 
 roc$model = 'CN Model'
 roc$is = 'discovery'
@@ -613,18 +614,23 @@ ggsave('plots/auc/lastendo_auc.png', plot=roc.plot(rocLastEndo, title='Last endo
 firstEndo = pg.samp %>% group_by(Patient, Hospital.Research.ID, Status,Endoscopy.Year, PID) %>% arrange(Endoscopy.Year, PID)  %>% dplyr::summarise(avg = mean(Prediction) ) %>% ungroup %>% group_by(Patient) %>% dplyr::filter( Endoscopy.Year == min(Endoscopy.Year) ) %>% dplyr::select(-Endoscopy.Year, -PID)
 
 rocFirstEndo = pROC::roc(Status ~ avg, data=firstEndo, ci=T, of='thresholds')
-
 rocFirstEndo$model = 'First endoscopy'
 ggsave('plots/auc/firstendo_auc.png', plot=roc.plot(rocFirstEndo, title='First Endoscopy'), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
-endo.thresholds = bind_cols('roc'=c('Max','Avg','Last','First'),
+pendo.rand = pg.samp %>% dplyr::group_by(Patient, Status, PID) %>%
+  dplyr::summarise( r.Prob = sample(Prediction, 1), n = length(PID) ) %>% filter(n > 1)
+rocRandEndo = pROC::roc(Status ~ r.Prob, data=pendo.rand, ci=T, of='thresholds', transpose = T)
+rocRandEndo$model = 'Per Endoscopy Random'
+ggsave('plots/auc/randomendo_auc.png', plot=roc.plot(rocRandEndo, title='Random per Endoscopy'), width=6, height=6, units="in", limitsize=F, dpi = 300)
+
+endo.thresholds = bind_cols('roc'=c('Max','Avg','Last','First','Random'),
   bind_rows(
     pROC::coords(rocEndoM, 'best', transpose=T),
     pROC::coords(rocEndoA, 'best', transpose=T),
     pROC::coords(rocLastEndo, 'best', transpose=T),
-    pROC::coords(rocFirstEndo, 'best', transpose=T)
+    pROC::coords(rocFirstEndo, 'best', transpose=T),
+    pROC::coords(rocRandEndo, 'best', transpose=T)
   ))
-
 ```
 
 ### Per Patient ROC
@@ -710,7 +716,9 @@ m = rbind.data.frame(
       get.roc.stat(roc),
       get.roc.stat(rocEndoM),get.roc.stat(rocEndoA),
       get.roc.stat(rocPtM), get.roc.stat(rocPtA),
-      get.roc.stat(rocFirstEndo), get.roc.stat(rocLastEndo))
+      get.roc.stat(rocFirstEndo), get.roc.stat(rocLastEndo),
+      get.roc.stat(rocRandEndo))
+
 m$model = factor(m$model)
 
 cols = brewer.pal(11, 'Paired')
@@ -723,7 +731,7 @@ p = ggplot( arrange(mm, CI.min), aes(x=model, y=value*100, ymin=CI.min*100, ymax
   theme(legend.position='none', axis.text.x=element_text(angle=45, hjust=1)) + labs(x='', y='AUC', title='ROC Comparison') 
 p
 
-ggsave('plots/auc/multi_auc.png', plot=p, height=6, width=5, units='in',dpi=300)
+ggsave('plots/auc/multi_auc.png', plot=p, height=6, width=8, units='in',dpi=300)
 ```
 
 
@@ -1186,10 +1194,11 @@ pi$p11Loss = as.numeric(pi$Samplename %in% p11Loss$variable)
 
 pi %>%  mutate(p53.Status = recode_factor(p53.Status, '1'='aberrant','0'='normal')) %>% dplyr::group_by(p11Loss, p53.Status) %>% tally %>% spread(p53.Status, n) 
 
-ct = cor.test(pi$p11Loss, (as.numeric(pi$p53.Status)-1))
+ct = fisher.test(table(pi$p11Loss, pi$p53.Status))
+
 ```
 
-17p11 loss and p53 IHC correlation  R=`r round(ct$estimate,2)`. 
+17p11 loss and p53 IHC correlation  Fisher's odds `r ct$estimate`, p-value = `r ct$p.value`. 
 
 
 
@@ -1697,7 +1706,7 @@ pg.samp = pg.samp %>% mutate(p53.Status = factor(p53.Status, levels=c(0,1), orde
 max.rules = purrr::map(unique(pg.samp$Patient), function(pt) {
     preds = pg.samp %>% filter(Patient == pt) %>% arrange(Endoscopy.Year, months.before.final)
     endo = BarrettsProgressionRisk:::.setUpRxTablePerEndo(preds %>% dplyr::mutate(Endoscopy = months.before.final, Sample = 'Samplename'), 'max', verbose=F) %>% mutate(Endoscopy = Endoscopy*-1)
-    rx = BarrettsProgressionRisk:::.apply.rules(endo, 'Endoscopy', pred.confidence )
+    rx = BarrettsProgressionRisk:::.apply.rules(endo, 'Endoscopy', pred.confidence,'numeric' ) 
     
     left_join(rx, endo %>% dplyr::select(Endoscopy, months.before.final, Endoscopy.Year, Probability), by=c('Time 1'='Endoscopy')) %>%
       mutate(`Time 2` = ifelse(months.before.final <= 0,'Endpoint',`Time 2`)) %>% 
@@ -1797,6 +1806,20 @@ rocPath = pROC::roc(Status ~ Pathology, data=pg.samp, auc=T, ci=T, of='threshold
 roc.plot(rocPath) + labs(title = 'Pathology status ROC')
 
 cor.test(pg.samp$FittedRR, as.integer(pg.samp$Pathology))
+
+```
+
+# Coefficients by # patients
+
+```{r}
+cache.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/supp_train_n/insilico_splits/'
+
+purrr::map(list.files(cache.dir, 'loo.Rdata',recursive = T, full.names = T), function(f) {
+  load(f,verbose=T)
+  
+  length(unique(pg.samp$Patient))
+  
+}
 
 ```
 
