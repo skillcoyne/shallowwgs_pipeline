@@ -52,7 +52,7 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   print(pt)
   pd = paste(multipcfdir, pt,sep='/')
   
-  if (!file.exists(paste0(pd,'/segment.Rdata'))) {
+#  if (!file.exists(paste0(pd,'/segment.Rdata'))) { 
     dir.create(pd,showWarnings = F)
     
     info = all.patient.info %>% filter(Hospital.Research.ID == pt) %>% 
@@ -62,9 +62,10 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     info = BarrettsProgressionRisk::loadSampleInformation(info, path=c('BE','ID','LGD','HGD','IMC'))
   
     cols = which(colnames(merged.fit) %in% info$Sample)
-    
+print(colnames(merged.fit)[cols])    
     segmented = BarrettsProgressionRisk::segmentRawData(info, merged.raw[,c(1:4,cols)],merged.fit[,c(1:4,cols)], verbose=T, kb = kb, multipcf = kb<100 )
-    
+print(colnames(segmented$seg.vals))
+stop()    
     raw_dist = tibble(
       patient = segmented$sample.info$Hospital.Research.ID,
       sample = segmented$sample.info$Sample,
@@ -110,9 +111,9 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     
     
     
-  } else {
-    load(file = paste0(pd,'/segment.Rdata'))
-  }
+#  } else {
+#    load(file = paste0(pd,'/segment.Rdata'))
+#  }
   
   tiles = BarrettsProgressionRisk::tileSegments(segmented, verbose=T)
   arms = BarrettsProgressionRisk::tileSegments(segmented, 'arms', verbose=T)

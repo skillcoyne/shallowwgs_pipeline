@@ -20,9 +20,12 @@ modeldir = args[2]
 # modeldir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb'
 infodir = args[3]
 # infodir = '~/Data/Ellie/QDNAseq/training'
+
+n = 60
+if (length(args) == 4) 
+  n = as.integer(args[4])
+
 logT = F
-if (length(args) == 4)
-  logT = as.logical(args[4])
 
 x = (unclass(Sys.time()) + sample(1:1000, 1))
 cache.dir = paste(outdir, 'insilico_splits', sep='/')
@@ -51,7 +54,8 @@ load(paste0(modeldir, '/all.pt.alpha.Rdata'),verbose=T)
 rm(plots,coefs,performance.at.1se, cvs, models)
 
 # By patient
-samplePtsN = round(nrow(sum.patient.data)*.2)
+#samplePtsN = round(nrow(sum.patient.data)*.2)
+samplePtsN = n
 
 # Balanced labels?
 leaveout = c(sample(filter(sum.patient.data, Status == 'NP')$Patient, samplePtsN/2), sample(filter(sum.patient.data, Status == 'P')$Patient, samplePtsN/2))

@@ -14,7 +14,7 @@ split.dir = args[2] # paste(data, 'Analysis/5e6_arms_splits', sep='/')
 
   rocs = NULL
   performance = NULL
-select.alpha = '0.9' 
+  select.alpha = '0.9' 
   split.dirs = list.files(split.dir, full.names = T)
   for (split in 1:length(split.dirs)) {
     print(split)  
@@ -27,7 +27,10 @@ select.alpha = '0.9'
     }
 
     load(list.files(split.dirs[split],full.names = T, pattern='all.*Rdata'), verbose=T)
-    performance = rbind(performance, performance.at.1se[[select.alpha]])
+    ncoefs = nrow(coefs[[select.alpha]])
+    performance = rbind(performance, cbind(performance.at.1se[[select.alpha]],ncoefs))
+    
+
     rm(plots,coefs,performance.at.1se,models,cvs)
     
     load(list.files(split.dirs[split],full.names = T, pattern='loo.*Rdata'), verbose=T)
