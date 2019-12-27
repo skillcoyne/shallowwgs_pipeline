@@ -240,9 +240,9 @@ crossvalidate.by.patient<-function(x,y,lambda,pts,a=1, sampleID = 1, nfolds=10, 
   fit.e = list()
   
   if (length(grep('fold',colnames(pts))) == nfolds) {
-    tpts = pts
+    tpts = pts %>% data.frame
   } else {
-    tpts = create.sample.sets(pts, sampleID, nfolds, splits, minR)
+    tpts = create.sample.sets(pts, sampleID, nfolds, splits, minR) %>% data.frame
   }
   
   cv.pred = (matrix(nrow=0, ncol=length(lambda)))
