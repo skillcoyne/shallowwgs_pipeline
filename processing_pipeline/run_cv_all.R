@@ -15,26 +15,42 @@ suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/data_
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/load_patient_metadata.R'))
 suppressPackageStartupMessages(source('~/workspace/shallowwgs_pipeline/lib/cv-pt-glm.R'))
 
+# load('~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb/all.pt.alpha.Rdata',verbose=T)
+# fit = models$`0.9`
+# lambda = performance.at.1se$`0.9`$lambda
+# rm(plots,coefs,performance.at.1se,dysplasia.df,cvs,labels)
+
+get.tiles<-function(files, info, scale=T) {
+  print(paste0("Scale:",scale))
+  seg.tiles = do.call(bind_rows, lapply(files, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
+  colnames(seg.tiles)[1] = 'sample'
+  seg.tiles = seg.tiles %>% filter(sample %in% info$Samplename)
+  samples = seg.tiles$sample
+  
+  seg.tiles = as.matrix(seg.tiles[,-1])
+  rownames(seg.tiles) = samples
+  dim(seg.tiles)
+  
+  # After mean centering set all NA values to 0
+  prep.matrix(seg.tiles, scale=scale, MARGIN=2)
+}
 
 d.data = args[1]
 # d.data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
 v.data = args[2]
 # v.data = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/'
 outdir = args[3]
-# outdir = '~/Data/BarrettsProgressionRisk/Analysis/dv_model_5e6_all/50kb/'
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis/dv_model_5e6_all_dvz/50kb/'
 infodir = args[4]
 # infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 
 select.alpha = 0.9
 
 cache.dir = outdir
-
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
 d.resids = do.call(bind_rows,purrr::map(list.files(d.data, 'residuals.tsv', recursive=T, full.names=T), function(f) read_tsv(f, col_types = c('ccddddl'))))
 v.resids = do.call(bind_rows,purrr::map(list.files(v.data, 'residuals.tsv', recursive=T, full.names=T), function(f) read_tsv(f, col_types = c('ccddddl'))))
-
-
 
 ## Hospital.Research.ID info file
 patient.file = list.files(infodir, pattern='All_patient_info.xlsx', recursive=T, full.names=T)
@@ -67,52 +83,45 @@ info = bind_rows(d.info %>% dplyr::select(Status, Patient, matches('Hospital'),P
 d.cleaned = list.files(path=d.data, pattern='tiled_segvals', full.names=T, recursive=T)
 v.cleaned = list.files(path=v.data, pattern='tiled_segvals', full.names=T, recursive=T)
 
+# d.tiles = get.tiles(c(grep('arm', d.cleaned, value=T, invert=T)), d.info)
+# d.arms = get.tiles(c(grep('arm', d.cleaned, value=T)), d.info)
+# 
+# z.mean = d.tiles$z.mean
+# z.sd = d.tiles$z.sd
+# z.arms.mean = d.arms$z.mean
+# z.arms.sd = d.arms$z.sd
+# rm(d.tiles,d.arms)
+
 cleaned = c(d.cleaned,v.cleaned)
 cleaned = grep('OCCAMS',cleaned, value=T, invert = T)
+
+#cleaned = c(v.cleaned)
+#cleaned = grep('OCCAMS',cleaned, value=T, invert = T)
 
 arm.files = c(grep('arm', cleaned, value=T))
 seg.files = c(grep('arm', cleaned, value=T, invert=T))
 
 if (length(seg.files) != length(arm.files)) stop("Tiled files do not match between short segments and arms.")
 
-seg.tiles = do.call(bind_rows, lapply(seg.files, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character()))))
-colnames(seg.tiles)[1] = 'sample'
-seg.tiles = seg.tiles %>% filter(sample %in% info$Samplename)
-samples = seg.tiles$sample
+segsList = get.tiles(seg.files, info, T)
+armsList = get.tiles(arm.files, info, T)
 
-seg.tiles = as.matrix(seg.tiles[,-1])
-rownames(seg.tiles) = samples
-dim(seg.tiles)
-
-#per.samp.sd = apply(seg.tiles, 1, sd)
-#per.samp.mean = apply(seg.tiles,1,mean)
-
-# After mean centering set all NA values to 0
-segsList = prep.matrix(seg.tiles,scale=T, MARGIN=2)
-#segsList = prep.matrix(seg.tiles,scale=F)
+segs = segsList$matrix
 z.mean = segsList$z.mean
 z.sd = segsList$z.sd
-segs = segsList$matrix
-dim(segs)
+#for (i in 1:ncol(segs))
+#   segs[,i] = BarrettsProgressionRisk:::unit.var(segs[,i], z.mean[i], z.sd[i])
+
+arms = armsList$matrix
+z.arms.mean = armsList$z.mean
+z.arms.sd = armsList$z.sd
+# for (i in 1:ncol(arms))
+#   arms[,i] = BarrettsProgressionRisk:::unit.var(arms[,i], z.arms.mean[i], z.arms.sd[i])
 
 # Complexity score
 cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
 mn.cx = mean(cx.score)
 sd.cx = sd(cx.score)
-
-# Load arm files  
-arm.tiles = do.call(bind_rows, lapply(arm.files, function(x) readr::read_tsv(x, col_types=cols(.default=col_double(), X1=col_character())) %>% dplyr::filter(X1!='')))
-colnames(arm.tiles)[1] = 'sample'
-arm.tiles = arm.tiles %>% filter(sample %in% info$Samplename)
-dim(arm.tiles)
-samples = arm.tiles$sample
-arm.tiles = as.matrix(arm.tiles[,-1])
-rownames(arm.tiles) = samples
-
-armsList = prep.matrix(arm.tiles,scale=T,MARGIN=2)
-arms = armsList$matrix
-z.arms.mean = armsList$z.mean
-z.arms.sd = armsList$z.sd
 
 # Merge segments and arms, subtract arms
 allDf = BarrettsProgressionRisk::subtractArms(segs, arms)
@@ -120,20 +129,21 @@ mn.cx = sqrt(mean(cx.score^2))
 
 # Add complexity score
 allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx))
-
+dim(allDf)
 ## labels: binomial: prog 1, np 0
-sampleStatus = info %>% filter(Samplename %in% rownames(allDf)) %>% dplyr::select(Samplename,Status) %>% 
+sampleStatus = info %>% ungroup %>% filter(Samplename %in% rownames(allDf)) %>% dplyr::select(Samplename,Status) %>% 
   mutate(Status = ifelse(Status == 'OAC', 'P', Status)) %>% mutate(Status = as.integer(Status)-1) 
 
+# MAKE SURE the labels don't get mixed up
 labels = sampleStatus %>% spread(Samplename, Status) %>% unlist
-
-
-dim(allDf)
 dysplasia.df = as.matrix(allDf[sampleStatus$Samplename,])
+labels = labels[rownames(dysplasia.df)]
+
+if (length(which(names(labels) == rownames(dysplasia.df))) != length(labels)) stop("Labels and x matrix mismatched!")
+
 dim(dysplasia.df)
 
 save(dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
-#rm(raw.segs, raw.arms)
 
 nl = 1000;folds = 10; splits = 5 
 
@@ -171,9 +181,8 @@ create.patient.sets2<-function(pts, n, splits, minR=0.2, uniquePtID = 'Patient')
   }
   return(patients)
 }
-
-
 sets = create.patient.sets2(info %>% dplyr::select(Patient,Samplename,Status,cohort), folds, splits, 0.2, 'Patient')  
+#sets = create.patient.sets(info %>% ungroup %>% dplyr::select(Patient,Samplename,Status), folds, splits, 0.2)  
 #sets = dplyr::select(info, Patient, Samplename, cohort) %>% left_join(sets, by = c("Patient", "Samplename"))
 
 alpha.values = c(0,0.5,0.7,0.8,0.9,1)
@@ -187,11 +196,12 @@ if (file.exists(file)) {
 } else {
   for (a in alpha.values) {
     print(a)
-    fit0 <- glmnet(dysplasia.df, labels, alpha=a, nlambda=nl, family='binomial', standardize=F)    
-    l = fit0$lambda
-    if (a > 0.5) l = more.l(l)
     
-    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels, lambda=l, pts=sets, sampleID=2, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
+    fit0 <- glmnet(dysplasia.df, labels[rownames(dysplasia.df)], alpha=a, nlambda=nl, family='binomial', standardize=F)    
+    l = fit0$lambda
+    #if (a > 0.5) l = more.l(l)
+    
+    cv.patient = crossvalidate.by.patient(x=dysplasia.df, y=labels[rownames(dysplasia.df)], lambda=l, pts=sets, sampleID=2, a=a, nfolds=folds, splits=splits, fit=fit0, select='deviance', opt=-1, standardize=F)
     
     lambda.opt = cv.patient$lambda.1se
     
@@ -277,11 +287,11 @@ if (file.exists(file)) {
         mutate(cvRR = BarrettsProgressionRisk:::cvRR(test, as.matrix(BarrettsProgressionRisk:::non.zero.coef(fitLOO, cv$lambda.1se)[-1], ncol=1))) %>% 
         arrange(desc(cvRR))
       
-      mp = BarrettsProgressionRisk:::mountainPlots(tiles = test, coefs = as.matrix(coef(fitLOO, cv$lambda.1se)), cvRR = tmp.cvRR, build = 'hg19')
-      p = do.call(gridExtra::arrangeGrob, c(mp$plot.list, ncol=1))
-      for (pn in names(mp$plot.list)) { 
-        ggsave(filename=paste0(pt.path,'/',pn,'.png'), plot=mp$plot.list[[pn]],width=12,height=4,units='in')
-      }
+      # mp = BarrettsProgressionRisk:::mountainPlots(tiles = test, coefs = as.matrix(coef(fitLOO, cv$lambda.1se)), cvRR = tmp.cvRR, build = 'hg19')
+      # p = do.call(gridExtra::arrangeGrob, c(mp$plot.list, ncol=1))
+      # for (pn in names(mp$plot.list)) { 
+      #   ggsave(filename=paste0(pt.path,'/',pn,'.png'), plot=mp$plot.list[[pn]],width=12,height=4,units='in')
+      # }
 
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       colnames(pm) = 'Probability'

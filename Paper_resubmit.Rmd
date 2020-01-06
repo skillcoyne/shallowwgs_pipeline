@@ -1812,14 +1812,67 @@ cor.test(pg.samp$FittedRR, as.integer(pg.samp$Pathology))
 # Coefficients by # patients
 
 ```{r}
-cache.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/supp_train_n/insilico_splits/'
+model.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb/'
+load(list.files(model.dir, 'loo_0.9.Rdata',recursive = T, full.names = T))
+d.n.patient = length(unique(pg.samp$Patient))
+d.roc = pROC::roc(Status ~ Prediction, data = pg.samp, ci=T, of='thresholds', transpose=T)
 
-purrr::map(list.files(cache.dir, 'loo.Rdata',recursive = T, full.names = T), function(f) {
-  load(f,verbose=T)
-  
-  length(unique(pg.samp$Patient))
-  
-}
+load(list.files(model.dir, 'all.pt.alpha',recursive = T, full.names = T))
+d.coefs = coefs[['0.9']]
+d.perf = performance.at.1se[['0.9']]$mean
+rm(dysplasia.df, plots, pg.samp, models, nzcoefs, fits, performance.at.1se)
+
+all.dir = '~/Data/BarrettsProgressionRisk/Analysis/dv_model_5e6_all_dvz/50kb/'
+load(list.files(all.dir, 'loo_0.9.Rdata',recursive = T, full.names = T))
+dv.n.patient = length(unique(pg.samp$Patient))
+dv.n.samples = length(unique(pg.samp$Samplename))
+dv.roc = pROC::roc(Status ~ Probability, data = pg.samp, ci=T, of='thresholds', transpose=T)
+
+load(list.files(all.dir, 'all.pt.alpha',recursive = T, full.names = T))
+dv.coefs = coefs[['0.9']]
+dv.perf = performance.at.1se[['0.9']]$mean
+rm(dysplasia.df, plots, pg.samp, models, nzcoefs, fits, performance.at.1se)
+
+load(list.files(all.dir, 'all.pt.alpha',recursive = T, full.names = T))
+dv.coefs = coefs[['0.9']]
+dv.perf = performance.at.1se[['0.9']]$mean
+rm(dysplasia.df, plots, pg.samp, models, nzcoefs, fits, performance.at.1se)
+
+
+cache.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/'
+filenames = list.files(cache.dir, 'supp*')
+
+info = do.call(bind_rows, purrr::map(list.files(cache.dir, 'merged.Rdata', recursive = T, full.names = T), function(f) {
+  load(f,verbose=F)
+  model.info
+}))
+
+info = add_row(info, n.patients = d.n.patient, cv.performance = d.perf, n.coefs = nrow(d.coefs), n.samples = 773, auc = d.roc$auc)
+info = add_row(info, n.patients = dv.n.patient, cv.performance = dv.perf, n.coefs = nrow(dv.coefs), n.samples = dv.n.samples, auc = dv.roc$auc)
+
+x = info %>% group_by(n.patients) %>% dplyr::summarise_at(vars(-n.samples), list(~mean(.), ~sd(.))) %>% as_tibble %>% mutate(n.patients = factor(n.patients))
+
+p = ggplot(x, aes(x=n.patients, y=cv.performance_mean, group=n.patients, fill=n.patients)) +
+  geom_col() + geom_errorbar(aes(ymin=cv.performance_mean-cv.performance_sd/2, ymax=cv.performance_mean+cv.performance_sd/2), width=0.2, color='grey39') +
+  geom_text(aes(label=round(cv.performance_mean,2)), y=0.05) + 
+  scale_y_continuous(expand=c(0,0), limits=c(0,0.8)) + theme(legend.position = 'none') +
+  plot.theme + labs(title='Cross validation performance', subtitle='10 random samples', y='mean', x='# patients used to train')
+
+p1 = ggplot(x, aes(x=n.patients, y=n.coefs_mean, group=n.patients, fill=n.patients)) +
+  geom_col() + geom_errorbar(aes(ymin=n.coefs_mean-n.coefs_sd/2, ymax=n.coefs_mean+n.coefs_sd/2), width=0.2, color='grey39') +
+  geom_text(aes(label=round(n.coefs_mean,2)), y=5) +
+  scale_y_continuous(expand=c(0,0), limits=c(0,90)) + theme(legend.position = 'none') +
+  plot.theme + labs(title='# Coefficients selected by model', subtitle='10 random samples', y='mean', x='# patients used to train')
+
+p2 = ggplot(x, aes(x=n.patients, y=auc_mean, group=n.patients, fill=n.patients)) +
+  geom_col() + geom_errorbar(aes(ymin=auc_mean-auc_sd/2, ymax=auc_mean+auc_sd/2), width=0.2, color='grey39') +
+  geom_text(aes(label=round(auc_mean,2)), y=0.05) +
+  scale_y_continuous(expand=c(0,0), limits=c(0,1)) + theme(legend.position = 'none') +
+  plot.theme + labs(title='AUC from leave-one-out analysis', subtitle='10 random samples', y='mean', x='# patients used to train')
+
+
+ggsave(filename='plots/performance/training_n_pts.png',plot=grid.arrange(p,p1,p2,nrow=1), width = 10, height=8, units='in', dpi=300)
+
 
 ```
 
