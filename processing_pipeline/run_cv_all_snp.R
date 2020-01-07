@@ -2,10 +2,6 @@ args = commandArgs(trailingOnly=TRUE)
 
 set.seed(1234)
 
-if (length(args) < 3)
-  stop("Missing required params: <data dir> <outdir> <info file dir> <Set: All,Training>")
-
-
 suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 suppressPackageStartupMessages( library(tidyverse) )
 suppressPackageStartupMessages( library(glmnet) )
@@ -30,20 +26,39 @@ get.tiles<-function(files, info, scale=T) {
   prep.matrix(seg.tiles, scale=scale, MARGIN=2)
 }
 
-d.data = args[1]
-# d.data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
-v.data = args[2]
-# v.data = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/'
-outdir = args[3]
-# outdir = '~/Data/BarrettsProgressionRisk/Analysis/dv_model_5e6_all_dvz/50kb/'
-infodir = args[4]
-# infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
+d.data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
+v.data = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/'
+snp.data = '~/Data/Reid_SNP/PerPatient/'
+outdir = '~/Data/BarrettsProgressionRisk/Analysis/dv_snp_model/50kb/'
+infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
+
+## SNP tiles - not yet adjusted
+load('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata', verbose=T) 
+rownames(mergedSegs) = sub('\\.LogR','', rownames(mergedSegs))
+rownames(mergedArms) = sub('\\.LogR','', rownames(mergedArms))
+snp.segs = mergedSegs
+snp.arms = mergedArms
+rm(mergedSegs, mergedArms)
+
+nm.rows = grep('BLD|GASTRIC', rownames(snp.segs))
+snp.segs = snp.segs[-nm.rows,]
+snp.arms = snp.arms[-nm.rows,]
+
+# difference between the two is 0.98 so...
+snp.segs = snp.segs + 0.98; snp.arms = snp.arms + 0.98
+
+snp.info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx') %>% 
+  mutate( PID = paste(PatientID, `Timepoint Code`, sep='_'), Patient = as.numeric(PatientID), Hospital.Research.ID = as.character(Patient), Samplename = PID ) 
+
+## ----
 
 select.alpha = 0.9
 
 cache.dir = outdir
 dir.create(cache.dir, recursive=T, showWarnings=F)
 
+
+## Discovery and validation sWGS
 d.resids = do.call(bind_rows,purrr::map(list.files(d.data, 'residuals.tsv', recursive=T, full.names=T), function(f) read_tsv(f, col_types = c('ccddddl'))))
 v.resids = do.call(bind_rows,purrr::map(list.files(v.data, 'residuals.tsv', recursive=T, full.names=T), function(f) read_tsv(f, col_types = c('ccddddl'))))
 
@@ -52,7 +67,7 @@ patient.file = list.files(infodir, pattern='All_patient_info.xlsx', recursive=T,
 demo.file = list.files(infodir, pattern='Demographics_full.xlsx', recursive=T, full.names=T)
 d.info = read.patient.info(patient.file, demo.file, set='All')$info %>% 
   dplyr::arrange(Status, Patient, Endoscopy.Year, Pathology) %>% dplyr::rename(Endoscopy = 'Endoscopy.Year') %>%
-  mutate(Endoscopy = as.Date(paste0(Endoscopy,'-01-01')), Block = as.character(Block))
+  mutate(Endoscopy = as.Date(paste0(Endoscopy,'-01-01')))
 
 d.resids = d.resids %>% filter(varMAD_median <= 0.008)
 d.info = d.info %>% filter(Samplename %in% d.resids$samplename)
@@ -66,14 +81,16 @@ v.info = readxl::read_xlsx(v.patient.file, 'Final Validation Samples') %>%
   dplyr::select(-matches('SLX|Index'), -`Path Notes`) %>%
   mutate(Pathology = recode(Pathology, 'GM'='NDBE'), Status = factor(Status, levels=c('NP','P'))) %>% 
   ungroup %>% group_by(`Hospital Research ID`) %>% mutate(Endoscopy = as.Date(Endoscopy)) %>% 
-  dplyr::rename(Hospital.Research.ID = 'Hospital Research ID')
+  dplyr::rename(Hospital.Research.ID = 'Hospital Research ID') %>% ungroup %>% 
+  mutate(Hospital.Research.ID = gsub(' ', '', gsub('\\/', '_', Hospital.Research.ID))) 
 
 v.resids = v.resids %>% filter(varMAD_median <= 0.008)
 v.info = v.info %>% filter(Samplename %in% v.resids$samplename)
 
-info = bind_rows(d.info %>% dplyr::select(Status, Patient, matches('Hospital'),PID,Endoscopy,Pathology,Samplename,Block) %>% mutate(cohort='discovery'),
-                 v.info %>% dplyr::select(Status, Patient, matches('Hospital'),PID,Endoscopy,Pathology,Samplename,Block) %>% mutate(cohort='validation')) %>% 
-  mutate(Status = factor(Status, levels = c('NP','P')), Pathology = recode(Pathology, 'BE'='NDBE'))
+info = bind_rows(d.info %>% dplyr::select(Status, matches('Hospital'),PID,Pathology,Samplename) %>% mutate(cohort='discovery'),
+                 v.info %>% dplyr::select(Status, matches('Hospital'),PID,Pathology,Samplename) %>% mutate(cohort='validation'),
+                 snp.info %>% dplyr::select(Status, matches('Hospital'),PID,Pathology,Samplename) %>% mutate(cohort='snp')) %>% 
+  mutate(Status = factor(Status, levels = c('NP','P')), Pathology = recode(Pathology, 'BE'='NDBE')) %>% dplyr::rename(Patient = 'Hospital.Research.ID')
 
 d.cleaned = list.files(path=d.data, pattern='tiled_segvals', full.names=T, recursive=T)
 v.cleaned = list.files(path=v.data, pattern='tiled_segvals', full.names=T, recursive=T)
@@ -86,16 +103,24 @@ seg.files = c(grep('arm', cleaned, value=T, invert=T))
 
 if (length(seg.files) != length(arm.files)) stop("Tiled files do not match between short segments and arms.")
 
-segsList = get.tiles(seg.files, info, T)
-armsList = get.tiles(arm.files, info, T)
+segsList = get.tiles(seg.files, info, F)
+armsList = get.tiles(arm.files, info, F)
 
 segs = segsList$matrix
-z.mean = segsList$z.mean
-z.sd = segsList$z.sd
+segs = rbind(segs, snp.segs) # add snps
+
+z.mean = apply(segs, 2, mean)
+z.sd = apply(segs, 2, sd)
+for (i in 1:ncol(segs))
+   segs[,i] = BarrettsProgressionRisk:::unit.var(segs[,i], z.mean[i], z.sd[i])
 
 arms = armsList$matrix
-z.arms.mean = armsList$z.mean
-z.arms.sd = armsList$z.sd
+arms = rbind(arms, snp.arms) # add snps
+
+z.arms.mean = apply(arms,2,mean)
+z.arms.sd = apply(arms,2,sd)
+ for (i in 1:ncol(arms))
+   arms[,i] = BarrettsProgressionRisk:::unit.var(arms[,i], z.arms.mean[i], z.arms.sd[i])
 
 # Complexity score
 cx.score = BarrettsProgressionRisk::scoreCX(segs,1)
@@ -126,45 +151,9 @@ save(dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, f
 
 nl = 1000;folds = 10; splits = 5 
 
-create.patient.sets2<-function(pts, n, splits, minR=0.2, uniquePtID = 'Patient') {
-  # This function just makes sure the sets don't become too unbalanced with regards to the labels.
-  pts = pts %>% mutate(label = as.integer(Status)-1)
-  
-  sample.ratio = pts %>% dplyr::select(Samplename, cohort) %>% group_by(cohort) %>% tally %>% mutate(n = n/sum(n))
-  wt = pts %>% ungroup %>% dplyr::select(!!uniquePtID, cohort) %>% distinct() %>% mutate( wt = ifelse(cohort == 'discovery', 0.78, 0.22)) %>% dplyr::select(wt) %>% pull
-  
-  check.sets<-function(df, grpCol, min) {
-    sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=df$label))
-    while ( (length(which(sets/rowSums(sets) < minR) ) >= 2 | length(which(sets/rowSums(sets) == 0)) > 0) ) {
-      print(sets/rowSums(sets))
-      #s = sample(rep(seq(5), length = length(unique(df[[uniquePtID]]))))
-      s = sample( rep(seq(splits), length=length(unique(pts[[uniquePtID]]))), prob=wt )
-      df2 = merge(df, cbind(unique(df[[uniquePtID]]), 'tmpgrp'=s), by=1)
-      df[[grpCol]] = df2$tmpgrp
-      sets = table(cbind.data.frame('set'=df[[grpCol]], 'labels'=df$label))
-    }
-    return(df[[grpCol]])
-  }
-  
-  s = sample( rep(seq(splits), length=length(unique(pts[[uniquePtID]]))), prob=wt )
-  patients = pts %>% left_join( bind_cols( !!quo_name(uniquePtID) := unique(pts[[uniquePtID]]), group=s ), by=uniquePtID) %>% dplyr::select(-Status,-cohort) %>% 
-    dplyr::rename( fold.1 = 'group')
-  patients$fold.1 = check.sets(patients, 'fold.1', minR)
-  
-  for (i in 2:n) {
-    s = sample( rep(seq(splits), length=length(unique(pts[[uniquePtID]]))), prob=wt )
-    patients = patients %>% left_join( bind_cols( !!quo_name(uniquePtID) := unique(pts[[uniquePtID]]), group=s ), by=uniquePtID) %>% 
-      dplyr::rename( !!quo_name(paste0('fold.',i)) := 'group')
-    
-    patients[[paste0('fold.',i)]] = check.sets(patients, paste0('fold.',i))
-  }
-  return(patients)
-}
-sets = create.patient.sets2(info %>% dplyr::select(Patient,Samplename,Status,cohort), folds, splits, 0.2, 'Patient')  
-#sets = create.patient.sets(info %>% ungroup %>% dplyr::select(Patient,Samplename,Status), folds, splits, 0.2)  
-#sets = dplyr::select(info, Patient, Samplename, cohort) %>% left_join(sets, by = c("Patient", "Samplename"))
+sets = create.patient.sets(info %>% ungroup %>% dplyr::select(Patient,Samplename,Status), folds, splits, 0.2)  
 
-alpha.values = c(0,0.5,0.7,0.8,0.9,1)
+alpha.values = c(0.7,0.8,0.9)
 #alpha.values = select.alpha
 ## ----- All ----- ##
 coefs = list(); plots = list(); performance.at.1se = list(); models = list(); cvs = list()
@@ -218,22 +207,24 @@ if (file.exists(file)) {
   secf = all.coefs[[select.alpha]]
   a = select.alpha
   
+  sets = create.patient.sets(info %>% ungroup %>% dplyr::select(Patient,Samplename,Status), folds, splits, 0.2)  
+  
   performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
   # Remove each patient (LOO)
-  for (pt in unique(pg.samp$Hospital.Research.ID)) {
-    pt.path = paste0(cache.dir, '/plots/', pt)
-    dir.create(pt.path, recursive = T, showWarnings = F)
+  for (pt in unique(pg.samp$Patient)) {
+#    pt.path = paste0(cache.dir, '/plots/', pt)
+#    dir.create(pt.path, recursive = T, showWarnings = F)
     
-  #for (pt in names(pg.samp)) {
+    #for (pt in names(pg.samp)) {
     print(pt)
-    samples = subset(pg.samp, Hospital.Research.ID != pt)$Samplename
+    samples = subset(pg.samp, Patient != pt)$Samplename
     
     train.rows = which(rownames(dysplasia.df) %in% samples)
     training = dysplasia.df[train.rows,,drop=F]
     test = as.matrix(dysplasia.df[-train.rows,,drop=F])
     if (ncol(test) <= 0) next # shouldn't be any but...
-
-    patient.samples = pg.samp %>% filter(Hospital.Research.ID == pt) %>% dplyr::select(Samplename)
+    
+    patient.samples = pg.samp %>% filter(Patient == pt) %>% dplyr::select(Samplename)
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
     sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
                                 dimnames=list(rownames(test),colnames(training)), sparse=T)
@@ -257,7 +248,7 @@ if (file.exists(file)) {
       nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
       
       coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
-
+      
       logit <- function(p){log(p/(1-p))}
       inverse.logit <- function(or){1/(1 + exp(-or))}
       
@@ -271,7 +262,7 @@ if (file.exists(file)) {
       # for (pn in names(mp$plot.list)) { 
       #   ggsave(filename=paste0(pt.path,'/',pn,'.png'), plot=mp$plot.list[[pn]],width=12,height=4,units='in')
       # }
-
+      
       pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
       colnames(pm) = 'Probability'
       
@@ -282,14 +273,14 @@ if (file.exists(file)) {
       colnames(sy) = 'Prob.Dev.Resid'
       if (nrow(test) == 1) rownames(sy) = rownames(pm)
       
-      patient = pg.samp %>% filter(Hospital.Research.ID == pt) %>% arrange(Samplename) 
+      patient = pg.samp %>% filter(Patient == pt) %>% arrange(Samplename) 
       
       patient$Probability = pm[patient$Samplename,]
       patient$RR = rr[patient$Samplename,]
-#      patient$Prob.Dev.Resid = sy[patient$Samplename,]
+      #      patient$Prob.Dev.Resid = sy[patient$Samplename,]
       
       pg.samp[which(pg.samp$Hospital.Research.ID == pt),] = patient
-
+      
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
