@@ -153,7 +153,7 @@ nl = 1000;folds = 10; splits = 5
 
 sets = create.patient.sets(info %>% ungroup %>% dplyr::select(Patient,Samplename,Status), folds, splits, 0.2)  
 
-alpha.values = c(0.7,0.8,0.9)
+alpha.values = c(0.9)
 #alpha.values = select.alpha
 ## ----- All ----- ##
 coefs = list(); plots = list(); performance.at.1se = list(); models = list(); cvs = list()
