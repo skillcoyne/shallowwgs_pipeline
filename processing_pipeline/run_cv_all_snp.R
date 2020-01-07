@@ -1,3 +1,4 @@
+
 args = commandArgs(trailingOnly=TRUE)
 
 set.seed(1234)
@@ -26,14 +27,21 @@ get.tiles<-function(files, info, scale=T) {
   prep.matrix(seg.tiles, scale=scale, MARGIN=2)
 }
 
-d.data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
-v.data = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/'
-snp.data = '~/Data/Reid_SNP/PerPatient/'
-outdir = '~/Data/BarrettsProgressionRisk/Analysis/dv_snp_model/50kb/'
-infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
+d.data = args[1]
+#d.data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
+v.data = args[2]
+# v.data = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/'
+snp.data = args[3]
+# snp.data = '~/Data/Reid_SNP/PerPatient/'
+outdir = args[4]
+# outdir = '~/Data/BarrettsProgressionRisk/Analysis/dv_snp_model/50kb/'
+infodir = args[5]
+#infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
+snp.info = args[6]
+# snp.info = '~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx'
 
 ## SNP tiles - not yet adjusted
-load('~/Data/Reid_SNP/PerPatient/tmp_seg_pt.Rdata', verbose=T) 
+load(paste0(snp.data,'/tmp_seg_pt.Rdata'), verbose=T) 
 rownames(mergedSegs) = sub('\\.LogR','', rownames(mergedSegs))
 rownames(mergedArms) = sub('\\.LogR','', rownames(mergedArms))
 snp.segs = mergedSegs
@@ -47,7 +55,7 @@ snp.arms = snp.arms[-nm.rows,]
 # difference between the two is 0.98 so...
 snp.segs = snp.segs + 0.98; snp.arms = snp.arms + 0.98
 
-snp.info = readxl::read_xlsx('~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx') %>% 
+snp.info = readxl::read_xlsx(snp.info) %>% 
   mutate( PID = paste(PatientID, `Timepoint Code`, sep='_'), Patient = as.numeric(PatientID), Hospital.Research.ID = as.character(Patient), Samplename = PID ) 
 
 ## ----
