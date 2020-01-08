@@ -292,17 +292,17 @@ if (file.exists(file)) {
       patient$RR = rr[patient$Samplename,]
       #      patient$Prob.Dev.Resid = sy[patient$Samplename,]
       
-      pg.samp[which(pg.samp$Hospital.Research.ID == pt),] = patient
+      pg.samp[which(pg.samp$Patient == pt),] = patient
       
       if (!is.na(patient)) {
         pt.path = paste0(cache.dir, '/loo')
         dir.create(pt.path, recursive = T, showWarnings = F)
-        
+        print(pg.samp)
         write_tsv(pg.samp, path=paste0(pt.path,'/',patient,'_pred.tsv'))
       }
       
     } else {
-      warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
+      warning(paste("Patient", pt, "did not have a 1se"))
     }
   }
   if (is.na(patient))
