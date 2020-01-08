@@ -533,8 +533,8 @@ preds %>% group_by(Status, Risk) %>% tally %>% spread(Risk, n) %>%
 Despite that, we still see a fairly consistent high/low risk prediction for NP vs P.  However, HGD in NP patients predicts at a rate consistent with progression.
 ```{r echo=F}
 preds = preds %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','ID','LGD','HGD','EAC'), ordered = T))
-rp = plot.risk.by.path(preds) 
-rp
+rp = plot.risk.by.path(preds) + labs(y='% Classified', title='Samples classified by pathology')
+rp 
 
 ggsave('plots/snp/path_risk.png', plot=rp, width=7, height=6, units='in', dpi=300)
 ```
@@ -585,20 +585,20 @@ prog = filter(pred.qc, Status == 'P')
 p1 = ggplot(prog, aes(Prob)) + facet_wrap(~Timepoint, scales='free_y',nrow=1) + 
   geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
   scale_fill_gradientn(colors = myPal,  name='') + 
-  labs(title='Predictions on progressors', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
+  labs(title='Progressor BE', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
 
 nonprog = subset(pred.qc, Status == 'NP')
 p2 = ggplot(nonprog, aes(Prob)) + facet_wrap(~Timepoint, scales='free_y', nrow=1) + 
   geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
   scale_fill_gradientn(colors = myPal,  name='') + 
-  labs(title='Predictions on non-progressors', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
+  labs(title='Non-Progressor BE', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
 
 normals = normals %>% dplyr::mutate(Type = ifelse(grepl('BLD',Samplename), 'Blood','Gastric'))
 
 p3 = ggplot(normals, aes(Prob)) + facet_wrap(~Type, ncol=2, scales = 'free') +
   geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
   scale_fill_gradientn(colors = myPal,  name='') +
-  labs(title='Predictions on Blood/Gastric normals', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
+  labs(title='Blood/Gastric Normals', y='n Samples', x='Unadjusted Probability') + theme(text=element_text(size=12))
 
 grid.arrange(p1,p2,p3,ncol=1)
 

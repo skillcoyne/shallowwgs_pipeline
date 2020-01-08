@@ -28,7 +28,7 @@ get.tiles<-function(files, info, scale=T) {
 }
 
 d.data = args[1]
-#d.data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
+# d.data = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
 v.data = args[2]
 # v.data = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/'
 snp.data = args[3]
@@ -36,9 +36,14 @@ snp.data = args[3]
 outdir = args[4]
 # outdir = '~/Data/BarrettsProgressionRisk/Analysis/dv_snp_model/50kb/'
 infodir = args[5]
-#infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
+# infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 snp.info = args[6]
 # snp.info = '~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx'
+
+patient = NA
+if (length(args) > 6) patient = args[7]
+
+
 
 ## SNP tiles - not yet adjusted
 load(paste0(snp.data,'/tmp_seg_pt.Rdata'), verbose=T) 
@@ -202,10 +207,15 @@ all.coefs = coefs
 ## --------- LOO --------- ##
 message("LOO")
 
+message(patient)
+
 pg.samp = info %>% rowwise %>% dplyr::mutate(
   Probability = NA,
   RR = NA,
 ) %>% filter(Samplename %in% rownames(dysplasia.df))
+
+if (!is.na(patient))
+  pg.samp  = pg.samp %>% filter(Patient == patient)
 
 file = paste(cache.dir, paste0('loo_',select.alpha,'.Rdata'), sep='/')
 if (file.exists(file)) {
@@ -220,10 +230,6 @@ if (file.exists(file)) {
   performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
   # Remove each patient (LOO)
   for (pt in unique(pg.samp$Patient)) {
-#    pt.path = paste0(cache.dir, '/plots/', pt)
-#    dir.create(pt.path, recursive = T, showWarnings = F)
-    
-    #for (pt in names(pg.samp)) {
     print(pt)
     samples = subset(pg.samp, Patient != pt)$Samplename
     
@@ -289,11 +295,19 @@ if (file.exists(file)) {
       
       pg.samp[which(pg.samp$Hospital.Research.ID == pt),] = patient
       
+      if (!is.na(patient)) {
+        pt.path = paste0(cache.dir, '/loo')
+        dir.create(pt.path, recursive = T, showWarnings = F)
+        
+        write_tsv(pg.samp, path=paste0(pt.path,'/',patient,'_pred.tsv'))
+      }
+      
     } else {
       warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
     }
   }
-  save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.samp, file=file)
+  if (is.na(patient))
+    save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.samp, file=file)
 }
 
 

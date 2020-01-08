@@ -1164,7 +1164,7 @@ One way of looking at the p53 prediction (e.g. Adam Bass) is to see how predicti
 p11 = filter(globalCNdf, chr == 17 &  start == 1 & seg.type == 'arms')
 p11Loss = p11 %>% filter(value < -1)
   
-p11Loss %>% filter(value <= -1) %>% group_by(Status) %>% tally(name='p11 Loss') %>% 
+p11Loss %>% group_by(Status) %>% tally(name='p11 Loss') %>% 
   full_join( p11 %>% group_by(Status) %>% tally(name='Total Samples') ) %>% 
   kable(caption='Chr17 p11 loss') %>% kable_styling(full_width = F)
 
@@ -1857,7 +1857,7 @@ p = ggplot(x, aes(x=n.patients, y=cv.performance_mean, group=n.patients, fill=Co
   plot.theme + theme(legend.position = 'bottom', strip.text = element_blank(), panel.spacing = unit(0.5, 'lines')) +
   labs(title='Cross validation performance', y='mean', x='# patients used to train')
 
-legend = get_legend(p)
+legend = cowplot::get_legend(p)
 p = p + theme(legend.position = 'none')
 
 p1 = ggplot(x, aes(x=n.patients, y=n.coefs_mean, group=n.patients, fill=Cohort)) + 
@@ -1876,11 +1876,11 @@ p2 = ggplot(x, aes(x=n.patients, y=auc_mean, group=n.patients, fill=Cohort)) +
   plot.theme + theme(legend.position = 'none', strip.text = element_blank(), panel.spacing = unit(0.5, 'lines')) +
   labs(title='AUC', y='mean', x='# patients used to train')
 
-grid.arrange(arrangeGrob(p,p1,p2,nrow=1), arrangeGrob(legend), heights=c(4,1))
+grid.arrange(arrangeGrob(p,p1,p2,ncol=1), arrangeGrob(legend), heights=c(4,1))
 
 
 ggsave(filename='plots/performance/training_n_pts.png',
-       plot=grid.arrange(arrangeGrob(p,p1,p2,nrow=1), arrangeGrob(legend), heights=c(4,1)), width=12, height=8, units='in', dpi=300)
+       plot=grid.arrange(arrangeGrob(p,p1,p2,ncol=1), arrangeGrob(legend), heights=c(6,1)), width=8, height=12, units='in', dpi=300)
 
 ```
 
