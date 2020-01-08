@@ -40,9 +40,9 @@ infodir = args[5]
 snp.info = args[6]
 # snp.info = '~/Data/BarrettsProgressionRisk/Analysis/SNP/metadata_T1T2.xlsx'
 
-patient = NA
-if (length(args) > 6) patient = args[7]
-# patient = 'PR1_WSH_084'
+loo.pt = NA
+if (length(args) > 6) loo.pt = args[7]
+# loo.pt = 'PR1_WSH_084'
 
 
 ## SNP tiles - not yet adjusted
@@ -206,15 +206,15 @@ all.coefs = coefs
 ## --------- LOO --------- ##
 message("LOO")
 
-message(patient)
+message(loo.pt)
 
 pg.samp = info %>% rowwise %>% dplyr::mutate(
   Probability = NA,
   RR = NA,
 ) %>% filter(Samplename %in% rownames(dysplasia.df))
 
-if (!is.na(patient))
-  pg.samp  = pg.samp %>% filter(Patient == patient)
+if (!is.na(loo.pt))
+  pg.samp  = pg.samp %>% filter(Patient == loo.pt)
 
 file = paste(cache.dir, paste0('loo_',select.alpha,'.Rdata'), sep='/')
 if (file.exists(file)) {
@@ -294,18 +294,18 @@ if (file.exists(file)) {
       
       pg.samp[which(pg.samp$Patient == pt),] = patient
       
-      if (!is.na(patient)) {
+      if (!is.na(loo.pt)) {
         pt.path = paste0(cache.dir, '/loo')
         dir.create(pt.path, recursive = T, showWarnings = F)
         print(pg.samp)
-        write_tsv(pg.samp, path=paste0(pt.path,'/',patient,'_pred.tsv'))
+        write_tsv(pg.samp, path=paste0(pt.path,'/',loo.pt,'_pred.tsv'))
       }
       
     } else {
       warning(paste("Patient", pt, "did not have a 1se"))
     }
   }
-  if (is.na(patient))
+  if (is.na(loo.pt))
     save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.samp, file=file)
 }
 
