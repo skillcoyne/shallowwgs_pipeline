@@ -42,7 +42,7 @@ snp.info = args[6]
 
 patient = NA
 if (length(args) > 6) patient = args[7]
-
+# patient = 'PR1_WSH_084'
 
 
 ## SNP tiles - not yet adjusted
@@ -69,7 +69,6 @@ select.alpha = 0.9
 
 cache.dir = outdir
 dir.create(cache.dir, recursive=T, showWarnings=F)
-
 
 ## Discovery and validation sWGS
 d.resids = do.call(bind_rows,purrr::map(list.files(d.data, 'residuals.tsv', recursive=T, full.names=T), function(f) read_tsv(f, col_types = c('ccddddl'))))
@@ -231,7 +230,7 @@ if (file.exists(file)) {
   # Remove each patient (LOO)
   for (pt in unique(pg.samp$Patient)) {
     print(pt)
-    samples = subset(pg.samp, Patient != pt)$Samplename
+    samples = filter(info, Patient != pt)$Samplename
     
     train.rows = which(rownames(dysplasia.df) %in% samples)
     training = dysplasia.df[train.rows,,drop=F]
