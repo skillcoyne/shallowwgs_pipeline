@@ -94,7 +94,7 @@ for (ra in levels(all.val$RA) ) {
 
     tryCatch({
       info = loadSampleInformation(si %>% filter(Samplename == samples))
-      segmented = BarrettsProgressionRisk::segmentRawData(info,rd,fd,cutoff=0.011,kb=kb,multipcf=kb<100,verbose=T)
+      segmented = BarrettsProgressionRisk::segmentRawData(info,rd,fd,kb=kb,multipcf=kb<100,verbose=T)
       
       raw_dist = tibble(
         patient = segmented$sample.info$Hospital.Research.ID,
@@ -141,6 +141,10 @@ for (ra in levels(all.val$RA) ) {
 
 				write.table(tiles$tiles, sep='\t', quote=F, col.names=NA, row.names=T, file=paste0(dirname(plot.dir), '/5e06_cleaned_tiled.tsv'))
 				write.table(arms$tiles, sep='\t', quote=F, col.names=NA, row.names=T, file=paste0(dirname(plot.dir), '/arms_cleaned_tiled.tsv'))
+				
+				write.table(tiles$tiles, sep='\t', quote=F, col.names=NA, row.names=T, file=paste0(dirname(plot.dir), '/5e06_cleaned_tiled.tsv'))
+				write.table(arms$tiles, sep='\t', quote=F, col.names=NA, row.names=T, file=paste0(dirname(plot.dir), '/arms_cleaned_tiled.tsv'))
+				
   		} 
   }, error = function(e) {
     message(paste("Error in segmentation for patient",pid,'from RA:', ra, ', skipping:\n\t',e))

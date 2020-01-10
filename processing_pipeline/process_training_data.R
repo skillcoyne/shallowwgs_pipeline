@@ -148,7 +148,7 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
   
     cols = which(colnames(fit.data) %in% subset(all.patient.info, Hospital.Research.ID == pt)$Samplename)
   
-    segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)],intPloidy = T, verbose=T, cutoff=0.015*2)
+    segmented = BarrettsProgressionRisk::segmentRawData(info, raw.data[,c(1:4,cols)],fit.data[,c(1:4,cols)], verbose=T, cutoff=0.015*2)
     residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
   
     save(segmented, file=paste0(pd,'/segment.Rdata'))
@@ -180,6 +180,9 @@ for (pt in unique(pts_slx$Hospital.Research.ID)) {
     
     write.table(arms$tiles, file=paste0(pd, '/arms_tiled_segvals.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
     write.table(tiles$tiles, file=paste0(pd, '/5e06_tiled_segvals.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
+    
+    write.table(arms$error, file=paste0(pd, '/arms_tiled_error.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
+    write.table(tiles$error, file=paste0(pd, '/5e06_tiled_error.txt'), quote=F, sep='\t', row.names=T, col.names=NA)
   }
   
 }
