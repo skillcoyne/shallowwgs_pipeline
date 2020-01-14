@@ -103,7 +103,7 @@ model.performance<-function(p1se, coeffs, folds, splits, lims=NULL) {
   return(list('performance'=performance, 'stable.coeffients'=coef.stable, 'cf.per.feature'=cfs,'plot'=p))
 }
 
-roc.plot <- function(roc,title="", incS = T) {
+roc.plot <- function(roc,title="", incS = F) {
   df = cbind.data.frame('specificity'=rev(roc$specificities), 'sensitivity'=rev(roc$sensitivities))
   
   best = as_tibble(round(pROC::coords(roc, "best", transpose=F),2)) 

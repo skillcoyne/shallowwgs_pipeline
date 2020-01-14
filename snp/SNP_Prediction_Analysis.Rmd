@@ -653,7 +653,7 @@ qcdata %>% filter(PatientID %in% pid & SampleType != 'Blood/Gastric Normal')
 # Exclude the low SCA patients
 rocpp = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca), auc=T, ci=T, of='thresholds', transpose=T)
 roc.plot(rocpp) + labs(title='BE biopsies', subtitle='excluding low SCA samples')
-ggsave(filename='plots/snp/auc_ex_lowsca_roc.png', plot = roc.plot(rocpp) + labs(title='BE biopsies', subtitle='excluding low SCA samples') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+ggsave(filename='plots/snp/auc_ex_lowsca_roc.png', plot = roc.plot(rocpp) + labs(title='BE biopsies', subtitle='excluding low SCA samples') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
 
 # Exclude all of the above
 rocexall = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
@@ -663,12 +663,12 @@ ggsave(filename='plots/snp/auc_ex_lowsca_wgs_roc.png', plot =roc.plot(rocexall) 
 # Timepoint 1 only
 roct1 = pROC::roc(Status ~ Prob, data=filter(pred.qc, Timepoint == 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
 roc.plot(roct1) + labs(title='BE biopsies', subtitle='Timepoint T1')
-ggsave(filename='plots/snp/auc_t1_roc.png', plot=roc.plot(roct1) + labs(title='BE biopsies', subtitle='Timepoint T1') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+ggsave(filename='plots/snp/auc_t1_roc.png', plot=roc.plot(roct1) + labs(title='BE biopsies', subtitle='Timepoint T1') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
 
 # Timepoint 2 only
 roct2 = pROC::roc(Status ~ Prob, data=subset(pred.qc, Timepoint != 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds', transpose=T)
 roc.plot(roct2) + labs(title='BE biopsies', subtitle='Timepoint T2')
-ggsave(filename='plots/snp/auc_t2_roc.png', plot=roc.plot(roct2) + labs(title='BE biopsies', subtitle='Timepoint T2') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+ggsave(filename='plots/snp/auc_t2_roc.png', plot=roc.plot(roct2) + labs(title='BE biopsies', subtitle='Timepoint T2') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
 
 ggplot(filter(pred.qc, !wgd.NP & !lowsca), aes(Prob)) +
   geom_histogram(aes(fill=..x..), breaks=seq(0,1,0.1) , show.legend = F) +
