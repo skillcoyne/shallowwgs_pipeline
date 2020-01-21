@@ -130,14 +130,17 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   }
   
   aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), '\nTPR=', round(Sensitivity,2), ' FPR=', round((1-Specificity),2), sep=''))
+
+  aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), sep=''))
   
+    
   df = do.call(rbind, lapply(rocList, function(r) 
     cbind.data.frame('Specificity'=rev(r$specificities), 'Sensitivity'=rev(r$sensitivities),'model'=r$model) 
   ))
 
   p = ggplot(df, aes(Specificity, Sensitivity,color=model,fill=model)) +
         geom_line(show.legend = F, size=1.5) + scale_x_reverse() +
-        geom_label(data=aucs, aes(x=x, y=y, label=label), color='white', show.legend = F) +
+        geom_label_repel(data=aucs, aes(x=x, y=y, label=label), color='white', show.legend = F) +
         labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme
   if (is.null(colors) & !is.null(palette)) {
     colors = RColorBrewer::brewer.pal(length(rocList)+1, palette)
@@ -385,7 +388,7 @@ plot.risk.by.path<-function(preds) {
 }
 
 
-transform.by.time<-function(pt, info) {
+transform.by.time<-function(pt) {
   pt = pt %>% dplyr::group_by(PID, Samplename) %>%  
     dplyr::mutate( 'months.before.final' = (Final.Endoscopy - Endoscopy.Year)*12) %>% 
     arrange(Pathology, PID, Endoscopy.Year) %>% ungroup 
