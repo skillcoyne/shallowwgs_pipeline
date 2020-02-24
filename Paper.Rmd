@@ -1,7 +1,7 @@
 ---
 title: "Paper"
 author: "Sarah Killcoyne"
-date: "2019-11-13"
+date: "`r format(Sys.time(), '%d %B %Y')`"
 output: 
   html_document:
     fig_height: 5
@@ -611,7 +611,7 @@ cutoff = round(pROC::coords(roc, 'best', ret = 'threshold'), 2)
 ### p53 ROC curve
 
 ```{r p53roc, echo=F, fig.height=2, fig.width=2}
-p53samples = subset(patient.info, !is.na(p53.Status), select=c('Samplename','p53.Status','Status'))
+p53samples = subset(patient.info, !is.na(p53.Status), select=c('Samplename','p53.Status','Status', 'Pathology'))
 p53roc = pROC::roc(as.numeric(p53samples$Status)-1, as.integer(p53samples$p53.Status)-1)
 
 pROC::ci.auc(p53roc$auc)
@@ -1015,34 +1015,24 @@ ggsave('plots/spatial/legend.png', plot=grid.arrange(p2$legend), width=2,height=
 
 #### By pathology?
 ```{r, echo=F, warning=F, message=F, fig.height=10, fig.width=12}
-p53Path = pg.samp %>% dplyr::filter(Status == 'P' & !is.na(p53.Status)) %>% 
-  dplyr::group_by(Pathology,p53.Status) %>% 
-  dplyr::summarise(Freq = length(Pathology)) %>% dplyr::mutate(Status = 'p53 IHC')
-
-p53Path = full_join( pg.samp %>% dplyr::filter(Status == 'P' & !is.na(p53.Status)) %>% 
-                       dplyr::group_by(Pathology) %>% 
-                       dplyr::summarise(nPath = length(Pathology)), p53Path, by='Pathology') %>% 
-  dplyr::mutate(ratio = round(Freq/nPath,2))
-
 rp = plot.risk.by.path(pg.samp %>% ungroup) + labs(title='Samples classified by pathology', y='% Classified')
 rp
 ggsave(filename='plots/pred_by_path.png', plot=(rp + theme(legend.position = 'none')), width=7, height=6, units='in', dpi=300)
 ```
 
 ```{r p53IHC, echo=F, warning=F, message=F, fig.height=8, fig.width=8}
-#p53Path$Risk[p53Path$Risk == 'High'] = 'Aberrant'
-#p53Path$Risk[p53Path$Risk == 'Low'] = 'Normal'
-
-#p53Path$p53.Status = factor(p53Path$p53.Status, levels=c('Aberrant', 'Normal'), ordered = F)
+p53Path = pg.samp %>% dplyr::filter(Status == 'P' & !is.na(p53.Status)) %>% 
+  dplyr::group_by(Pathology,p53.Status) %>% tally(name='Freq') %>% ungroup %>% 
+  group_by(Pathology) %>% dplyr::mutate(nPath = sum(Freq), Status = 'p53 IHC', ratio = round(Freq/nPath,2))
 
 p53Path$p53.Status = factor(p53Path$p53.Status, ordered = T)
-p53Path =arrange(p53Path, Pathology, p53.Status)
+p53Path = arrange(p53Path, Pathology, p53.Status)
 col = brewer.pal(11, "PRGn")[c(10,2)]
 rp = ggplot(p53Path, aes(Pathology, ratio*100, group=Pathology, fill=p53.Status)) + geom_bar(stat='identity', position = position_stack()) +
   scale_fill_manual(values=col, name='p53 IHC', labels=c('Normal','Aberrant')) + 
   geom_text(aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), nudge_y=1) +
   geom_text(aes(label=paste(ratio*100,'%',sep='')), position=position_stack(vjust = 0.5), size=5,color='white') +
-  plot.theme + labs(title='Samples predicted by aberrant p53 IHC', y='% Predicted', x='Pathology') + 
+  plot.theme + labs(title='p53 IHC in samples from progressive patients', y='% samples', x='Pathology') + 
   theme(legend.position = 'bottom', text = element_text(size=14))
 rp
 ggsave(filename='plots/p53_pred.png', plot=rp, width=6, height=5, units='in', dpi=300)
@@ -1134,9 +1124,14 @@ plist = purrr::map(sum.patient.data$Patient, function(pt) {
 
   patient = pg.samp %>% filter(Patient == pt) %>% dplyr::select(Patient,Status,Pathology,Endoscopy.Year,Block,Risk,months.before.final) %>% dplyr::rename(Endoscopy = Endoscopy.Year, GEJ.Distance = Block) %>% ungroup
 
-    p = BarrettsProgressionRisk::patientRiskTilesPlot(patient, 'months.before.final','rev') + theme(legend.position = 'none') + labs(x='months',y='location') + theme(plot.title = element_text(face = 'bold', size=16))
+    p = BarrettsProgressionRisk::patientRiskTilesPlot(patient, 'months.before.final','rev', 0.5) + theme(legend.position = 'none') + labs(x='months',y='location') + theme(text = element_text(size = 10), plot.title = element_text(face = 'bold', size=16), axis.text = element_text(size = 10))
   
-    ggsave(paste0('plots/heatmaps/',unique(patient$Status),'/pt_',pt,'.png'), plot = p, height=length(unique(patient$GEJ.Distance))+1, width=length(unique(patient$months.before.final))+1, units='in', dpi=300, limitsize=F) 
+      h = (length(unique(patient$GEJ.Distance))+1)*0.5
+  if (length(unique(patient$GEJ.Distance)) <= 1) h = (length(unique(patient$GEJ.Distance))+1)*0.8
+  w = (length(unique(patient$months.before.final))+1)*0.5
+  if (length(unique(patient$months.before.final)) <= 1) w = (length(unique(patient$months.before.final))+1)*0.8
+    
+    ggsave(paste0('plots/heatmaps/',unique(patient$Status),'/pt_',pt,'.png'), plot = p, height=h, width=w, units='in', dpi=300, limitsize=F) 
 
     return(p)
 })
@@ -1530,9 +1525,14 @@ for (pt in unique(val.preds$Patient)) {
       dplyr::select(Patient, Status, Endoscopy, months.before.final, Pathology,Block,Risk) %>% 
       dplyr::rename(GEJ.Distance = Block)
 
-  p = BarrettsProgressionRisk::patientRiskTilesPlot(patient, 'months.before.final', 'rev') + labs(x='months', y='location') + theme(legend.position = 'none',plot.title = element_text(face = 'bold', size=16))
+  p = BarrettsProgressionRisk::patientRiskTilesPlot(patient, 'months.before.final', 'rev', 0.5) + labs(x='months', y='location') + theme(legend.position = 'none',plot.title = element_text(face = 'bold', size=16), text = element_text(size=12), axis.text = element_text(size=12))
 
-    ggsave(paste0('plots/validation/heatmaps/',unique(patient$Status),'/pt_',pt,'.png'), plot = p, height=length(unique(patient$GEJ.Distance))+1, width=length(unique(patient$months.before.final))+1, units='in', dpi=300, limitsize=F) 
+    h = (length(unique(patient$GEJ.Distance))+1)*0.8
+  if (length(unique(patient$GEJ.Distance)) <= 1) h = (length(unique(patient$GEJ.Distance))+1)
+  w = (length(unique(patient$months.before.final))+1)*0.8
+  if (length(unique(patient$months.before.final)) <= 1) w = (length(unique(patient$months.before.final))+1)
+    
+    ggsave(paste0('plots/validation/heatmaps/',unique(patient$Status),'/pt_',pt,'.png'), plot = p, height=h, width=w, units='in', dpi=300, limitsize=F) 
 }
 
 sq = c(0, 1, 1*12, 2*12, 4*12, 6*12, 8*12, 10*12, 15*12)
@@ -1807,6 +1807,80 @@ second %>% filter(Status == 'NP' & Rule == '1') %>% ungroup  %>%
   dplyr::summarise_at(vars(months.before.final), list(~min(.), ~max(.), ~mean(.), ~median(.))) 
 ```
 
+# CoxHD with clinical factors
+```{r, eval=F}
+library(CoxHD)
+
+time<-function(x) {
+  for (i in 1:nrow(x)) {
+    if (i == 1) {
+      x[i,'tstart'] = 0
+      x[i, 'tstop'] = x[(i+1), 'Endoscopy.Year'] - x[i, 'Endoscopy.Year']
+      if (is.na(x[i,'tstop']) || x[i,'tstop'] == 0) x[i,'tstop'] = 0.5
+      next
+    }  
+
+    x[i,'tstart'] = x[(i-1), 'tstop']
+
+    # Final sample is different -- will leave it out later
+    if (i == nrow(x)) {
+      x[i, 'tstop'] = x[i,'tstart'] + 0.5
+      break
+    }
+
+    x[i, 'tstop'] =  x[i,'tstart'] + x[(i+1), 'Endoscopy.Year'] - x[i, 'Endoscopy.Year']
+
+    # Samples taken in the same year
+    if ( x[i, 'Endoscopy.Year'] == x[(i+1), 'Endoscopy.Year'] )
+      x[i,'tstop'] = x[i,'tstop'] + 0.5 
+  }
+  return(x[,c('tstart','tstop')])
+}
+
+
+coxDF = do.call(bind_rows, purrr::map(unique(pg.samp$Patient), function(pt) {
+  df = pg.samp %>% filter(Patient == pt) %>% arrange(Endoscopy.Year)
+  df %>% bind_cols(time(df))
+})) %>%  dplyr::select(Samplename, Patient, Status, Risk, Prediction, Pathology, tstart, tstop, Age.at.diagnosis, Smoking, Sex, Maximal) %>% 
+  mutate(Diagnosis = as.integer(Pathology %in% c('HGD','IMC')) ) %>%  dplyr::select(Samplename, Patient, Status, tstart, tstop, Diagnosis, everything() )
+
+coxDF = bind_cols(coxDF, as_tibble(dysplasia.df[coxDF$Samplename,features$label])) %>% 
+  rename_at( vars(matches('\\d+:')), list(~paste0('chr',gsub(':|-','.', .))) ) %>% 
+  mutate(Smoking = as.integer(Smoking)-1, Sex = as.integer(Sex)-1, Pathology = as.integer(Pathology)-1) %>% ungroup
+
+coxSM = CoxHD::StandardizeMagnitude(dplyr::select(coxDF, -matches('Samplename|Patient|Status|Risk|Prediction|Pathology|tstart|tstop|Diagnosis')))
+coxSM = bind_cols(dplyr::select(coxDF, Samplename, tstart, tstop, Diagnosis), as_tibble(coxSM))
+
+surv = with(coxSM, Surv(tstart, tstop, Diagnosis))
+
+groups = factor(c(rep('clinical',4),c(rep('genomic', nrow(features)))))
+rfx = CoxRFX(as.data.frame(coxSM[,-c(1:4)]), surv, groups, verbose=T, nu=1)
+summary(rfx)
+
+plot(rfx)
+
+wt = WaldTest(rfx)
+survConcordance(surv ~ predict(rfx))
+
+wt$label = sub('\\.', '-', sub('\\.', ':', sub('chr', '', rownames(wt))))
+wt = merge(wt, features[,c('label','hazards', 'coef','stability')], by='label', all=T) 
+
+wt[is.na(wt$hazards), c('hazards', 'coef.y')] = 0
+plot.waldtest(wt) + labs(x='RFX coef',y='GLM coef', title='RFX vs GLM coefficients', subtitle='Labeled points have a significant p-value in RFX (except BE/ID)')
+
+
+
+#gcols = colnames(coxDF)
+#cols = features$label
+
+
+coxSM = cbind(coxDF[,c(1:3)], StandardizeMagnitude(coxDF[,-c(1:3)]))
+
+
+```
+
+
+
 # Check COX
 
 ```{r}
@@ -1862,7 +1936,6 @@ dvsnp.roc = pROC::roc(Status ~ Probability, data=dvsnp.preds, ci=T, of='threshol
 
 dvsnp.dv.auc = pROC::auc(Status ~ Probability, data = dvsnp.preds %>% filter(cohort != 'snp') )
 dvsnp.snp.auc = pROC::auc(Status ~ Probability, data = dvsnp.preds %>% filter(cohort == 'snp') )
-
 
 dvsnp.preds = dvsnp.preds %>% mutate(type = ifelse(cohort == 'snp', 'snp', 'sWGS')) 
 
@@ -1963,5 +2036,6 @@ ggsave(filename='plots/performance/training_n_pts.png',
        plot=grid.arrange(arrangeGrob(p,p1,p2,ncol=1), arrangeGrob(legend), heights=c(6,1)), width=8, height=12, units='in', dpi=300)
 
 ```
+
 
 

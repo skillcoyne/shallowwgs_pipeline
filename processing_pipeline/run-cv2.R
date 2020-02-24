@@ -23,7 +23,7 @@ outdir = args[2]
 infodir = args[3]
 # infodir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 set = 'All'
-#set = 'Training'
+
 #if (length(args) == 4) set = args[4]
 
 select.alpha = 0.9
@@ -118,6 +118,37 @@ dim(dysplasia.df)
 
 save(dysplasia.df, labels, mn.cx, sd.cx, z.mean, z.sd, z.arms.mean, z.arms.sd, file=paste(cache.dir, 'model_data.Rdata', sep='/'))
 #rm(raw.segs, raw.arms)
+
+# 
+# clin = dplyr::select(patient.info, Samplename, Smoking, Sex, Age.at.diagnosis, Maximal) %>% mutate_if(is.factor, list(~as.integer(.)-1)) %>% filter(Samplename %in% rownames(dysplasia.df))
+# clin %>% mutate(Smoking = sample(c(0,1),1,T,prob=c(0.22,0.78)))
+# 
+# clin$Smoking[which(is.na(clin$Smoking))] = sample(c(0,1),length(which(is.na(clin$Smoking)) ),T,prob=c(0.22,0.78))
+# clin$Maximal[which(is.na(clin$Maximal))] = mean(clin$Maximal,na.rm=T)
+# 
+# xclin = cbind(dysplasia.df[clin$Samplename,], (data.frame(dplyr::select(clin, -Samplename))))
+# dim(xclin)
+# 
+# standardizeMagnitude<-function(X) {
+#   .scale <- function(x) {
+#     if (max(x, na.rm = TRUE) == 0) 
+#       1
+#     else 10^floor(log10(max(x, na.rm = TRUE)))
+#   }
+#   scale <- sapply(X, .scale)
+#   Y <- X * rep(1/scale, each = nrow(X))
+#   n <- as.character(scale)
+#   i <- n != "1"
+#   names(Y)[i] <- paste(names(X)[i], n[i], sep = "_")
+#   return(Y)
+# }
+# 
+# x = standardizeMagnitude(xclin)
+# x = x[names(labels),]
+# dim(x)
+# 
+# dysplasia.df = as.matrix(x)
+# dim(dysplasia.df)
 
 nl = 1000;folds = 10; splits = 5 
 sets = create.patient.sets(patient.info[c('Hospital.Research.ID','Samplename','Status')], folds, splits, 0.2)  
