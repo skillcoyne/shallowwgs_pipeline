@@ -15,13 +15,6 @@ suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 data = args[1]
 patient.file = args[2]
 outdir = args[3]
-data = '~/Data/BarrettsProgressionRisk/QDNAseq/qc_batches/merged/100kb/'
-patient.file = '~/Data/BarrettsProgressionRisk/QDNAseq/qc_batches/qc_batches.xlsx'
-outdir = '~/Data/BarrettsProgressionRisk/Analysis/qc_batches'
-# data = '~/Data/Ellie/QDNAseq/validation/merged/100kb'
-# patient.file = '~/Data/Ellie/QDNAseq/validation/sWGS_validation_batches.xlsx'
-# outdir = '~/Data/Ellie/Analysis/validation'
-# patient.name = 'AHM1990'
 
 patient.name = NULL
 if (length(args) == 4)
