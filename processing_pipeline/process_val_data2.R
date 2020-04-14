@@ -15,6 +15,9 @@ suppressPackageStartupMessages( library(BarrettsProgressionRisk) )
 data = args[1]
 patient.file = args[2]
 outdir = args[3]
+data = '~/Data/BarrettsProgressionRisk/QDNAseq/qc_batches/merged/100kb/'
+patient.file = '~/Data/BarrettsProgressionRisk/QDNAseq/qc_batches/qc_batches.xlsx'
+outdir = '~/Data/BarrettsProgressionRisk/Analysis/qc_batches'
 # data = '~/Data/Ellie/QDNAseq/validation/merged/100kb'
 # patient.file = '~/Data/Ellie/QDNAseq/validation/sWGS_validation_batches.xlsx'
 # outdir = '~/Data/Ellie/Analysis/validation'
@@ -24,20 +27,26 @@ patient.name = NULL
 if (length(args) == 4)
   patient.name = gsub('\\/', '_', args[4])
 
-sheets = readxl::excel_sheets(patient.file)[8:14]
+#sheets = readxl::excel_sheets(patient.file)[8:14]
+sheets = readxl::excel_sheets(patient.file)
+
+all = grep('ALL', sheets)
+if (length(all) == 1) sheets = sheets[all]
+
 all.patient.info = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(patient.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status|Endoscopy|Block|Path'), `Sample Type`, `SLX-ID`, `Index Sequence`,Cohort) %>% 
+  readxl::read_xlsx(patient.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status|Endoscopy|Block|Path'), `Sample Type`, `SLX-ID`, `Index Sequence`) %>% 
     dplyr::mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
 })) %>% dplyr::rename('SLX.ID'='SLX-ID', 'Hospital.Research.ID'='Hospital Research ID', 'Block'='Block ID')
 
 #all.patient.info =all.patient.info %>% filter(Cohort != 'Old progressor scrolls')
 
 pastefun<-function(x) {
+  print(x)
   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
   return(x)
 }
 all.patient.info = all.patient.info %>% rowwise %>% 
-  mutate_at(vars(`SLX.ID`), list(pastefun) ) %>% ungroup %>%
+  mutate(SLX.ID = pastefun(SLX.ID) ) %>% ungroup %>%
   mutate(`Hospital.Research.ID` = str_replace_all( str_remove_all(`Hospital.Research.ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', '')) %>% 
   mutate(Samplename = paste(`SLX.ID`, `Index Sequence`, sep='.')) 
 
