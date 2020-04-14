@@ -6,6 +6,24 @@ plot.theme = theme(text=element_text(size=12), panel.background=element_blank(),
                    axis.line=element_line(color='black'), panel.grid.major=element_line(color='grey90'),
                    panel.border = element_rect(color="grey", fill=NA, size=0.5), panel.spacing = unit(0.1, 'lines')  ) 
 
+get.roc.stat<-function(roc, x='best') {
+  auc = c( pROC::auc(roc), range(pROC::ci.auc(roc))  )
+  sens = c(pROC::coords(roc, x, tranpose=T)[['sensitivity']], pROC::ci.se(roc,pROC::coords(roc, x, tranpose=T)[['specificity']], conf.level=0.95))
+  spec = c(pROC::coords(roc, x, tranpose=T)[['specificity']], pROC::ci.sp(roc,pROC::coords(roc, x, tranpose=T)[['sensitivity']], conf.level=0.95))
+  
+  stat = rbind('AUC'=auc, 'Sensitivity'=sens[c(1,2,4)], 'Specificity'=spec[c(1,2,4)])
+  colnames(stat) = c ('value','CI.min','CI.max')
+  stat = as.data.frame(stat)
+  stat$model = roc$model
+  stat$Measure = rownames(stat)
+  stat
+}
+
+get.auc.at<-function(roc, foc='spec', p=c(1,0.99)) {
+  # To find the auc at a given spec or sens
+  pROC::auc(roc, partial.auc=p, partial.auc.focus=foc, partial.auc.correct=T)
+}
+
 
 get.legend<-function(a.gplot){
   tmp <- ggplot_gtable(ggplot_build(a.gplot))
@@ -103,7 +121,7 @@ model.performance<-function(p1se, coeffs, folds, splits, lims=NULL) {
   return(list('performance'=performance, 'stable.coeffients'=coef.stable, 'cf.per.feature'=cfs,'plot'=p))
 }
 
-roc.plot <- function(roc,title="", incS = F) {
+roc.plot <- function(roc,title="", incS = T) {
   df = cbind.data.frame('specificity'=rev(roc$specificities), 'sensitivity'=rev(roc$sensitivities))
   
   best = as_tibble(round(pROC::coords(roc, "best", transpose=F),2)) 
@@ -112,10 +130,12 @@ roc.plot <- function(roc,title="", incS = F) {
     label = paste0('(FPR ', round((1-best$specificity),2),' TPR ', round(best$sensitivity,2),')\n', label )
   }
   
+  st = paste0('95% CI: ', paste(round(range(pROC::ci.auc(roc$auc)),2), collapse='-'))
+  
   ggplot(df, aes(specificity, sensitivity)) + geom_line() + scale_x_reverse() + 
     geom_label(data=as.data.frame(t(round(pROC::coords(roc, "best", transpose=T),2))), 
                aes(x=specificity, y=sensitivity,label=label), nudge_y=ifelse(incS,0.1,0), nudge_x = ifelse(incS, 0.15, 0)) +
-    labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)') + plot.theme
+    labs(title=title, subtitle=st, x='Specificity (1-FPR)', y='Sensitivity (TPR)') + plot.theme
 }
 
 multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
@@ -129,7 +149,7 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
     aucs$x = 0.5
   }
   
-  aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), '\nTPR=', round(Sensitivity,2), ' FPR=', round((1-Specificity),2), sep=''))
+  #aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), '\nTPR=', round(Sensitivity,2), ' FPR=', round((1-Specificity),2), sep=''))
 
   aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), sep=''))
   
@@ -139,15 +159,14 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   ))
 
   p = ggplot(df, aes(Specificity, Sensitivity,color=model,fill=model)) +
-        geom_line(show.legend = F, size=1.5) + scale_x_reverse() +
-        geom_label_repel(data=aucs, aes(x=x, y=y, label=label), color='white', show.legend = F) +
+        geom_line(size=1) + scale_x_reverse() +
         labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme
   if (is.null(colors) & !is.null(palette)) {
     colors = RColorBrewer::brewer.pal(length(rocList)+1, palette)
   } else if (is.null(colors) & is.null(palette)) {
     colors = RColorBrewer::brewer.pal(length(rocList)+1,'Set1')
   }
-  p = p + scale_color_manual(values=colors) + scale_fill_manual(values=colors)
+  p = p + scale_color_manual(name='', values=colors) + scale_fill_manual(name = '', values=colors)
  
   return(p)
 }
@@ -317,12 +336,16 @@ min.theme = theme(text=element_text(size=12), panel.background=element_blank(), 
                   panel.spacing.y = unit(0.05, 'lines')   ) 
 
 
-mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
+mtn.spatial<-function(df, b, limits, title='', pal=NULL, ylim=c(-5,5)) {
   df$mean.value = df$value
+  
+  if (is.null(ylim)) ylim = range(df$value)
+  #print(ylim)
+  
   if (is.null(pal))
     pal = RColorBrewer::brewer.pal(length(limits), 'Set2')
   
-  df = left_join(df, b %>% dplyr::select('Samplename','Endoscopy.Year','months.before.final','Block','ogj'), by=c('variable' = 'Samplename'))
+  df = left_join(df,  dplyr::select(b, 'Samplename','Endoscopy.Year','months.before.final','Block','ogj'), by=c('variable' = 'Samplename'))
   
   df$ogj = factor(df$ogj, ordered = T)
   df$ogj = factor(df$ogj, levels=rev(levels(df$ogj)), ordered = T)
@@ -339,7 +362,8 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL) {
     return('')
   }
   
-  p = ggplot(df, aes(x=chr.length)) + facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
+  p = ggplot(df, aes(x=chr.length)) + ylim(ylim) +
+    facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
     geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
     scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
     labs(title=title, x='') + min.theme + theme(axis.line = element_blank(), strip.background=element_rect(fill="white"), strip.text.x = element_text(size = 11) )

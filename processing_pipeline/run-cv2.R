@@ -391,7 +391,7 @@ if (lnhgd) {
       
       if (nrow(test) <= 0) next
       
-      patient.samples = pg.sampNOHGD %>% filter(Hospital.Research.ID == pt) %>% select(Samplename)
+      patient.samples = pg.sampNOHGD %>% filter(Hospital.Research.ID == pt) %>% dplyr::select(Samplename)
       # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
       sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
                                   dimnames=list(rownames(test),colnames(training)), sparse=T)
@@ -445,6 +445,101 @@ if (lnhgd) {
       }
     }
     save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.sampNOHGD, file=file)
+  }
+}
+
+
+## --------- LOO NO HGD/LGD--------- ##
+lnlgd = T 
+if (lnlgd) {
+  message("LOO NO HGD/LGD")
+  
+  pg.sampNOLGD = patient.info %>% rowwise %>% dplyr::mutate(
+    PID = sub('_$', '', unlist(strsplit(Path.ID, 'B'))[1]),
+    Prediction = NA,
+    RR = NA,
+    Prediction.Dev.Resid = NA
+  ) %>% filter(Samplename %in% rownames(dysplasia.df) & Pathology %nin% c('LGD','HGD','IMC'))
+  
+  select.alpha = 0.9
+  
+  file = paste(cache.dir, 'loonolgd.Rdata', sep='/')
+  if (file.exists(file)) {
+    load(file, verbose=T)
+  } else {
+    dysplasia.dfNOLGD = dysplasia.df[intersect(rownames(dysplasia.df),subset(patient.info, Pathology %nin% c('LGD','HGD','IMC'))$Samplename),]
+    
+    secf = all.coefs[[select.alpha]]
+    a = select.alpha
+    
+    performance.at.1se = c(); coefs = list(); plots = list(); fits = list(); nzcoefs = list()
+    # Remove each patient (LOO)
+    for (pt in unique(pg.sampNOLGD$Hospital.Research.ID)) {
+      #for (pt in names(pg.sampNOHGD)) {
+      print(pt)
+      
+      samples = subset(pg.sampNOLGD, Hospital.Research.ID != pt)$Samplename
+      
+      train.rows = which(rownames(dysplasia.dfNOLGD) %in% samples)
+      training = dysplasia.df[train.rows,,drop=F]
+      test = as.matrix(dysplasia.dfNOLGD[-train.rows,,drop=F])
+      
+      if (nrow(test) <= 0) next
+      
+      patient.samples = pg.sampNOLGD %>% filter(Hospital.Research.ID == pt) %>% dplyr::select(Samplename)
+      # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
+      sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
+                                  dimnames=list(rownames(test),colnames(training)), sparse=T)
+      
+      for(i in colnames(dysplasia.dfNOLGD)) sparsed_test_data[,i] = test[,i]
+      
+      # Fit generated on all samples, including HGD
+      fitLOO <- glmnet(training, labels[train.rows], alpha=a, family='binomial', nlambda=nl, standardize=F) # all patients
+      l = fitLOO$lambda
+      
+      cv = crossvalidate.by.patient(x=training, y=labels[train.rows], lambda=l, a=a, nfolds=folds, splits=splits,
+                                    pts=subset(sets, Samplename %in% samples),sampleID=2, fit=fitLOO, standardize=F)
+      
+      plots[[pt]] = arrangeGrob(cv$plot+ggtitle('Classification'), cv$deviance.plot+ggtitle('Binomial Deviance'), top=pt, ncol=2)
+      
+      fits[[pt]] = cv  
+      
+      if ( length(cv$lambda.1se) > 0 ) {
+        performance.at.1se = c(performance.at.1se, subset(cv$lambdas, lambda == cv$lambda.1se)$mean)
+        
+        #coef.1se = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
+        nzcoefs[[pt]] = as.data.frame(non.zero.coef(fitLOO, cv$lambda.1se))
+        
+        coefs[[pt]] = coef(fitLOO, cv$lambda.1se)[rownames(secf),]
+        #coef.stability(coef.1se, cv$non.zero.cf)
+        
+        logit <- function(p){log(p/(1-p))}
+        inverse.logit <- function(or){1/(1 + exp(-or))}
+        
+        pm = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='response')
+        colnames(pm) = 'Prediction'
+        
+        rr = predict(fitLOO, newx=sparsed_test_data, s=cv$lambda.1se, type='link')
+        colnames(rr) = 'RR'
+        
+        sy = as.matrix(sqrt(binomial.deviance(pm,labels[intersect(patient.samples$Samplename, names(labels))])))
+        colnames(sy) = 'Prediction.Dev.Resid'
+        if (nrow(test) == 1) rownames(sy) = rownames(pm)
+        
+        patient = pg.sampNOLGD %>% filter(Hospital.Research.ID == pt) %>% arrange(Samplename) 
+        
+        patient$Prediction = pm[patient$Samplename,]
+        patient$RR = rr[patient$Samplename,]
+        patient$Prediction.Dev.Resid = sy[patient$Samplename,]
+        
+        pg.sampNOLGD[which(pg.sampNOLGD$Hospital.Research.ID == pt),] = patient
+        
+        
+      } else {
+        warning(paste("Hospital.Research.ID", pt, "did not have a 1se"))
+      }
+    }
+    save(plots, performance.at.1se, coefs, nzcoefs, fits, pg.sampNOLGD, file=file)
   }
 }
 

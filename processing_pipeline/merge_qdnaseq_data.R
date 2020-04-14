@@ -16,8 +16,8 @@ val.file = args[2]
 normals = F
 if (length(args) == 3) normals = as.logical(args[3])
 
- data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
-  val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
+# data = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/'
+# val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
 #val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/training/All_patient_info.xlsx'
 
 pastefun<-function(x) {

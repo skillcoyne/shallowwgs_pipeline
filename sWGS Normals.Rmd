@@ -12,7 +12,7 @@ library(tidyverse)
 library(BarrettsProgressionRisk)
 library(glmnet)
 library(gridExtra)
-library(pander)
+library(kableExtra)
 source('lib/load_patient_metadata.R')
 #source('lib/data_func.R')
 #source('lib/fastPCF.R')
@@ -21,33 +21,33 @@ data.dir = '~/Data/BarrettsProgressionRisk/QDNAseq'
 analysis.dir = '~/Data/BarrettsProgressionRisk/Analysis'
 #data.files = list.files(, full.names = T)
 
-modeldir = '~/Data/BarrettsProgressionRisk/Analysis/5e6_arms_all'
+modeldir = paste0(analysis.dir,'/models_5e6_all/50kb')
 
 patient.file = list.files(data.dir, pattern='All_patient_info.xlsx', recursive=T, full.names=T)
 demo.file = list.files(data.dir, pattern='Demographics_full.xlsx', recursive=T, full.names=T)
 
 rpi = read.patient.info(patient.file, demo.file)
-normals = rpi$normal
+normals = rpi$normal %>% mutate(Samplename = sub('_','-',Samplename))
 
 data.files = list.files(paste0(analysis.dir, '/normals'), 'segment.Rdata', recursive = T, full.names = T)
 
-
 resids = do.call(bind_rows, purrr::map(list.files(paste0(analysis.dir, '/normals'), 'residuals.tsv', recursive = T, full.names = T), function(f) read_tsv(f)))
+resids = left_join( dplyr::select(normals, Patient, Hospital.Research.ID, Samplename, Plate.Index), resids, by=c('Samplename'='samplename')) 
 
-resids = sample.residual.variance(seg.residuals)
-resids = merge(normals[,c('Patient','Hospital.Research.ID','Samplename')], resids, by.x='Samplename', by.y='sample')
+failedQC = filter(resids, !Pass)
 
-failedQC = arrange(subset(resids, round(var1sd_median,3) > 0.012, select=c(Hospital.Research.ID,Samplename, var1sd_median,var1sd_sd, var1sd_Q1,var1sd_Q3)),  var1sd_median)
-
-
-pander(normals[,c('Patient','Hospital.Research.ID','Status','Endoscopy.Year','Pathology notes')], caption='Normal samples', justify='left')
+normals %>% dplyr::select(-matches('Cellularity|p53|Reads|Batch|Set')) %>% kable(caption = 'Normal samples') %>% kable_styling(full_width = F)
 ```
 
 
 `r nrow(failedQC)` samples failed the variant residual QC based on a cutoff determined by the discovery cohort.
 
 
-```{r, echo=F, warning=F, fig.height=30, fig.width=8}
+```{r, echo=F, warning=F, fig.height=32, fig.width=12}
+plist = lapply(data.files, function(f) {
+  load(f)
+  BarrettsProgressionRisk::plotSegmentData(segmented)
+})
 do.call(grid.arrange, c(plist, ncol=1))
 ```
 
@@ -56,7 +56,6 @@ do.call(grid.arrange, c(plist, ncol=1))
 Using the model trained on the progressors and non-progressors in the initial cohort the normal samples can be predicted as well.
 
 ```{r, echo=F}
-
 file = paste(modeldir, 'model_data.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
@@ -65,22 +64,54 @@ file = paste(modeldir, 'all.pt.alpha.Rdata', sep='/')
 if (!file.exists(file))
   stop(paste("Missing data file", file))
 load(file, verbose=F)
+fit = models[['0.9']]
+lambda = performance.at.1se[['0.9']]$lambda  
+cvRR = BarrettsProgressionRisk:::cvRR(dysplasia.df, coefs[['0.9']])
 rm(dysplasia.df,coefs,plots,labels)
+file = paste(modeldir, 'loo_0.9.Rdata', sep='/')
+if (!file.exists(file))
+  stop(paste("Missing data file", file))
+load(file, verbose=F)
+rm(plots, performance.at.1se, coefs, fits, pg.samp)
 
-select.alpha = '0.9'
-fitV = models[[select.alpha]]
-lambda.opt = performance.at.1se[[select.alpha]][, 'lambda']
+be.model = BarrettsProgressionRisk:::be.model.fit(fit, lambda, 50, 5e6, z.mean, z.arms.mean, z.sd, z.arms.sd, mn.cx, sd.cx, nzcoefs, cvRR)
+
+preds = tibble()
+plist = list()
+for (f in data.files) { 
+  load(f)
+  
+  tiles = BarrettsProgressionRisk:::tileSamples(segmented, be.model = be.model, scale=T, MARGIN=2, verbose=F)
+
+  prr = BarrettsProgressionRisk:::predictRisk(segmented, tiles, be.model, verbose=F)
+  
+  plist[f] = grid.arrange(BarrettsProgressionRisk::copyNumberMountainPlot(prr))
+  
+  preds = bind_rows(preds, predictions(prr))
+}
 
 
-tiled.segs = segment.matrix(tiled.normals)
-tiled.arms = segment.matrix(tiled.normal.arms)
+paste0(analysis.dir, '/normals')
+files = list.files(paste0(analysis.dir, '/normals'), '5e06_.*tiled', recursive=T, full.names = T)
+tiled.segs = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% dplyr::rename('Sample' = 'X1')
 
-cx.score = score.cx(tiled.segs,1)
+files = list.files(paste0(analysis.dir, '/normals'), 'arms_.*tiled', recursive=T, full.names = T)
+tiled.arms = do.call(bind_rows, purrr::map(files, function(f) {
+  read_tsv(f,col_types=c(.default=col_double()))
+})) %>% dplyr::rename('Sample' = 'X1')
+
+tiles.segs[,-1]
+
+cx.score = BarrettsProgressionRisk::scoreCX(tiled.segs,1)
+
+
 
 for (i in 1:ncol(tiled.segs)) 
-  tiled.segs[,i] = unit.var(tiled.segs[,i], z.mean[i], z.sd[i])
+  tiled.segs[,i] = BarrettsProgressionRisk:::unit.var(tiled.segs[,i], z.mean[i], z.sd[i])
 for (i in 1:ncol(tiled.arms)) 
-  tiled.arms[,i] = unit.var(tiled.arms[,i], z.arms.mean[i], z.arms.sd[i])
+  tiled.arms[,i] = BarrettsProgressionRisk:::unit.var(tiled.arms[,i], z.arms.mean[i], z.arms.sd[i])
 
 mergedDf = subtract.arms(tiled.segs, tiled.arms)
 mergedDf = cbind(mergedDf, 'cx' = unit.var(cx.score, mn.cx, sd.cx))
