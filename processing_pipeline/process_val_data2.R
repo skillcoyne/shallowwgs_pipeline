@@ -26,26 +26,17 @@ sheets = readxl::excel_sheets(patient.file)
 all = grep('ALL', sheets)
 if (length(all) == 1) sheets = sheets[all]
 
-all.patient.info = do.call(bind_rows, lapply(sheets, function(s) {
+all.patient.info = do.call(bind_rows, purrr::map(sheets, function(s) {
   readxl::read_xlsx(patient.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status|Endoscopy|Block|Path'), `Sample Type`, `SLX-ID`, `Index Sequence`) %>% 
     dplyr::mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) %>% dplyr::filter(!is.na(`SLX-ID`))
-})) %>% dplyr::rename('SLX.ID'='SLX-ID', 'Hospital.Research.ID'='Hospital Research ID', 'Block'='Block ID')
+})) %>% dplyr::rename('SLX.ID'='SLX-ID', 'Hospital.Research.ID'='Hospital Research ID', 'Block'='Block ID') 
 
-#all.patient.info =all.patient.info %>% filter(Cohort != 'Old progressor scrolls')
-
-pastefun<-function(x) {
-  print(x)
-  if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
-  return(x)
-}
-all.patient.info = all.patient.info %>% rowwise %>% 
-  mutate(SLX.ID = pastefun(SLX.ID) ) %>% ungroup %>%
+all.patient.info = all.patient.info %>% 
   mutate(`Hospital.Research.ID` = str_replace_all( str_remove_all(`Hospital.Research.ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', '')) %>% 
-  mutate(Samplename = paste(`SLX.ID`, `Index Sequence`, sep='.')) 
+  mutate(Samplename = paste(`SLX.ID`, sub('-','_',`Index Sequence`), sep='.')) 
 
 pts_slx = all.patient.info %>% dplyr::select(`SLX.ID`, `Hospital.Research.ID`) %>% distinct %>% arrange(`Hospital.Research.ID`)
 
-#datafile = paste(data,'excluded_qdnaseq_output.Rdata',sep='/')
 datafile = paste(data,"merged_raw_fit.Rdata", sep='/')
 if (!file.exists(datafile)) stop("Run merge_qdnaseq_data.R first")
 
@@ -75,28 +66,10 @@ for (pt in unique(pts_slx$`Hospital.Research.ID`)) {
       dplyr::select('Hospital.Research.ID', 'Samplename','Endoscopy','Block','Pathology') %>% 
       dplyr::rename('Sample' = 'Samplename', 'GEJ.Distance' = 'Block')
     info = BarrettsProgressionRisk::loadSampleInformation(info, path=c('NDBE','ID','LGD','HGD','IMC'))
-  
+
     cols = which(colnames(merged.fit) %in% info$Sample)
     
     segmented = BarrettsProgressionRisk::segmentRawData(info, merged.raw[,c(1:4,cols)],merged.fit[,c(1:4,cols)], verbose=T, kb = kb, multipcf = F )
-    
-    raw_dist = tibble(
-      patient = segmented$sample.info$Hospital.Research.ID,
-      sample = segmented$sample.info$Sample,
-
-      min = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~min(.,na.rm=T))) %>% t())[,1],
-      max = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~max(.,na.rm=T))) %>% t())[,1],
-
-      mean = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~mean(.,na.rm=T))) %>% t())[,1],
-      median = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~median(.,na.rm=T))) %>% t())[,1],
-      stdev = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~sd(.,na.rm=T))) %>% t())[,1],
-      var = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~var(.,na.rm=T))) %>% t())[,1],
-      
-      Q1 = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~quantile(.,probs=0.25,na.rm=T))) %>% t())[,1],
-      Q3 = (segmented$prepped.data %>% dplyr::summarise_at(vars(-chrom, -start), list(~quantile(.,probs=0.75,na.rm=T))) %>% t())[,1]
-    )
-    raw_dist %>% write_tsv(path=paste0(pd,'/raw_dist.tsv'))
-    
     residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
   
     save(segmented, file=paste0(pd,'/segment.Rdata'))
