@@ -10,14 +10,12 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-
 library(tidyverse)
 library(gridExtra)
 library(kableExtra)
 
-
 dir1 = '~/Data/BarrettsProgressionRisk/Analysis/pcf_perPatient/50kb/'
-dir2 = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient/50kb/'
+dir2 = '~/Data/BarrettsProgressionRisk/Analysis/qc_batches/pcf_perPatient/50kb/'
 
 ```
 
@@ -35,8 +33,8 @@ kable(head(res.variance), caption='Example residuals across segments per sample'
 
 ```{r, echo=F, fig.height=10}
 res.variance = arrange(res.variance,varMAD_median)
-cutoff = round(median(res.variance$varMAD_median)+sd(res.variance$varMAD_median)*2, 3)
-#cutoff = 0.015
+cutoff = median(res.variance$varMAD_median)+sd(res.variance$varMAD_median)*2
+cutoff = 0.008
 
 grid.arrange(
   ggplot(res.variance,aes(sample=varMAD_median)) + stat_qq() + geom_hline(yintercept=cutoff, linetype='dashed',color='grey') + 
@@ -68,14 +66,12 @@ failedQC = res.variance %>% filter( round(varMAD_median,3) > cutoff )
 Cutoff from above dataset applied to the initial validation set.
 
 ```{r, echo=F}
-val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/validation/sWGS_validation_batches.xlsx'
-sheets = readxl::excel_sheets(val.file)[1:4]
+val.file = '~/Data/BarrettsProgressionRisk/QDNAseq/qc_batches/qc_batches.xlsx'
+sheets = readxl::excel_sheets(val.file)
 all.val = do.call(bind_rows, lapply(sheets, function(s) {
-  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`, Cohort, Batch, RA, matches('Collection')) %>% 
-    dplyr::filter(!is.na(`SLX-ID`) & RA == 'C.Kosmidou') %>% 
+  readxl::read_xlsx(val.file, s) %>% dplyr::select(`Hospital Research ID`, matches('Status'), `Block ID`,`Sample Type`, `SLX-ID`, `Index Sequence`,  Batch, matches('Collection')) %>% 
     mutate_at(vars(`SLX-ID`, `Block ID`), list(as.character)) 
-}))
-all.val = all.val %>% dplyr::select(-Collection)
+})) %>% dplyr::select(-Collection)
 
 pastefun<-function(x) {
   if ( !grepl('SLX-', x) ) x = paste0('SLX-',x)
@@ -86,7 +82,7 @@ all.val = all.val %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>%
 all.val = all.val %>% mutate(
   `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), 
   `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
-  Sample = paste(`SLX-ID`,`Index Sequence`,sep='.')
+  Sample = paste(`SLX-ID`,sub('-','_',`Index Sequence`),sep='.')
   )
 
 
