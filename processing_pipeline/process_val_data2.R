@@ -55,7 +55,7 @@ kb = as.integer(sub('kb', '',basename(data)))
 tiled = NULL; tile.MSE = NULL
 arms.tiled = NULL; arm.MSE = NULL
 
-all.patient.info %<>% mutate(Endoscopy = 1, Block = ifelse(is.na(as.numeric(Block)),1,as.numeric(Block)))
+all.patient.info = mutate(Endoscopy = 1, Block = ifelse(is.na(as.numeric(Block)),1,as.numeric(Block)))
 
 for (pt in unique(pts_slx$`Hospital.Research.ID`)) {
   tryCatch({
@@ -73,7 +73,7 @@ for (pt in unique(pts_slx$`Hospital.Research.ID`)) {
   
       cols = which(colnames(merged.fit) %in% info$Sample)
       
-      segmented = BarrettsProgressionRisk::segmentRawData(info, merged.raw[,c(1:4,cols)],merged.fit[,c(1:4,cols)], verbose=T, kb = kb, multipcf = F, cutoff = 1 )
+      segmented = BarrettsProgressionRisk::segmentRawData(info, merged.raw[,c(1:4,cols)],merged.fit[,c(1:4,cols)], verbose=T, kb = kb, multipcf = F, cutoff = 1.0001)
       residuals = BarrettsProgressionRisk::sampleResiduals(segmented) %>% add_column('patient'=pt, .before=1)
     
       save(segmented, file=paste0(pd,'/segment.Rdata'))
