@@ -33,7 +33,7 @@ all.patient.info = do.call(bind_rows, purrr::map(sheets, function(s) {
 
 all.patient.info = all.patient.info %>% 
   mutate(`Hospital.Research.ID` = str_replace_all( str_remove_all(`Hospital.Research.ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', '')) %>% 
-  mutate(Samplename = paste(`SLX.ID`, sub('-','_',`Index Sequence`), sep='.')) 
+  mutate(Samplename = paste(`SLX.ID`, gsub('tp','',sub('-','_',`Index Sequence`)), sep='.')) 
 
 pts_slx = all.patient.info %>% dplyr::select(`SLX.ID`, `Hospital.Research.ID`) %>% distinct %>% arrange(`Hospital.Research.ID`)
 
@@ -55,7 +55,7 @@ kb = as.integer(sub('kb', '',basename(data)))
 tiled = NULL; tile.MSE = NULL
 arms.tiled = NULL; arm.MSE = NULL
 
-all.patient.info = mutate(Endoscopy = 1, Block = ifelse(is.na(as.numeric(Block)),1,as.numeric(Block)))
+all.patient.info = mutate(all.patient.info, Endoscopy = 1, Block = ifelse(is.na(as.numeric(Block)),1,as.numeric(Block)))
 
 for (pt in unique(pts_slx$`Hospital.Research.ID`)) {
   tryCatch({
