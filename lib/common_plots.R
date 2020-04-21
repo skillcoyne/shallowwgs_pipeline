@@ -121,10 +121,10 @@ model.performance<-function(p1se, coeffs, folds, splits, lims=NULL) {
   return(list('performance'=performance, 'stable.coeffients'=coef.stable, 'cf.per.feature'=cfs,'plot'=p))
 }
 
-roc.plot <- function(roc,title="", incS = T) {
+roc.plot <- function(roc,title="", incS = T, threshold = 'best') {
   df = cbind.data.frame('specificity'=rev(roc$specificities), 'sensitivity'=rev(roc$sensitivities))
   
-  best = as_tibble(round(pROC::coords(roc, "best", transpose=F),2)) 
+  best = as_tibble(round(pROC::coords(roc, threshold, transpose=F),2)) 
   label = paste0('AUC:',round(roc$auc, 2))
   if (incS) {
     label = paste0('(FPR ', round((1-best$specificity),2),' TPR ', round(best$sensitivity,2),')\n', label )
@@ -133,25 +133,25 @@ roc.plot <- function(roc,title="", incS = T) {
   st = paste0('95% CI: ', paste(round(range(pROC::ci.auc(roc$auc)),2), collapse='-'))
   
   ggplot(df, aes(specificity, sensitivity)) + geom_line() + scale_x_reverse() + 
-    geom_label(data=as.data.frame(t(round(pROC::coords(roc, "best", transpose=T),2))), 
+    geom_label(data=as.data.frame(t(round(pROC::coords(roc, threshold, transpose=T),2))), 
                aes(x=specificity, y=sensitivity,label=label), nudge_y=ifelse(incS,0.1,0), nudge_x = ifelse(incS, 0.15, 0)) +
     labs(title=title, subtitle=st, x='Specificity (1-FPR)', y='Sensitivity (TPR)') + plot.theme
 }
 
-multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
+multi.roc.plot <- function(rocList, threshold='best', title="ROC", palette=NULL, colors=NULL) {
   aucs = do.call(rbind, lapply(rocList,function(r) 
-    cbind.data.frame('AUC'=r$auc,'model'=r$model,'Specificity'=pROC::coords(r,'best',transpose=T)[['specificity']], 'Sensitivity'=pROC::coords(r,'best',transpose=T)[['sensitivity']])))
-  aucs$y = aucs$Sensitivity
-  aucs$x = aucs$Specificity
+    cbind.data.frame('AUC'=r$auc,'model'=r$model,'Specificity'=pROC::coords(r, threshold,transpose=T)[['specificity']], 'Sensitivity'=pROC::coords(r,threshold,transpose=T)[['sensitivity']])))
+  aucs$best.y = aucs$Sensitivity
+  aucs$best.x = aucs$Specificity
 
-  if (nrow(aucs) > 3) {
-    aucs$y = seq(0.1,1, 1/nrow(aucs))
-    aucs$x = 0.5
+  if (nrow(aucs) > 2) {
+    aucs$y = rev(seq(0.1,1, 0.1))[1:nrow(aucs)]
+    aucs$x = 0.1
   }
   
-  #aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), '\nTPR=', round(Sensitivity,2), ' FPR=', round((1-Specificity),2), sep=''))
+  aucs$label=with(aucs, paste('(TPR=', round(Sensitivity,2), ' FPR=', round((1-Specificity),2), ')\nAUC ', round(AUC,2), sep=''))
 
-  aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), sep=''))
+  #aucs$label=with(aucs, paste(model, '\nAUC ', round(AUC,2), sep=''))
   
     
   df = do.call(rbind, lapply(rocList, function(r) 
@@ -159,14 +159,22 @@ multi.roc.plot <- function(rocList, title="ROC", palette=NULL, colors=NULL) {
   ))
 
   p = ggplot(df, aes(Specificity, Sensitivity,color=model,fill=model)) +
-        geom_line(size=1) + scale_x_reverse() +
+        geom_line() + scale_x_reverse() +
+        geom_point(data=aucs,aes(best.x,best.y), color='grey39', shape='*', size=8, show.legend = F) +
         labs(title=title, x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme
+  
+  if (nrow(aucs) <= 2) {
+    p = p + geom_label_repel(data=aucs,aes(best.x,best.y,label=label), color='white', show.legend = F, segment.size = 0.2, nudge_x=0.5, segment.colour = 'grey39') 
+  } else {
+    p = p + geom_label_repel(data=aucs,aes(x,y,label=label), color='white', show.legend = F) 
+  }
+  
   if (is.null(colors) & !is.null(palette)) {
     colors = RColorBrewer::brewer.pal(length(rocList)+1, palette)
   } else if (is.null(colors) & is.null(palette)) {
     colors = RColorBrewer::brewer.pal(length(rocList)+1,'Set1')
   }
-  p = p + scale_color_manual(name='', values=colors) + scale_fill_manual(name = '', values=colors)
+  p = p + scale_color_manual(name='', values=colors) + scale_fill_manual(name = '', values=colors) + theme(legend.position = 'bottom')
  
   return(p)
 }
@@ -291,24 +299,23 @@ plot.endo<-function(df, minM=NULL, maxM=NULL, bin=F) {
   }
 }
 
-vig.plot<-function(df, info, cols=c('green3','orange','red3'), pathology=F, add.title=F) {
-  scale = seq(min(info$Endoscopy.Year), max(info$Endoscopy.Year), 1)
-  subtitle = with(info, paste(unique(Age.at.diagnosis),unique(Sex),': ', sep=''))
-  if (!is.na(unique(info$Smoking)))                             
+vig.plot<-function(df, cols=c('green3','orange','red3'), pathology=F, add.title=F) {
+  scale = seq(min(df$Endoscopy.Year), max(df$Endoscopy.Year), 1)
+  subtitle = with(df, paste(unique(Age.at.diagnosis),unique(Sex),': ', sep=''))
+  if (!is.na(unique(df$Smoking)))                             
     subtitle = paste(subtitle, ifelse(unique(info$Smoking) == 'Y', 'smoker, ','non-smoker, '),sep='')
   
-  subtitle = paste(subtitle, 'M', unique(info$Maximal), sep='')
+  subtitle = paste(subtitle, 'M', unique(df$Maximal), sep='')
   
   if (!is.na(unique(info$Circumference)))
     subtitle = paste(subtitle, 'C', info$Circumference, sep='')
   
   subtitle = paste(subtitle, " BE diagnosed ", unique(info$Initial.Endoscopy), sep='')
   
-  df$Risk = factor(df$Risk, levels=c('Low','Moderate','High'), ordered = T)
-  df$p53.Status = factor(df$p53.Status, levels=c(0,1), ordered = T)
+  df = df %>% mutate(Risk = factor(df$Risk, levels=c('Low','Moderate','High'), ordered = T), p53.Status = factor(p53.Status, levels=c(0,1), ordered = T))
 
   p = ggplot(df, aes(Endoscopy.Year, nl)) + geom_tile(aes(fill=Risk), color='white', size=1.5) + 
-    scale_fill_manual(values=cols, limits=levels(df$Risk),name='Progression') 
+    scale_fill_manual(values=cols, limits=levels(df$Risk),name='Risk') 
   
   if (!pathology) {
     p = p + geom_point(aes(shape=Pathology), color='white', fill='white', size=5) + 
@@ -318,7 +325,7 @@ vig.plot<-function(df, info, cols=c('green3','orange','red3'), pathology=F, add.
     p = p + geom_text(aes(label=Pathology, color=Risk), show.legend=F) + scale_color_manual(values=c('white','black','white')) 
   }
     p = p + labs(y='Oesophageal Location',x='Endoscopies') + scale_x_continuous(breaks=scale) + 
-        plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='right',  legend.key = element_rect(fill='grey39')) 
+        plot.theme + theme(axis.text.x=element_text(angle=45, hjust=1),legend.position='right',  legend.key = element_rect(fill='grey39', color=NA)) 
     if (add.title)
       p = p + labs(title=paste('Patient',unique(info$Patient)), subtitle=subtitle)
     
@@ -366,7 +373,7 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL, ylim=c(-5,5)) {
     facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
     geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
     scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
-    labs(title=title, x='') + min.theme + theme(axis.line = element_blank(), strip.background=element_rect(fill="white"), strip.text.x = element_text(size = 11) )
+    labs(title=title, x='') + min.theme + theme(axis.line = element_blank(), strip.background=element_rect(fill="white", color=NA), strip.text.x = element_text(size = 11) )
 
   legend = get.legend(p)
   p = p + theme(legend.position = 'none')

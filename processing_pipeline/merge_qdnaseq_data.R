@@ -26,7 +26,7 @@ pastefun<-function(x) {
 }
 
 sheets = readxl::excel_sheets(val.file)
-
+all = grep('All',sheets,value=T)
 
 if (length(all) == 1) {
   all.info = read.patient.info(val.file, sheet=all)
@@ -44,9 +44,9 @@ if (length(all) == 1) {
       mutate_at(vars(`SLX-ID`), list(as.character))
   }))
   all.info = all.info %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>% ungroup
-  all.info = all.info %>% mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''))  
+  all.info = all.info %>% 
+    mutate(`Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''))  
 }
-
 
 print(unique(all.info$`SLX-ID`))
 

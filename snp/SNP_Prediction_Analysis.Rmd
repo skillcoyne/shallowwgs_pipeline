@@ -548,11 +548,10 @@ ggsave('plots/snp/path_risk.png', plot=rp, width=7, height=6, units='in', dpi=30
 # ggsave(filename = 'plots/snp/all_samp_roc.png', plot = roc.plot(roc) + labs(title='SNP ROC', subtitle='All samples') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 
 rocBE = pROC::roc(Status ~ Prob, data=preds, auc=T, ci=T, of='thresholds')
-roc.plot(rocBE) + labs(title='SNP ROC, BE biopsies')
-
+roc.plot(rocBE,title='SNP ROC, BE biopsies',incS = T, 0.3)
 rocBE$model = 'per Biopsy'
 
-ggsave(filename = 'plots/snp/be_roc.png', plot = roc.plot(rocBE, 'SNP ROC: BE biopsies') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
+ggsave(filename = 'plots/snp/be_roc.png', plot = roc.plot(rocBE, 'SNP ROC: BE biopsies', T, 0.3) + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 ```
 
 A quick look at the two random samples from earlier.  
@@ -644,7 +643,6 @@ In this case the status has changed slightly. All patients that had a HGD/IMC pa
 rocEX = pROC::roc( Path.Status ~ Prob, data=pred.qc, auc=T, ci=T, of='thresholds')
 roc.plot(rocEX) + labs(title='BE biopsies: Path status (HGD/IMC)')
 ggsave(filename='plots/snp/path_status_roc.png', plot = roc.plot(rocEX) + labs(title='BE biopsies', subtitle='Path status (HGD/IMC)') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
-
 rocEX$model = 'HGD/IMC progressed'
 
 notlow = filter(pred.qc, !lowsca)
@@ -656,37 +654,33 @@ qcdata %>% filter(PatientID %in% pid & SampleType != 'Blood/Gastric Normal')
 rocpp = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca), auc=T, ci=T, of='thresholds')
 roc.plot(rocpp, 'BE biopsies: excl. low SCA samples')
 ggsave(filename='plots/snp/auc_ex_lowsca_roc.png', plot = roc.plot(rocpp, 'BE biopsies: excl. low SCA samples') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
-
 rocpp$model = 'All excl. low SCA'
 
 # Exclude all of the above
 rocexall = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds')
 roc.plot(rocexall, 'BE biopsies: excl. low SCA & WGD NP')
 ggsave(filename='plots/snp/auc_ex_lowsca_wgs_roc.png', plot =roc.plot(rocexall, 'BE biopsies: excl. low SCA & WGD NP') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
-
 rocexall$model = 'excl. low SCA & (NP) WGD'
 
 # Timepoint 1 only
 roct1 = pROC::roc(Status ~ Prob, data=filter(pred.qc, Timepoint == 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds')
 roc.plot(roct1, 'BE biopsies: Timepoint T1')
 ggsave(filename='plots/snp/auc_t1_roc.png', plot=roc.plot(roct1, 'BE biopsies: Timepoint T1') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
-
 roct1$model = 'Timepoint 1 (with exclusions)'
 
 # Timepoint 2 only
 roct2 = pROC::roc(Status ~ Prob, data=subset(pred.qc, Timepoint != 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds')
 roc.plot(roct2, 'BE biopsies: Timepoint T2')
 ggsave(filename='plots/snp/auc_t2_roc.png', plot=roc.plot(roct2, 'BE biopsies: Timepoint T2') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
-
 roct2$model = 'Timepoint 2  (with exclusions)'
 
 m = bind_rows(
-      get.roc.stat(rocBE),
-      get.roc.stat(rocEX),
-      get.roc.stat(rocexall),
-      get.roc.stat(rocpp),
-      get.roc.stat(roct1),
-      get.roc.stat(roct2)
+      get.roc.stat(rocBE,0.3),
+      get.roc.stat(rocEX,0.3),
+      get.roc.stat(rocexall,0.3),
+      get.roc.stat(rocpp,0.3),
+      get.roc.stat(roct1,0.3),
+      get.roc.stat(roct2,0.3)
 ) %>% dplyr::mutate_if(is.numeric, list(~round(.,2))) %>%
   dplyr::mutate(model = factor(model, levels = c(rocBE$model, rocEX$model, rocexall$model, rocpp$model, roct1$model, roct2$model), ordered = T))
 
@@ -698,7 +692,7 @@ p = ggplot(m, aes(model, value, ymin=CI.min, ymax=CI.max, group=Measure)) +
   scale_y_continuous(limits=c(0,1)) +
   scale_fill_brewer(palette='Set2') +
   theme(legend.position = 'right',text = element_text(size=14), axis.text.x = element_text(angle=45, hjust=1)) + 
-  labs(x='', y='ROC', title='Model comparisons') 
+  labs(x='', y='ROC', title='Model comparisons', subtitle = 'threshold = 0.3') 
 p 
 ggsave(filename='plots/snp/roc_comparisons.png', plot=p, width=7, height=5, units='in', dpi=300)
 

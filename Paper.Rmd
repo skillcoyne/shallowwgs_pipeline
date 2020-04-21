@@ -15,6 +15,7 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, message = F, warning = F)
 library(tidyverse)
+library(broom)
 library(BarrettsProgressionRisk)
 library(ggrepel)
 library(kableExtra)
@@ -485,18 +486,18 @@ ggsave('plots/performance/loo_perf_nohgd.png', plot=p, width=5, height=5, units=
 pg.sampNOHGD = pg.sampNOHGD %>% filter(!is.na(Prediction))
 
 rocNOHGD = pROC::roc(Status ~ Prediction, data=pg.sampNOHGD[c('Status', 'Prediction')], ci=T, of='thresholds')
-roc.plot(rocNOHGD, 'Model excluding HGD/IMC',incS = T) 
+roc.plot(rocNOHGD, 'Model excluding HGD/IMC',incS = T, 0.3) 
 
-pROC::coords(rocNOHGD, 'best', transpose=F) %>% add_column('AUC'=pROC::auc(rocNOHGD)) %>% mutate_all(list(~round(.,2))) %>% 
+pROC::coords(rocNOHGD, 0.3, transpose=F) %>% add_column('AUC'=pROC::auc(rocNOHGD)) %>% mutate_all(list(~round(.,2))) %>% 
   kable(caption = 'LOO excluding HGD/IMC') %>% kable_styling(full_width = F)
 
-ggsave(filename='plots/auc/roc_nohgd_model.png', plot=roc.plot(rocNOHGD, 'Model excluding HGD/IMC',incS = T) , width=6, height=6, units='in', dpi=300)
+ggsave(filename='plots/auc/roc_nohgd_model.png', plot=roc.plot(rocNOHGD, 'Model excluding HGD/IMC',T, 0.3) , width=6, height=6, units='in', dpi=300)
 ```
 
 
 #### LOO minus HGD/LGD
 
-```{r loonohgd, echo=F, message=F, warning=T}
+```{r loonolgd, echo=F, message=F, warning=T}
 file = paste(cache.dir, 'loonolgd.Rdata', sep='/')
 if (file.exists(file)) {
   message(paste("loading file", file))
@@ -513,40 +514,15 @@ if (file.exists(file)) {
 pg.sampNOLGD = pg.sampNOLGD %>% filter(!is.na(Prediction))
 
 rocNOLGD = pROC::roc(Status ~ Prediction, data=pg.sampNOLGD[c('Status', 'Prediction')], ci=T, of='thresholds')
-roc.plot(rocNOLGD, 'Model excluding LGD/HGD/IMC',incS = T) 
+roc.plot(rocNOLGD, 'Model excluding LGD/HGD/IMC',T,0.3) 
 
-pROC::coords(rocNOLGD, 'best', transpose=F) %>% add_column('AUC'=pROC::auc(rocNOLGD)) %>% mutate_all(list(~round(.,2))) %>% 
+pROC::coords(rocNOLGD, 0.3, transpose=F) %>% add_column('AUC'=pROC::auc(rocNOLGD)) %>% mutate_all(list(~round(.,2))) %>% 
   kable(caption = 'LOO excluding LGD/HGD/IMC') %>% kable_styling(full_width = F)
 
-ggsave(filename='plots/auc/roc_nolgd_model.png', plot=roc.plot(rocNOLGD, 'Model excluding LGD/HGD/IMC',incS = T) , width=6, height=6, units='in', dpi=300)
+ggsave(filename='plots/auc/roc_nolgd_model.png', plot=roc.plot(rocNOLGD, 'Model excluding LGD/HGD/IMC',T, 0.3) , width=6, height=6, units='in', dpi=300)
 ```
 
-```{r}
-roc$model = 'All samples model'
-rocNOHGD$model = 'Excluding HGD/IMC'
-rocNOLGD$model = 'Excluding LGD/HGD/IMC'
 
-m = bind_rows(
-      get.roc.stat(roc),
-      get.roc.stat(rocNOHGD)
-#      get.roc.stat(rocNOLGD)
-      ) %>% dplyr::mutate(model = factor(model)) %>% dplyr::mutate_if(is.numeric, list(~round(.,2))) 
-
-p = ggplot(m, aes(model, value, ymin=CI.min, ymax=CI.max, group=Measure)) + 
-  geom_bar(aes(fill=Measure), stat='identity',position=dodge) + 
-  geom_errorbar(position=dodge, width=0.3, color='black' ) +
-  geom_text(aes(label=paste(value,sep=''), y=CI.max), vjust=-0.5, position=dodge) + plot.theme + 
-  scale_y_continuous(limits=c(0,1)) +
-  scale_fill_brewer(palette='Set2') +
-  theme(legend.position = 'right',text = element_text(size=14), axis.text.x = element_text(angle=45, hjust=1)) + 
-  labs(x='', y='ROC', title='Model comparisons') 
-
-auc.leg = get.legend(p)
-
-ggsave('plots/auc/loo_model_roc.png', plot=p + theme(legend.position = 'none'), height=6, width=4.5, units="in", limitsize=F, dpi = 300)
-
-#ggsave('plots/auc/multi_auc.png', plot=p+theme(legend.position = 'none'), height=6, width=8, units='in',dpi=300)
-```
 
 
 #### Insilico splits
@@ -635,17 +611,17 @@ pendo = pg.samp %>% dplyr::group_by(Patient, Status, Hospital.Research.ID, PID )
 
 rocEndoM = pROC::roc(Status ~ max, data=pendo, ci=T, of='thresholds')
 rocEndoM$model = 'Max per Endoscopy'
-ggsave('plots/auc/maxendo_auc.png', plot=roc.plot(rocEndoM, title='Max per Endoscopy'), width=6, height=6, units="in", limitsize=F, dpi = 300)
+ggsave('plots/auc/maxendo_auc.png', plot=roc.plot(rocEndoM, title='Max per Endoscopy', T, 0.3), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
 rocEndoA = pROC::roc(Status ~ avg, data=pendo, ci=T, of='thresholds')
 rocEndoA$model = 'Mean per Endoscopy'
-ggsave('plots/auc/avgendo_auc.png', plot=roc.plot(rocEndoA, title='Mean per Endoscopy'), width=6, height=6, units="in", limitsize=F, dpi = 300)
+ggsave('plots/auc/avgendo_auc.png', plot=roc.plot(rocEndoA, title='Mean per Endoscopy', T, 0.3), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
 lastEndo = pg.samp %>% group_by(Patient, Hospital.Research.ID, Status,Endoscopy.Year, PID) %>% arrange(desc(Endoscopy.Year), PID)  %>% dplyr::summarise(avg = mean(Prediction) ) %>% ungroup %>% group_by(Patient) %>% dplyr::filter( Endoscopy.Year == max(Endoscopy.Year) ) %>% dplyr::select(-Endoscopy.Year, -PID)
 
 rocLastEndo = pROC::roc(Status ~ avg, data=lastEndo, ci=T, of='thresholds')
 rocLastEndo$model = 'Last endoscopy'
-ggsave('plots/auc/lastendo_auc.png', plot=roc.plot(rocLastEndo, title='Last endoscopy'), width=6, height=6, units="in", limitsize=F, dpi = 300)
+ggsave('plots/auc/lastendo_auc.png', plot=roc.plot(rocLastEndo, title='Last endoscopy', T, 0.3), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
 firstEndo = pg.samp %>% group_by(Patient, Hospital.Research.ID, Status,Endoscopy.Year, PID) %>% 
   arrange(Endoscopy.Year, PID)  %>% dplyr::summarise(avg = mean(Prediction) ) %>% ungroup %>% 
@@ -653,24 +629,24 @@ firstEndo = pg.samp %>% group_by(Patient, Hospital.Research.ID, Status,Endoscopy
 
 rocFirstEndo = pROC::roc(Status ~ avg, data=firstEndo, ci=T, of='thresholds')
 rocFirstEndo$model = 'First endoscopy'
-ggsave('plots/auc/firstendo_auc.png', plot=roc.plot(rocFirstEndo, title='First Endoscopy'), width=6, height=6, units="in", limitsize=F, dpi = 300)
+ggsave('plots/auc/firstendo_auc.png', plot=roc.plot(rocFirstEndo, title='First Endoscopy', T, 0.3), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
 pendo.rand = pg.samp %>% dplyr::group_by(Patient, Status, PID) %>%
   dplyr::summarise( r.Prob = sample(Prediction, 1), n = length(PID) ) %>% filter(n > 1)
 rocRandEndo = pROC::roc(Status ~ r.Prob, data=pendo.rand, ci=T, of='thresholds')
 rocRandEndo$model = 'Per Endoscopy Random'
-ggsave('plots/auc/randomendo_auc.png', plot=roc.plot(rocRandEndo, title='Random per Endoscopy'), width=6, height=6, units="in", limitsize=F, dpi = 300)
+ggsave('plots/auc/randomendo_auc.png', plot=roc.plot(rocRandEndo, title='Random per Endoscopy', T, 0.3), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
-endo.thresholds = bind_cols('roc'=c('Max','Mean','Last','First','Random'),
-  bind_rows(
-    pROC::coords(rocEndoM, 'best', transpose = T),
-    pROC::coords(rocEndoA, 'best', transpose = T),
-    pROC::coords(rocLastEndo, 'best', transpose = T),
-    pROC::coords(rocFirstEndo, 'best', transpose = T),
-    pROC::coords(rocRandEndo, 'best', transpose = T)
-  ))
+# endo.thresholds = bind_cols('roc'=c('Max','Mean','Last','First','Random'),
+#   bind_rows(
+#     pROC::coords(rocEndoM, 'best', transpose = T),
+#     pROC::coords(rocEndoA, 'best', transpose = T),
+#     pROC::coords(rocLastEndo, 'best', transpose = T),
+#     pROC::coords(rocFirstEndo, 'best', transpose = T),
+#     pROC::coords(rocRandEndo, 'best', transpose = T)
+#   ))
 
-multi.roc.plot(list(rocEndoM, rocEndoA, rocLastEndo, rocFirstEndo, rocRandEndo)) + labs(title='Endoscopy prediction ROCs')
+multi.roc.plot(list(rocEndoM, rocEndoA, rocLastEndo, rocFirstEndo, rocRandEndo), threshold = 0.3) + labs(title='Endoscopy prediction ROCs')
 ```
 
 ### Per Patient ROC
@@ -686,17 +662,14 @@ ptendo = ptendo %>% filter(!is.na(mean))
 rocPtM = pROC::roc(Status ~ max, data=ptendo, ci=T, of='thresholds')
 #pROC::coords(rocPtM, 'best', transpose=T)
 rocPtM$model = 'Max per Patient'
-ggsave('plots/auc/maxpt_auc.png', plot=roc.plot(rocPtM, title='Max per Patient (excl. final)'), width=6, height=6, units="in", limitsize=F, dpi = 300)
+ggsave('plots/auc/maxpt_auc.png', plot=roc.plot(rocPtM, title='Max per Patient (excl. final)', T, 0.3), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
 rocPtA = pROC::roc(Status ~ mean, data=ptendo, ci=T, of='thresholds')
 #pROC::coords(rocPtA, 'best', transpose=T))
 rocPtA$model = 'Mean per Patient'
-ggsave('plots/auc/avgpt_auc.png', plot=roc.plot(rocPtA, title='Mean per Patient (excl. final)'), width=6, height=6, units="in", limitsize=F, dpi = 300)
+ggsave('plots/auc/avgpt_auc.png', plot=roc.plot(rocPtA, title='Mean per Patient (excl. final)', T, 0.3), width=6, height=6, units="in", limitsize=F, dpi = 300)
 
-grid.arrange(roc.plot(rocPtM, title='Max') , roc.plot(rocPtA, title='Mean'), nrow=1, top='Per Patient')
-
-multi.roc.plot(list(rocPtM, rocPtA)) + labs(title='Per-Patient ROCs')
-
+multi.roc.plot(list(rocPtM, rocPtA), threshold = 0.3) + labs(title='Per-Patient ROCs', subtitle = 'threshold = 0.3')
 ```
 
 ### Compare ROCs
@@ -713,11 +686,9 @@ m = bind_rows(
       get.roc.stat(p53roc),
       get.roc.stat(hgdpathroc),
       get.roc.stat(pathroc),
-      get.roc.stat(roc)) %>%
+      get.roc.stat(roc, 0.3)) %>%
   dplyr::mutate(model = factor(model, levels=c('p53 IHC','HGD Only','HGD & LGD','CN Model'), ordered = T)) %>% 
   dplyr::mutate_if(is.numeric, list(~round(.,2))) 
-
-rocList = list(roc,pathroc,hgdpathroc,p53roc)
 
 cols = brewer.pal(4, "PRGn")
 dodge = position_dodge(width=0.9)
@@ -739,18 +710,49 @@ comp = ggplot(m, aes(model, value, ymin=CI.min, ymax=CI.max, group=Measure)) + #
   theme(text = element_text(size=14), axis.text.x = element_text(angle=45, hjust=1)) + 
   labs(x='', y='AUC', title='ROC Comparison') 
 
-
 ggsave('plots/auc/path_p53_cn_auc.png', plot=comp, width=6, height=5, units="in", limitsize=F, dpi = 300)
 ```
 
+```{r}
+roc$model = 'All samples model'
+rocNOHGD$model = 'Excluding HGD/IMC'
+rocNOLGD$model = 'Excluding LGD/HGD/IMC'
+
+m = bind_rows(
+      get.roc.stat(roc,0.3),
+      get.roc.stat(rocNOHGD,0.3)
+#      get.roc.stat(rocNOLGD)
+      ) %>% dplyr::mutate(model = factor(model)) %>% dplyr::mutate_if(is.numeric, list(~round(.,2))) 
+
+p = ggplot(m, aes(model, value, ymin=CI.min, ymax=CI.max, group=Measure)) + 
+  geom_bar(aes(fill=Measure), stat='identity',position=dodge) + 
+  geom_errorbar(position=dodge, width=0.3, color='black' ) +
+  geom_text(aes(label=paste(value,sep=''), y=CI.max), vjust=-0.5, position=dodge) + plot.theme + 
+  scale_y_continuous(limits=c(0,1)) +
+  scale_fill_brewer(palette='Set2') +
+  theme(legend.position = 'right',text = element_text(size=12)) + 
+  labs(x='', y='ROC', title='LOO model comparisons', subtitle = 'threshold = 0.3') 
+auc.leg = get.legend(p)
+
+#p = multi.roc.plot(list(roc,rocNOHGD), threshold = 0.3, palette = 'Dark2' ) + labs(title='LOO model comparisons', subtitle = 'threshold = 0.3')
+p
+
+#ggsave('plots/auc/loo_model_roc.png', plot=p + theme(legend.position = 'none'), height=4, width=4, units="in", limitsize=F, dpi = 300)
+
+ggsave('plots/auc/loo_model_roc.png', plot=p + theme(legend.position = 'none'), height=4, width=4, units="in", limitsize=F, dpi = 300)
+
+#ggsave('plots/auc/multi_auc.png', plot=p+theme(legend.position = 'none'), height=6, width=8, units='in',dpi=300)
+```
 
 ```{r}
 roc$model = "per Sample"
 
+multi.roc.plot(list(roc,rocEndoM, rocEndoA), threshold = 0.3, palette = 'Dark2' ) + labs(title='Aggregated per Endoscopy ', subtitle = 'threshold = 0.3')
+
 m = bind_rows(
-      get.roc.stat(roc),
-      get.roc.stat(rocEndoM),get.roc.stat(rocEndoA),
-      get.roc.stat(rocPtM), get.roc.stat(rocPtA)
+      get.roc.stat(roc,0.3),
+      get.roc.stat(rocEndoM,0.3),get.roc.stat(rocEndoA,0.3),
+      get.roc.stat(rocPtM,0.3), get.roc.stat(rocPtA,0.3)
       #get.roc.stat(rocFirstEndo), get.roc.stat(rocLastEndo),
       #get.roc.stat(rocRandEndo)
       ) %>% 
@@ -764,7 +766,9 @@ p = ggplot(m, aes(model, value, ymin=CI.min, ymax=CI.max, group=Measure)) +
   scale_y_continuous(limits=c(0,1)) +
   scale_fill_brewer(palette='Set2') +
   theme(legend.position = 'bottom',text = element_text(size=14), axis.text.x = element_text(angle=45, hjust=1)) + 
-  labs(x='', y='AUC', title='Aggregated ROC Comparison') 
+  labs(x='', y='ROC ', title='Aggregated ROC Comparison', subtitle='threshold = 0.3') 
+
+
 
 # cols = brewer.pal(11, 'Paired')
 # dodge = position_dodge(width=0.9)
@@ -778,6 +782,8 @@ p = ggplot(m, aes(model, value, ymin=CI.min, ymax=CI.max, group=Measure)) +
 #   scale_fill_manual(values=cols, name='') + plot.theme + 
 #   theme(legend.position='none', axis.text.x=element_text(angle=45, hjust=1)) + labs(x='', y='AUC', title='ROC Comparison') 
 auc.leg = get.legend(p)
+
+p
 
 ggsave('plots/auc/multi_auc.png', plot=p+theme(legend.position = 'none'), height=6, width=8, units='in',dpi=300)
 ggsave('plots/auc/roc_leg.png', plot=grid.arrange(auc.leg), height=1, width=4, unit='in', dpi=300)
@@ -971,7 +977,10 @@ p
 ggsave(filename='plots/hetero_initial.png', plot=p, width=6, height=4, units='in', dpi=300)
 
 ogjLimits = levels(factor(pg.samp$ogj, ordered = T))
+```
 
+
+```{r}
 # for (i in sort(unique(sum.patient.data$Patient))) {
 #   print(i)
 #   pt = filter(sum.patient.data, Patient == i)
@@ -982,16 +991,17 @@ ogjLimits = levels(factor(pg.samp$ogj, ordered = T))
 #   fl = paste0('patient_', i, '_',status,'.png')
 #   ggsave(paste('plots/spatial/', fl, sep=''), plot=grid.arrange(pms$grob), width=10.5, height=4.5, units='in', dpi=300)
 # }
-p2 = mtn.spatial(globalCNdf %>% filter(Patient == 20 & seg.type != 'arms'), pg.samp, ogjLimits,'Patient 20 (P)' )
-p6 = mtn.spatial(globalCNdf %>% filter(Patient == 51 & seg.type != 'arms'), pg.samp, ogjLimits,'Patient 51 (NP)' )
-ggsave(filename='plots/spatial/patient_20_P.png', plot=grid.arrange(p2$grob), width=10.5, height=4.5, units='in', dpi=300)
-ggsave(filename='plots/spatial/patient_51_NP.png', plot=grid.arrange(p6$grob), width=10.5, height=4.5, units='in', dpi=300)
+p20 = mtn.spatial(globalCNdf %>% filter(Patient == 20 & seg.type != 'arms'), pg.samp, ogjLimits )
+ggsave(filename='plots/spatial/patient_20_P.png', plot=grid.arrange(p20$grob), width=16, height=6, units='in', dpi=300)
 
-grid.arrange(p2$grob, p6$grob, ncol=1)
+p51 = mtn.spatial(globalCNdf %>% filter(Patient == 51 & seg.type != 'arms'), pg.samp, ogjLimits,'Patient 51 (NP)' )
+ggsave(filename='plots/spatial/patient_51_NP.png', plot=grid.arrange(p51$grob), width=10.5, height=4.5, units='in', dpi=300)
+
+grid.arrange(p20$grob, p51$grob, ncol=1)
 
 pg.samp = pg.samp %>% dplyr::select(-ogj)
 
-ggsave('plots/spatial/legend.png', plot=grid.arrange(p2$legend), width=2,height=2, units='in', dpi=300)
+ggsave('plots/spatial/legend.png', plot=grid.arrange(p20$legend), width=2,height=2, units='in', dpi=300)
 ```
 
 
@@ -1053,7 +1063,7 @@ rp = ggplot(endos.m, aes(x=brks, y=pred.r*100, ymin=(pred.r-`sem(P)`)*100, ymax=
   geom_errorbar(color='grey55', width=0.2) +
   geom_text(aes(label=paste(round(pred.r*100), '%', sep='')), color='black', nudge_y=2) +
   geom_text(aes(y=5, label=paste('n=',n.endo,'\ns=',n.samp,sep='')), color='white', nudge_y=2) + 
-  labs(x='Months prior to endpoint', y='Percent classified', title='High risk classifications prior to final endoscopy', subtitle='n = #endoscopies, s = #samples') + coord_cartesian(ylim = c(0,100)) + 
+  labs(x='Months prior to endpoint', y='Sensitivity', title='High risk classifications prior to final endoscopy', subtitle='n = #endoscopies, s = #samples') + coord_cartesian(ylim = c(0,100)) + 
   plot.theme + theme( axis.text.x=element_text(angle=45,hjust=1), text=element_text(size=12) ) 
 rp
 ggsave(filename='plots/pred_endo.png', plot=rp, width=6, height=5, units='in', dpi=300)
@@ -1431,8 +1441,10 @@ val.demo = val.demo %>% mutate_at(vars(Sex,Smoking), list(~forcats::fct_explicit
 
 val.demo %>% filter(Patient != no_followup$Patient) %>% group_by(Status) %>% tally %>% spread(Status, n)
 val.demo %>% filter(Patient != no_followup$Patient) %>% group_by(Status,Sex) %>% tally %>% spread(Status, n)
+chisq.test(table(val.demo$Sex, val.demo$Status))
 
-val.demo %>% filter(Patient != no_followup$Patient) %>% group_by(Status,Smoking) %>% tally %>% spread(Status, n)
+val.demo %>% filter(Patient != no_followup$Patient) %>% group_by(Status,Smoking) %>% tally %>% spread(Status, n) 
+chisq.test(table(val.demo$Smoking, val.demo$Status)[-3,])
 
 
 val.demo %>% filter(Patient != no_followup$Patient) %>% group_by(Status) %>% dplyr::summarise_at(vars(Maximal), list(~mean(.,na.rm=T), ~sd(.,na.rm=T))) 
@@ -1683,7 +1695,7 @@ sum.patient.data$smoking_str = replace_na(sum.patient.data$smoking_str, '')
 
 create.desc<-function(pt,age,sex,smk,len,date) {
   str =  paste0('Patient ', pt, ': ', age, sex)
-  if (smk != '' & !is.na(smk)) str = paste0(str, ' ,', smk)
+  if (smk != '' & !is.na(smk)) str = paste0(str, ', ', smk)
   str = paste0(str,'\n')
   
   if (len != '' & !is.na(len)) str = paste0(str, len,'cm length ')
@@ -1695,24 +1707,26 @@ create.desc<-function(pt,age,sex,smk,len,date) {
 sum.patient.data$desc = sum.patient.data %>% group_by(Patient) %>% rowwise() %>% dplyr::summarise(desc = create.desc(Patient, age.diagnosis, gender, smoking_str, M, initial.endo))
 
 pt = 34
-p34 = vig.plot(df=filter(pg.samp, Patient == pt),info= filter(patient.info, Patient == pt),cols=riskCols) + 
-    theme(legend.position = 'bottom') + labs(title = filter(sum.patient.data, Patient == pt)$desc) + 
-    theme(legend.position = 'none', text = element_text(size=12))
-ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p34, width=6.35, height=4.5,dpi=72)
 
+p34 = vig.plot(df=filter(pg.samp, Patient == pt),cols=riskCols) + 
+    theme(legend.position = 'bottom', text = element_text(size=12)) + labs(title = filter(sum.patient.data, Patient == pt)$desc) 
+   
+#vig.legend = get.legend(p34)
+#ggsave('plots/vignette/legend_long.png', plot=grid.arrange(vig.legend), width=8, height=1)
+ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p34 + theme(legend.position = 'none'), width=6.35, height=4.5,dpi=300)
 
 pt = 3
-p3 = vig.plot(df=filter(pg.samp, Patient == pt),info= filter(patient.info, Patient == pt),cols=riskCols) + 
-    theme(legend.position = 'bottom') + labs(title = filter(sum.patient.data, Patient == pt)$desc) + 
+p3 = vig.plot(df=filter(pg.samp, Patient == pt),cols=riskCols) + 
+    labs(title = filter(sum.patient.data, Patient == pt)$desc) + 
     theme(legend.position = 'none', text = element_text(size=12))
-ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p3, width=6.35, height=4,dpi=72)
+ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p3, width=6.35, height=4,dpi=300)
 
 
 pt = 68
-p68 = vig.plot(df=filter(pg.samp, Patient == pt),info= filter(patient.info, Patient == pt),cols=riskCols) + 
-    theme(legend.position = 'bottom') + labs(title = filter(sum.patient.data, Patient == pt)$desc) + 
+p68 = vig.plot(df=filter(pg.samp, Patient == pt),cols=riskCols) + 
+    labs(title = filter(sum.patient.data, Patient == pt)$desc) + 
     theme(legend.position = 'none', text = element_text(size=12))
-ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p68, width=6.35, height=5,dpi=72)
+ggsave(paste0('plots/vignette/vig_',pt,'.png'), plot=p68, width=6.35, height=6,dpi=300)
 
   
 for (pt in c(56,20,86,23,33,49,51,6,25)) {
@@ -1843,8 +1857,7 @@ p = second %>% group_by(Status, Rule) %>% tally %>% spread(Rule,n) %>% dplyr::re
   geom_col(aes(fill=Status), position = position_dodge()) + geom_text(aes(label=paste0('n=',value)), position = position_dodge(width = 1)) + coord_flip() +
   scale_fill_manual(values = c('#4575B4', '#A50026'), name='' ) + plot.theme + labs(x='', y='# Patients', title='Second Endoscopy Rx') + theme(legend.position = 'bottom')
 p
-
-
+ggsave('plots/second_endo_rx.png', plot=p, width=6, height=6, units='in', dpi=300)
 
 second %>% filter(Status == 'P' & Rule == '1') %>% ungroup %>% filter(months.before.final < 120) %>%
   dplyr::summarise_at(vars(months.before.final), list(~min(.), ~max(.), ~mean(.), ~median(.))) 

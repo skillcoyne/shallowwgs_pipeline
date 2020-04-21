@@ -33,8 +33,8 @@ kable(head(res.variance), caption='Example residuals across segments per sample'
 
 ```{r, echo=F, fig.height=10}
 res.variance = arrange(res.variance,varMAD_median)
-cutoff = median(res.variance$varMAD_median)+sd(res.variance$varMAD_median)*2
-cutoff = 0.008
+cutoff = round(median(res.variance$varMAD_median)+sd(res.variance$varMAD_median)*3,3)
+#cutoff = 0.010
 
 grid.arrange(
   ggplot(res.variance,aes(sample=varMAD_median)) + stat_qq() + geom_hline(yintercept=cutoff, linetype='dashed',color='grey') + 
@@ -61,7 +61,7 @@ failedQC = res.variance %>% filter( round(varMAD_median,3) > cutoff )
 
 `r nrow(failedQC)` samples (`r signif(nrow(failedQC)/nrow(res.variance)*100,2)`%) would have failed due to high variance across all the segments. A manual check of these agrees with most of these. One or two samples would appear to be driven by some extreme segments, and this could be further evaluated, and stricter cutoffs do pick up additional samples that are borderline.  However, this cutoff appears to be reasonable.
 
-## Validation dataset
+## QC dataset
 
 Cutoff from above dataset applied to the initial validation set.
 
@@ -82,63 +82,33 @@ all.val = all.val %>% rowwise %>% mutate_at(vars(`SLX-ID`), list(pastefun) ) %>%
 all.val = all.val %>% mutate(
   `Hospital Research ID` = str_replace_all( str_remove_all(`Hospital Research ID`, " "), '/', '_'), 
   `Index Sequence` = str_replace_all(`Index Sequence`, 'tp', ''),
-  Sample = paste(`SLX-ID`,sub('-','_',`Index Sequence`),sep='.')
+  Sample = paste(`SLX-ID`,sub('-','_',gsub('tp','',`Index Sequence`)),sep='.')
   )
 
 
-resVal = do.call(bind_rows, lapply(list.files(dir2, 'residuals', recursive = T, full.names = T), function(f) {
+qc.res.val = do.call(bind_rows, lapply(list.files(dir2, 'residuals', recursive = T, full.names = T), function(f) {
   readr::read_tsv(f, col_types = 'ccddddl') #%>% set_names('sample', 'varMAD_median', 'varMAD_sd', 'varMAD_Q1', 'varMAD_Q3', 'n.segs', 'Pass') %>%  
    # mutate(`Patient ID` = as.character(basename(dirname(f))))
-})) %>% dplyr::select(patient, samplename, matches('varMad'), Pass) 
+})) %>% dplyr::select(patient, samplename, matches('varMad'), -Pass) %>% filter(samplename %in% all.val$Sample)
 
 
-resVal = resVal %>% filter(samplename %in% all.val$Sample)
+qc.res.val %>% kable(caption='Residuals across segments per sample') %>% kable_styling('striped')
+qc.res.val = arrange(qc.res.val,varMAD_median)
 
-
-resVal %>% kable(caption='Residuals across segments per sample') %>% kable_styling('striped')
-resVal = arrange(resVal,varMAD_median)
-
-ggplot(resVal,aes(sample=varMAD_median)) + stat_qq() + geom_hline(yintercept=cutoff, linetype='dashed',color='grey') + 
+ggplot(qc.res.val,aes(sample=varMAD_median)) + stat_qq() + geom_hline(yintercept=cutoff, linetype='dashed',color='grey') + 
   labs(title='Normal Q-Q plot (all)', x='Theoretical quantiles',y='Sample quantiles') + theme_bw()
 
-ggplot(resVal, aes(varMAD_median)) + geom_histogram(bins=50,color='lightblue') + 
+ggplot(qc.res.val, aes(varMAD_median)) + geom_histogram(bins=50,color='lightblue') + 
   geom_vline(xintercept = cutoff, linetype='dashed', color='grey') + labs(x='var(median(segments)+1sd(segments))') +
   theme_bw()
 
-failedQCVal = resVal %>% filter(varMAD_median > cutoff) %>% arrange(`Patient ID`, varMAD_median)
+failedQCVal = qc.res.val %>% filter(varMAD_median > cutoff) %>% arrange(patient, varMAD_median)
 
 #setdiff(as.character(resVal$sample),as.character(failedQCVal$sample))
 
 ```
 
-The result from this is that `r nrow(failedQCVal)` samples (`r signif(nrow(failedQCVal)/nrow(resVal)*100,3)`%) would have failed due to high variance across all the segments. A manual check of these agrees with all of them.
-
-
-## If we learned it from all residuals
-
-```{r}
-res.variance = res.variance %>% mutate_at(vars(patient, sample), as.character)
-resVal = resVal %>% dplyr::rename( patient = `Patient ID` ) %>% mutate_at(vars(patient, sample), as.character)
-
-res.variance$cohort = 'discovery'
-resVal$cohort = 'validation'
-
-ar = bind_rows( res.variance, resVal ) %>% mutate(cohort = factor(cohort))
-
-#newcutoff = round(median(ar$varMAD_median)+sd(ar$varMAD_median)*2, 3)
-newcutoff = 0.015
-
-ggplot(ar,aes(sample=varMAD_median)) + stat_qq() + geom_hline(yintercept=newcutoff, linetype='dashed',color='grey') + 
-    labs(title='Normal Q-Q plot (all)', x='Theoretical quantiles',y='Sample quantiles') + theme_bw()
-
-ggplot(ar, aes(varMAD_median)) + geom_histogram(bins=50,color='lightblue') + 
-  geom_vline(xintercept = newcutoff, linetype='dashed', color='grey') + labs(x='var(MAD)') +
-  theme_bw()
-
-fc = ar %>% filter(round(varMAD_median,3) > newcutoff) %>% select(patient, sample, varMAD_median,varMAD_sd, varMAD_Q1,varMAD_Q3) %>% arrange(patient, varMAD_median)
-```
-
-Using the cutoff `r newcutoff` learned from all of them we would fail `r length(which(resVal$varMAD_median > newcutoff))` samples from the training dataset (Ellie's) and `r length(which(resVal$varMAD_median > newcutoff))` from the initial validation dataset. So while it's less stringent it still fails `r length(which(failedQCVal$varMAD_median > newcutoff))/nrow(resVal)*100`% versus `r length(which(failedQC$varMAD_median > newcutoff))/nrow(res.variance)*100`% of the training dataset.
+The result from this is that `r nrow(failedQCVal)` samples (`r signif(nrow(failedQCVal)/nrow(qc.res.val)*100,3)`%) would have failed due to high variance across all the segments. A manual check of these agrees with all of them.
 
 
 
