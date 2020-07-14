@@ -8,13 +8,16 @@ plot.theme = theme(text=element_text(size=12), panel.background=element_blank(),
 
 get.roc.stat<-function(roc, x='best') {
   auc = c( pROC::auc(roc), range(pROC::ci.auc(roc))  )
-  sens = c(pROC::coords(roc, x, tranpose=T)[['sensitivity']], pROC::ci.se(roc,pROC::coords(roc, x, tranpose=T)[['specificity']], conf.level=0.95))
-  spec = c(pROC::coords(roc, x, tranpose=T)[['specificity']], pROC::ci.sp(roc,pROC::coords(roc, x, tranpose=T)[['sensitivity']], conf.level=0.95))
+  sens = c(pROC::coords(roc, x, transpose=T)[['sensitivity']], pROC::ci.se(roc,pROC::coords(roc, x, transpose=T)[['specificity']], conf.level=0.95))
+  spec = c(pROC::coords(roc, x, transpose=T)[['specificity']], pROC::ci.sp(roc,pROC::coords(roc, x, transpose=T)[['sensitivity']], conf.level=0.95))
   
   stat = rbind('AUC'=auc, 'Sensitivity'=sens[c(1,2,4)], 'Specificity'=spec[c(1,2,4)])
   colnames(stat) = c ('value','CI.min','CI.max')
   stat = as.data.frame(stat)
   stat$model = roc$model
+  
+  if (!is.null(roc$n) & is.numeric(roc$n)) stat$n = roc$n
+  
   stat$Measure = rownames(stat)
   stat
 }
@@ -56,7 +59,7 @@ cn.mtn.plot<-function(df, label, type='bar') {
     lowCol = rev(brewer.pal(6, "Greens"))[c(3,1)]
     # grey = brewer.pal(3,'Greys')[1]
     
-    colors = c('#74C476', 'darkblue','#9E9AC8')
+    colors = c('#74C476', 'grey44','#9E9AC8')
     
     p = p + 
       geom_rect(data=rangeDf, aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=cuts), show.legend=T ) + 
@@ -261,7 +264,7 @@ plot.cn.chr<-function(df, chrom='17', info=NULL, haz=NULL, genes=NULL, label=NUL
   }
   
   p + plot.theme + 
-    labs(x='', y='Mean adj. segmentation value') +
+    labs(x='', y='Mean adj. segmentation value', title='') +
     theme(axis.text.x=element_blank(), legend.position='none', panel.grid=element_blank(), panel.background=element_blank())  
 }
 
@@ -299,18 +302,18 @@ plot.endo<-function(df, minM=NULL, maxM=NULL, bin=F) {
   }
 }
 
-vig.plot<-function(df, cols=c('green3','orange','red3'), pathology=F, add.title=F) {
+vig.plot<-function(df, cols=BarrettsProgressionRisk::riskColors(), pathology=F, add.title=F) {
   scale = seq(min(df$Endoscopy.Year), max(df$Endoscopy.Year), 1)
   subtitle = with(df, paste(unique(Age.at.diagnosis),unique(Sex),': ', sep=''))
   if (!is.na(unique(df$Smoking)))                             
-    subtitle = paste(subtitle, ifelse(unique(info$Smoking) == 'Y', 'smoker, ','non-smoker, '),sep='')
+    subtitle = paste(subtitle, ifelse(unique(df$Smoking) == 'Y', 'smoker, ','non-smoker, '),sep='')
   
   subtitle = paste(subtitle, 'M', unique(df$Maximal), sep='')
   
-  if (!is.na(unique(info$Circumference)))
-    subtitle = paste(subtitle, 'C', info$Circumference, sep='')
+  if (!is.na(unique(df$Circumference)))
+    subtitle = paste(subtitle, 'C', df$Circumference, sep='')
   
-  subtitle = paste(subtitle, " BE diagnosed ", unique(info$Initial.Endoscopy), sep='')
+  subtitle = paste(subtitle, " BE diagnosed ", unique(df$Initial.Endoscopy), sep='')
   
   df = df %>% mutate(Risk = factor(df$Risk, levels=c('Low','Moderate','High'), ordered = T), p53.Status = factor(p53.Status, levels=c(0,1), ordered = T))
 
@@ -320,7 +323,6 @@ vig.plot<-function(df, cols=c('green3','orange','red3'), pathology=F, add.title=
   if (!pathology) {
     p = p + geom_point(aes(shape=Pathology), color='white', fill='white', size=5) + 
     scale_shape_manual(values=c(1,0,15,17,25), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='white', color='white'))) 
-    #scale_shape_manual(values=c('B','I','L','H','C'), limits=levels(df$Pathology), guide=guide_legend(override.aes=list(fill='black', color='black'))) +
   } else {
     p = p + geom_text(aes(label=Pathology, color=Risk), show.legend=F) + scale_color_manual(values=c('white','black','white')) 
   }
@@ -336,14 +338,14 @@ vig.plot<-function(df, cols=c('green3','orange','red3'), pathology=F, add.title=
 
 min.theme = theme(text=element_text(size=12), panel.background=element_blank(), strip.background=element_rect(fill="grey97"), 
                   strip.text.y = element_text(size=6),
-                  strip.text.x = element_text(size=9), axis.text = element_blank(), axis.ticks = element_blank(),
+                  strip.text.x = element_text(size=9), 
                   axis.line=element_line(color='grey', size=0.1), panel.grid.major=element_blank(), 
                   panel.border = element_rect(color="grey", fill=NA, size=0.2), 
                   panel.spacing.x = unit(0, 'lines'), 
                   panel.spacing.y = unit(0.05, 'lines')   ) 
 
 
-mtn.spatial<-function(df, b, limits, title='', pal=NULL, ylim=c(-5,5)) {
+mtn.spatial<-function(df, b, limits, title='', pal=NULL, ylim=c(-5,5), axis.text.y=F) {
   df$mean.value = df$value
   
   if (is.null(ylim)) ylim = range(df$value)
@@ -369,11 +371,17 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL, ylim=c(-5,5)) {
     return('')
   }
   
-  p = ggplot(df, aes(x=chr.length)) + ylim(ylim) +
+  p = ggplot(df, aes(x=chr.length)) + 
     facet_grid(Endoscopy.Year+ogj~chr, scales='free', space='free_x', labeller = labeller(.multi_line = F)) +
     geom_rect(aes(xmin=start, xmax=end, ymin=0, ymax=mean.value, fill=ogj), show.legend=T) + 
+    scale_y_continuous(limits=ylim, breaks = c(0,ylim)) + 
     scale_fill_manual(values=pal, limits=limits,  name='OGJ Dist.') +
-    labs(title=title, x='') + min.theme + theme(axis.line = element_blank(), strip.background=element_rect(fill="white", color=NA), strip.text.x = element_text(size = 11) )
+    labs(title=title, x='') + min.theme +
+    theme(axis.line = element_blank(), axis.ticks.x = element_blank(), axis.text.x = element_blank(), strip.background=element_rect(fill="white", color=NA), 
+          strip.text.x = element_text(size = 11),panel.spacing.y = unit(0.1, 'lines'), axis.text.y = element_text(size=6))    
+  
+  if (!axis.text.y)
+    p = p + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())    
 
   legend = get.legend(p)
   p = p + theme(legend.position = 'none')
@@ -387,10 +395,7 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL, ylim=c(-5,5)) {
     g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[n]
   }
   
-  #grid.arrange(g)
   return(list('grob'=g, 'legend'=legend))
-  #grid::grid.draw(g)  
-  #return(g)
 }
 
 
@@ -409,8 +414,8 @@ plot.risk.by.path<-function(preds) {
   
   rp = ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) + 
     scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) +
-    geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=101), position=position_stack(), size=4) +
-    geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), ), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
+    geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=102), position=position_stack(), size=4) +
+    geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), ), position=position_stack(vjust = 0.5), size=4, show.legend = F) +
     #geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
     facet_grid(~Status, scales = 'free_x', space = 'free_x') + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + 
     theme(legend.position = 'bottom', text=element_text(size=14))

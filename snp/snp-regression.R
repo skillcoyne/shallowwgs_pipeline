@@ -251,6 +251,9 @@ features = as_tibble(hazards, rownames = 'label') %>% dplyr::rename(hazards = va
   dplyr::mutate(coef = coefs[['0.9']][,1], stability = featureStability) %>% arrange(-hazards)
 
 qq = quantile(features$hazards, seq(0,1,.15))
+
+features %>% dplyr::arrange(desc(hazards)) %>% write_tsv('plots/exfig4b.tsv')
+
 p = ggplot(features, aes(coef, hazards, col=hazards >= qq[length(qq)])) + 
   geom_point(alpha=0.8, show.legend = F) + 
   ggrepel::geom_text_repel(aes(x=coef, label=ifelse(hazards >= qq[length(qq)], label, '')),show.legend=F) +

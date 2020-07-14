@@ -244,7 +244,13 @@ qcdata.endo = qcdata %>% group_by(PatientID, EndoID, Status, Timepoint, SampleTy
 # nrow(lowsca)
 # nrow(filter(qcdata.endo, SampleType == 'BE' & ASCAT.SCA.ratio_mean >= 0.01 & Purity_max <= 0.98))
 
-p = ggplot(qcdata.endo, aes(Purity_mean, ASCAT.SCA.ratio_mean)) + facet_grid(~SampleType) +
+plotL <- c('BE' = paste0('BE\n(n=',nrow(filter(qcdata.endo, SampleType == 'BE')),')' ),
+           'Blood/Gastric Normal' = paste0('Blood/Gastric Normal\n(n=', nrow(filter(qcdata.endo, SampleType == 'Blood/Gastric Normal')), ')' ))
+
+qcdata.endo %>% ungroup %>% dplyr::select(Status, Purity_mean, ASCAT.SCA.ratio_mean, SampleType) %>% 
+  dplyr::mutate(Status = recode(Status, 'NP' = 'Non-Progressor', 'P'='Progressor')) %>% dplyr::arrange(Status, SampleType) %>% write_tsv('plots/exfig3d.tsv')
+
+p = ggplot(qcdata.endo, aes(Purity_mean, ASCAT.SCA.ratio_mean)) + facet_grid(~SampleType, labeller = labeller(SampleType = plotL)) +
   geom_point(aes(color=ASCAT.SCA.ratio_mean < 0.01 & Purity_mean > 0.95 ), show.legend = F) + 
   labs(title='Merged biopsies per-timepoint', y='mean(ASCAT.SCA.ratio)', x='mean(ASCAT purity)')
 p
@@ -533,6 +539,11 @@ preds %>% group_by(Status, Risk) %>% tally %>% spread(Risk, n) %>%
 Despite that, we still see a fairly consistent high/low risk prediction for NP vs P.  However, HGD in NP patients predicts at a rate consistent with progression.
 ```{r echo=F}
 preds = preds %>% mutate(Pathology = factor(Pathology, levels=c('NDBE','ID','LGD','HGD','EAC'), ordered = T))
+
+preds %>% dplyr::select(Prob, RR, Risk, Pathology, Status) %>% dplyr::rename('Probability' = 'Prob', 'Relative Risk' = 'RR') %>%
+  dplyr::mutate(Status = recode(Status, 'NP'='Non-Progressor', 'P' = 'Progressor') ) %>% dplyr::arrange(Status, Pathology) %>%
+  write_tsv('plots/exfig3b.tsv')
+
 rp = plot.risk.by.path(preds) + labs(y='% Classified', title='Samples classified by pathology')
 rp 
 
@@ -550,6 +561,12 @@ ggsave('plots/snp/path_risk.png', plot=rp, width=7, height=6, units='in', dpi=30
 rocBE = pROC::roc(Status ~ Prob, data=preds, auc=T, ci=T, of='thresholds')
 roc.plot(rocBE,title='SNP ROC, BE biopsies',incS = T, 0.3)
 rocBE$model = 'per Biopsy'
+rocBE$n = nrow(preds)
+
+preds %>% dplyr::select(Status, Prob, RR) %>% dplyr::rename('Probability' = 'Prob', 'Relative Risk' = 'RR') %>%
+  dplyr::mutate(Status = recode(Status, 'NP'='Non-Progressor', 'P' = 'Progressor') ) %>% dplyr::arrange(Status, Probability) %>%
+  write_tsv('plots/exfig3a.tsv')
+
 
 ggsave(filename = 'plots/snp/be_roc.png', plot = roc.plot(rocBE, 'SNP ROC: BE biopsies', T, 0.3) + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 ```
@@ -644,6 +661,7 @@ rocEX = pROC::roc( Path.Status ~ Prob, data=pred.qc, auc=T, ci=T, of='thresholds
 roc.plot(rocEX) + labs(title='BE biopsies: Path status (HGD/IMC)')
 ggsave(filename='plots/snp/path_status_roc.png', plot = roc.plot(rocEX) + labs(title='BE biopsies', subtitle='Path status (HGD/IMC)') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 rocEX$model = 'HGD/IMC progressed'
+rocEX$n = nrow(pred.qc)
 
 notlow = filter(pred.qc, !lowsca)
 pid = notlow %>% ungroup %>%dplyr::select(PatientID) %>% distinct %>% pull 
@@ -655,24 +673,28 @@ rocpp = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca), auc=T, ci=T, of=
 roc.plot(rocpp, 'BE biopsies: excl. low SCA samples')
 ggsave(filename='plots/snp/auc_ex_lowsca_roc.png', plot = roc.plot(rocpp, 'BE biopsies: excl. low SCA samples') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
 rocpp$model = 'All excl. low SCA'
+rocpp$n = nrow(filter(pred.qc, !lowsca))
 
 # Exclude all of the above
 rocexall = pROC::roc(Status ~ Prob, data=filter(pred.qc, !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds')
 roc.plot(rocexall, 'BE biopsies: excl. low SCA & WGD NP')
 ggsave(filename='plots/snp/auc_ex_lowsca_wgs_roc.png', plot =roc.plot(rocexall, 'BE biopsies: excl. low SCA & WGD NP') + theme(text=element_text(size=12)), width=4, height=4, units='in', dpi=300)
 rocexall$model = 'excl. low SCA & (NP) WGD'
+rocexall$n = nrow(filter(pred.qc, !lowsca & !wgd.NP))
 
 # Timepoint 1 only
 roct1 = pROC::roc(Status ~ Prob, data=filter(pred.qc, Timepoint == 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds')
 roc.plot(roct1, 'BE biopsies: Timepoint T1')
 ggsave(filename='plots/snp/auc_t1_roc.png', plot=roc.plot(roct1, 'BE biopsies: Timepoint T1') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
 roct1$model = 'Timepoint 1 (with exclusions)'
+roct1$n = nrow(filter(pred.qc, Timepoint == 'T1' & !lowsca & !wgd.NP))
 
 # Timepoint 2 only
-roct2 = pROC::roc(Status ~ Prob, data=subset(pred.qc, Timepoint != 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds')
+roct2 = pROC::roc(Status ~ Prob, data=filter(pred.qc, Timepoint != 'T1' & !lowsca & !wgd.NP), auc=T, ci=T, of='thresholds')
 roc.plot(roct2, 'BE biopsies: Timepoint T2')
 ggsave(filename='plots/snp/auc_t2_roc.png', plot=roc.plot(roct2, 'BE biopsies: Timepoint T2') + theme(text=element_text(size=12)), width=5, height=5, units='in', dpi=300)
 roct2$model = 'Timepoint 2  (with exclusions)'
+roct2$n = nrow(filter(pred.qc, Timepoint != 'T1' & !lowsca & !wgd.NP))
 
 m = bind_rows(
       get.roc.stat(rocBE,0.3),
@@ -682,7 +704,11 @@ m = bind_rows(
       get.roc.stat(roct1,0.3),
       get.roc.stat(roct2,0.3)
 ) %>% dplyr::mutate_if(is.numeric, list(~round(.,2))) %>%
-  dplyr::mutate(model = factor(model, levels = c(rocBE$model, rocEX$model, rocexall$model, rocpp$model, roct1$model, roct2$model), ordered = T))
+  dplyr::mutate(model = factor(model, levels = c(rocBE$model, rocEX$model, rocexall$model, rocpp$model, roct1$model, roct2$model), ordered = T)) %>%
+  dplyr::mutate(model = paste0(model,'\n(n=',n,')'))
+
+m %>% dplyr::mutate(model = sub('\n.*', '', model)) %>% write_tsv('plots/exfig3c.tsv')
+
 
 dodge = position_dodge(width=0.9)
 p = ggplot(m, aes(model, value, ymin=CI.min, ymax=CI.max, group=Measure)) + 
@@ -718,7 +744,12 @@ file = paste(cache.dir, 'all.pt.alpha.Rdata', sep='/')
 if (file.exists(file)) {
  message(paste("loading", file))
  load(file, verbose=T)
- model.performance(performance.at.1se, coefs, folds, splits)$plot + labs(title='SNP CV models')
+ 
+ performance.at.1se %>% bind_rows() %>% dplyr::mutate(penalty = names(performance.at.1se)[-1], 'non-zero coefs'=sapply(coefs, nrow)[-1]) %>% write_tsv('plots/exfig4a.tsv')
+ p = model.performance(performance.at.1se, coefs, folds, splits)$plot + labs(title='SNP CV models') + labs(subtitle = paste0('(n=',nrow(df),')'))
+ p
+ ggsave('plots/snp/model_perf.png', plot=p, width=4, height=4, dpi=300, units='in')
+ rm(p)
 } else {
   warning("Run 'snp-regression.R' first")
 }

@@ -59,20 +59,22 @@ Per alpha value and kb segment size the overall performance per cross-validated 
 dir.create('plots/parameters')
 kb.models = list.files(data)
 
-kb.perf = do.call(bind_rows, lapply(list.files(data,full.names = T), function(f) {
-  load(paste0(f,'/all.pt.alpha.Rdata'),verbose=F)
+kb.dirnames = grep('kb', list.files(data,full.names = T), value=T)
 
+kb.perf = do.call(bind_rows, lapply(kb.dirnames, function(f) {
+  load(paste0(f,'/all.pt.alpha.Rdata'),verbose=F)
   nonz = names(which(sapply(performance.at.1se, nrow) > 0))
 # do.call(bind_rows,lapply(coefs, function(df){
 #   tibble(n=nrow(df), mean.stability=mean(rowSums(df[,-1])/50), sd.stability=sd(rowSums(df[,-1])/50) )
 # })) %>% mutate(alpha=names(coefs), kb=basename(f))
-
   do.call(bind_rows, performance.at.1se) %>% 
     mutate(alpha=nonz, kb = basename(f), n.coefs=sapply(coefs[nonz], nrow)) %>% 
     dplyr::select(mean, sme, `lambda-1se`, alpha, n.coefs, kb) 
   
 }))
 kb.perf = kb.perf %>% mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T)) %>% arrange(kb, alpha)
+
+kb.perf %>% dplyr::select(-`lambda-1se`) %>% write_tsv('plots/exfig9a.tsv')
 
 p = ggplot(kb.perf, aes(kb, mean, fill=kb)) + facet_grid(~alpha) + ylim(0,1) + 
   geom_col() + geom_errorbar(aes(ymin=mean-sme, ymax=mean+sme), col='grey39', width=0.2) + 
@@ -93,25 +95,55 @@ Finally, I generate a ROC for each of the leave-one out prediction sets. Here ag
 
 
 ```{r fig.height=7, fig.width=8}
-rc9 = do.call(bind_rows, lapply(list.files(data,full.names = T), function(f) {
+threshold = 'best'
+rc9 = do.call(bind_rows, lapply(kb.dirnames, function(f) {
   load(paste0(f,'/loo_0.9.Rdata'),verbose=F)
-  roc = pROC::roc(Status ~  Prediction, data=pg.samp, auc=T, ci=T, of='thresholds',transpose=T, quiet=T)
-  pROC::coords(roc, "best", transpose=F) %>% mutate( auc = as.numeric(pROC::auc(roc)), kb = basename(f) )
+  roc = pROC::roc(Status ~  Prediction, data=pg.samp, auc=T, ci=T, of='thresholds',quiet=T)
+
+  bind_cols(
+    as_tibble(pROC::ci.auc(roc)) %>% mutate(m = c('auc.low', 'auc', 'auc.high')) %>% spread(m,value),
+    as_tibble(data.frame(pROC::ci.coords(roc, threshold, transpose=F))) %>% dplyr::select(-matches('threshold')) %>% 
+      set_names(c('specificity.low', 'specificity', 'specificity.high', 'sensitivity.low', 'sensitivity', 'sensitivity.high')) ) %>%
+    mutate(kb = basename(f))
 })) 
 
-rc9 = rc9 %>% set_names(c('Threshold','FPR','TPR','AUC','kb')) %>% 
-  mutate(kb = factor(kb,levels=c('15kb','50kb','100kb','500kb'), ordered=T), FPR = 1-FPR) %>% arrange(kb) %>%
-  dplyr::select(-Threshold)
+rc9 = rc9 %>%  mutate(kb = factor(kb,levels=c('15kb','50kb','100kb','500kb'), ordered=T)) %>% arrange(kb) 
 
-p = ggplot(melt(rc9, id.vars='kb'), aes(variable, value, group=kb)) + ylim(0,1) + 
-  geom_bar(aes(fill=kb), stat='identity', position='dodge') + 
-  geom_text(aes(label=round(value,2)), position=position_dodge(width=1)) + 
+df = rc9 %>% dplyr::select(matches('auc|kb'))
+pos = position_dodge(width=0.9)
+p = ggplot() + 
+  geom_bar(data=df, aes(x=kb, y=auc, group=kb, fill=kb), stat='identity', position = pos, show.legend = F) + 
+  geom_errorbar(data=df, aes(x=kb, ymin=auc.low, ymax=auc.high, group=kb), position = pos, width=0.2, color='grey39') +
   scale_fill_brewer(palette='Set1') + 
-  labs(title='Discovery ROC', subtitle = 'alpha=0.9', x='', y='%') + 
-  theme_minimal() + theme(text=element_text(size=12))
-p
-ggsave(filename='plots/parameters/training_kb_auc.png', plot = p, width = 6, height = 6, units = 'in', dpi = 300)
+  scale_y_continuous(expand=c(0,0), limits=c(0,1)) + 
+  labs(title='', subtitle = 'alpha=0.9', x='AUC', y='%') + 
+  theme_minimal() + theme(text=element_text(size=12), axis.text.x = element_text(angle=45, hjust=1))
 
+df = rc9 %>% dplyr::select(matches('sensitivity|kb'))
+p1 = ggplot() + 
+  geom_bar(data=df, aes(x=kb, y=sensitivity, group=kb, fill=kb), stat='identity', position = pos, show.legend = F) + 
+  geom_errorbar(data=df, aes(x=kb, ymin=sensitivity.low, ymax=sensitivity.high, group=kb), position = pos, width=0.2, color='grey39') +
+  scale_fill_brewer(palette='Set1') + 
+  scale_y_continuous(expand=c(0,0), limits=c(0,1)) + 
+  labs(title='', subtitle = '', x='TPR', y='') + 
+  theme_minimal() + theme(text=element_text(size=12), axis.text.x = element_text(angle=45, hjust=1), axis.text.y = element_blank())
+
+df = rc9 %>% dplyr::select(matches('specificity|kb'))
+p2 = ggplot() + 
+  geom_bar(data=df, aes(x=kb, y=1-specificity, group=kb, fill=kb), stat='identity', position = pos, show.legend = F) + 
+  geom_errorbar(data=df, aes(x=kb, ymin=1-specificity.low, ymax=1-specificity.high, group=kb), position = pos, width=0.2, color='grey39') +
+  scale_fill_brewer(palette='Set1') + 
+  scale_y_continuous(expand=c(0,0), limits=c(0,1)) + 
+  labs(title='', subtitle = '', x='FPR', y='') + 
+  theme_minimal() + theme(text=element_text(size=12), axis.text.x = element_text(angle=45, hjust=1), axis.text.y = element_blank())
+
+rc9 %>% dplyr::rename('auc.ci.high'='auc.high', 'auc.ci.low'='auc.low') %>% write_tsv('plots/exfig9b.tsv')
+
+grid.arrange(p,p1,p2,nrow=1)
+ggsave(filename='plots/parameters/training_kb_auc.png', plot = grid.arrange(p,p1,p2,nrow=1,top='Discovery ROC'), width = 6, height = 6, units = 'in', dpi = 300)
+# rc9 = rc9 %>% set_names(c('Threshold','FPR','TPR','AUC','AUC.CI.Low','AUC.CI.High','kb')) %>% 
+#   mutate(kb = factor(kb,levels=c('15kb','50kb','100kb','500kb'), ordered=T), FPR = 1-FPR) %>% arrange(kb) %>%
+#   dplyr::select(-Threshold)
 ```
 
 ## Validation predicted on corresponding model
@@ -139,6 +171,7 @@ val.info = do.call(bind_rows, lapply(sheets, function(s) {
 vdir = '~/Data/BarrettsProgressionRisk/Analysis/validation/pcf_perPatient'
 
 val.preds = purrr::map(list.files(vdir, full.names=T), function(dir) {
+  print(dir)
   do.call(bind_rows, purrr::map(list.files(paste0(dir,'/predictions_5e6_all/0.9'), 'predictions.tsv', full.names = T, recursive = T), function(f) {
     pd = read_tsv(f, col_types = 'cddcccDcccc') %>% dplyr::select(`Hospital Research ID`, everything())
     left_join(pd, val.info %>% dplyr::select(`Hospital Research ID`, Status, Samplename, Cohort), by=c('Hospital Research ID', 'Sample'='Samplename')) %>% 
@@ -148,31 +181,40 @@ val.preds = purrr::map(list.files(vdir, full.names=T), function(dir) {
 names(val.preds) = list.files(vdir)
 
 val.auc = do.call(bind_rows, purrr::map(val.preds, function(kb) {
-  roc = pROC::roc(Status ~ Probability, data=kb, auc=T, ci=T, of='thresholds',transpose=T, quiet=T)
-  pROC::coords(roc, "best", transpose=F) %>% mutate( auc = as.numeric(pROC::auc(roc)), kb = unique(kb$kb) )
+  roc = pROC::roc(Status ~ Probability, data=kb, auc=T, ci=T, of='thresholds', quiet=T)
+  #pROC::coords(roc, "best", transpose=F) %>% mutate( auc = as.numeric(pROC::auc(roc)), kb = unique(kb$kb) )
+  
+  bind_cols(
+    as_tibble(pROC::ci.auc(roc)) %>% mutate(m = c('auc.low', 'auc', 'auc.high')) %>% spread(m,value),
+    as_tibble(data.frame(pROC::ci.coords(roc, threshold, transpose=F))) %>% dplyr::select(-matches('threshold')) %>% 
+      set_names(c('specificity.low', 'specificity', 'specificity.high', 'sensitivity.low', 'sensitivity', 'sensitivity.high')) ) %>%
+    mutate(kb = unique(kb$kb))
 }))
 
-
-val.auc = val.auc %>% set_names(c('Threshold','FPR','TPR','AUC','kb')) %>% 
-  mutate(kb = factor(kb,levels=c('15kb','50kb','100kb','500kb'), ordered=T), FPR = 1-FPR) %>% arrange(kb) %>%
-  dplyr::select(-Threshold)
-
-ggplot(melt(val.auc, id.vars='kb'), aes(variable, value, group=kb)) + ylim(0,1) +
-  geom_bar(aes(fill=kb), stat='identity', position='dodge') + 
-  geom_text(aes(label=round(value,2)), position=position_dodge(width=1)) + 
-  scale_fill_brewer(palette='Set1') + 
-  labs(title='Validation ROC (alpha=0.9)', x='', y='%') + theme_minimal()
-
+# val.auc = val.auc %>% set_names(c('Threshold','FPR','TPR','AUC','kb')) %>% 
+#   mutate(kb = factor(kb,levels=c('15kb','50kb','100kb','500kb'), ordered=T), FPR = 1-FPR) %>% arrange(kb) %>%
+#   dplyr::select(-Threshold)
+# 
+# ggplot(melt(val.auc, id.vars='kb'), aes(variable, value, group=kb)) + ylim(0,1) +
+#   geom_bar(aes(fill=kb), stat='identity', position='dodge') + 
+#   geom_text(aes(label=round(value,2)), position=position_dodge(width=1)) + 
+#   scale_fill_brewer(palette='Set1') + 
+#   labs(title='Validation ROC (alpha=0.9)', x='', y='%') + theme_minimal()
 ```
 
 ## Side-by-side
 
 ```{r fig.height=7, fig.width=8}
 aucs = bind_rows(rc9 %>% mutate(Cohort = 'Discovery'), val.auc %>% mutate(Cohort = 'Validation'))
+aucs = aucs %>% dplyr::select(matches('auc|kb|Cohort')) %>% dplyr::rename('AUC'='auc') %>% 
+  mutate(kb = factor(kb, levels=c('15kb','50kb','100kb','500kb'), ordered=T))
+
+aucs %>% dplyr::rename('AUC.CI.high'= 'auc.high', 'AUC.CI.low'='auc.low')  %>% write_tsv('plots/exfig9c.tsv')
 
 p = ggplot(aucs, aes(kb, AUC, group=Cohort)) + ylim(0,1) + 
-  geom_bar(aes(fill=Cohort), stat='identity', position='dodge') + 
-  geom_text(aes(label=round(AUC,2)), position=position_dodge(width=1)) + 
+  geom_bar(aes(fill=Cohort), stat='identity', position=pos) + 
+  geom_errorbar(aes(ymin=auc.low, ymax=auc.high), width=0.2, color='grey39', stat='identity', position=pos) +
+  geom_text(aes(label=round(AUC,2), y=auc.low-0.05), position=position_dodge(width=1)) + 
   scale_fill_brewer(palette='Set1') + 
   labs(title='AUC discovery & validation', x='', y='AUC') + 
   theme_minimal() + theme(text = element_text(size=12))
@@ -226,7 +268,7 @@ pred.conf<-function(df) {
 ```{r, fig.width=10,fig.height=7, eval=F}
 ## 0.5
 loo.pred.confidence = purrr::map( list.files(data,full.names = T), function(f) {
-  #print(f)
+  print(f)
   load(paste0(f,'/loo_0.5.Rdata'),verbose=F)
   suppressWarnings(pred.conf(pg.samp)) %>% mutate(kb = basename(f))
 }) 
@@ -260,18 +302,19 @@ do.call(grid.arrange, c(plist, top='Alpha=0.8'))
 ## Discovery LOO alpha=0.9
 
 ```{r, fig.width=8, fig.height=12}
+files = grep('supp', list.files(data,full.names = T), invert = T, value = T)
 ## ALL LOO is at alpha=0.9
-loo.pred.confidence = purrr::map( list.files(data,full.names = T), function(f) {
+loo.pred.confidence = purrr::map( files, function(f) {
   #print(f)
   load(paste0(f,'/loo_0.9.Rdata'),verbose=F)
   suppressWarnings(pred.conf(pg.samp)) %>% mutate(kb = basename(f))
 }) 
-names(loo.pred.confidence) = list.files(data)
+names(loo.pred.confidence) = basename(files)
 
 plist = lapply(loo.pred.confidence, function(lpf) {
   BarrettsProgressionRisk::showPredictionCalibration(lpf %>% dplyr::rename('perc' = 'P.ratio') ) + labs(title=unique(lpf$kb))
 })
-  
+
 do.call(grid.arrange, c(plist[c('15kb','50kb','100kb','500kb')], top='Discovery LOO alpha=0.9'))
 ```
 
@@ -279,7 +322,22 @@ do.call(grid.arrange, c(plist[c('15kb','50kb','100kb','500kb')], top='Discovery 
 
 ```{r, fig.width=8, fig.height=12}
 
-per.samp.train = lapply(list.files(data,full.names = T), function(f) {
+lapply(files, function(f) {
+  load(paste0(f,'/loo_0.9.Rdata'),verbose=F)
+  
+  kb = basename(f)
+  
+  pg.samp = pg.samp %>% mutate(quants = cut(Prediction, breaks=seq(0,1,0.1), include.lowest = T)) %>%
+    left_join(loo.pred.confidence[[kb]] %>% dplyr::select(quants, Risk), by='quants') %>%
+    mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T))
+
+  pg.samp %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% 
+    left_join(pg.samp %>% group_by(Status) %>% tally, by='Status') %>%
+    dplyr::rename('Total' = 'n') %>% mutate(kb = kb)
+    
+}) %>% bind_rows() %>% dplyr::rename('Total samples' = 'Total') %>% write_tsv('plots/exfig10a.tsv')
+
+per.samp.train = lapply(files, function(f) {
   load(paste0(f,'/loo_0.9.Rdata'),verbose=F)
   
   kb = basename(f)
@@ -293,7 +351,7 @@ per.samp.train = lapply(list.files(data,full.names = T), function(f) {
     dplyr::rename('Total' = 'n') %>%
     mutate_at(vars(Low,Moderate,High), funs(./Total)) %>% mutate(kb = kb)
 })
-names(per.samp.train) = list.files(data)
+names(per.samp.train) = basename(files)
 
 plist = purrr::map(names(per.samp.train), function(kb) {
   df = melt(per.samp.train[[kb]], id.vars=c('Status','Total','kb')) %>% as_tibble %>% mutate(Status = recode_factor(Status, NP = 'Non-Progressor', P = 'Progressor'))
@@ -306,6 +364,8 @@ plist = purrr::map(names(per.samp.train), function(kb) {
 names(plist) = names(per.samp.train)
 
 p = do.call(grid.arrange, c(plist[c('15kb','50kb','100kb','500kb')], top='Discovery Cohort Classifications (alpha=0.9)'))
+
+grid.arrange(p)
 
 ggsave(filename='plots/parameters/kb_classes.png', plot = p, width = 6, height = 12, units = 'in', dpi = 300)
 
@@ -321,40 +381,7 @@ ggsave(filename='plots/parameters/kb_classes.png', plot = p, width = 6, height =
 
 ```
 
-## Per-sample alpha=0.9
 
-```{r, fig.width=8, fig.height=12, eval=F}
-test.preds.per.kb09 = purrr::map(list.files(data,full.names = T), function(f) {
-  read_tsv(list.files(f, 'test_patients_preds_0.9.tsv', full.names = T), col_types = 'cdccdccclddccccccddccccdddccdddcdd') %>% dplyr::select(Hospital.Research.ID, Status, Endoscopy.Year, Pathology, Prediction, RR, Samplename, Path.ID) %>% mutate(kb = basename(f))
-}) 
-names(test.preds.per.kb09) = basename(list.files(data))
-
-test.preds.per.kb09 = lapply(test.preds.per.kb09, function(kb) {
-  kb %>% mutate(quants = cut(Prediction, breaks=seq(0,1,0.1), include.lowest = T)) %>% 
-    left_join(loo.pred.confidence[[unique(kb$kb)]] %>% dplyr::select(quants, Risk), by='quants') %>%
-    mutate(Risk = factor(Risk, levels=c('Low','Moderate','High'), ordered=T)) 
-})
-
-test.samples = all.patient.info %>% filter(Set == 'Test') %>% group_by(Status) %>% tally
-
-test.counts09 = lapply(test.preds.per.kb09, function(kb) {
-  kb %>% group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>%
-    mutate(kb = unique(kb$kb)) %>% left_join(test.samples, by='Status') %>% 
-    mutate_if(is.numeric, funs(./n))
-})
-
-plist = lapply(test.counts09, function(kb) {
-  tt = unique(kb$kb)
-  kb = kb  %>% ungroup %>% dplyr::select(-kb,-n) 
-
-  ggplot(melt(kb, id.vars=c('Status')), aes(variable, value, group=Status, fill=Status)) + ylim(0,1) + 
-    geom_bar(stat='identity', position='dodge') + geom_text(aes(label=round(value,2)), position = position_dodge(width=1)) +
-    #scale_fill_manual(values=c('#4575B4','#A50026'),labels=c('NP','P')) + 
-    labs(title=tt, x='', y='sample ratio') + theme_minimal()
-})
-
-do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Test set predictions, alpha=0.9'))
-```
 
 ## Per endoscopy
 ```{r, fig.width=8, fig.height=12, eval=F}
@@ -411,6 +438,17 @@ oac %>% group_by(kb, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>% mutate_a
 #  roc = pROC::roc(Status ~ Probability, data=val.preds$`100kb`, auc=T, ci=T, of='thresholds',transpose=T)
 #  pROC::coords(roc, "best", transpose=F) %>% mutate( auc = as.numeric(pROC::auc(roc)), kb = basename(f) )
 
+
+lapply(val.preds, function(kb) {
+  totals = kb %>% dplyr::filter(Cohort != 'Old progressor scrolls' & Pathology != 'OAC' ) %>% group_by(Status) %>% tally
+  
+  kb %>% dplyr::filter(Cohort != 'Old progressor scrolls' & Pathology != 'OAC')  %>% 
+    group_by(Status, Risk) %>% tally %>% spread(Risk,n) %>% ungroup %>%
+    mutate(kb = unique(kb$kb)) %>% left_join(totals, by='Status')
+}) %>% bind_rows() %>% dplyr::rename('Total samples' = 'n') %>% dplyr::select(kb, Status, everything()) %>% write_tsv('plots/exfig10b.tsv')
+  
+
+
 val.counts = lapply(val.preds, function(kb) {
   totals = kb %>% dplyr::filter(Cohort != 'Old progressor scrolls' & Pathology != 'OAC') %>% group_by(Status) %>% tally
   
@@ -430,7 +468,6 @@ plist = lapply(val.counts, function(kb) {
 })
 do.call(grid.arrange, c(plist[c('50kb','100kb','15kb','500kb')], top='Validation'))
 
-
 plist = purrr::map(names(val.counts), function(kb) {
   df = melt(val.counts[[kb]], id.vars=c('Status','kb')) %>% as_tibble %>% mutate(Status = recode_factor(Status, NP = 'Non-Progressor', P = 'Progressor'))
   ggplot(df, aes(Status, value, group=Status, fill=variable)) + 
@@ -440,6 +477,8 @@ plist = purrr::map(names(val.counts), function(kb) {
     labs(title=unique(kb), x='', y='sample ratio') + theme_minimal() + theme(text = element_text(size = 12), legend.position = 'none')
 })
 names(plist) = names(val.counts)
+
+
 
 p = do.call(grid.arrange, c(plist[c('15kb','50kb','100kb','500kb')], top='Validation Cohort Classifications (alpha=0.9)'))
 
