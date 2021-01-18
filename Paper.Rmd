@@ -176,6 +176,12 @@ globalCNdf %<>% filter(!is.na(Status))
 n.status <- c('Progressor'=paste0('P\n(n=',length(unique(subset(globalCNdf, Status == 'Progressor')$variable)), ')'),
               'Non-Progressor'=paste0('NP\n(n=',length(unique(subset(globalCNdf, Status == 'Non-Progressor')$variable)),')'))
 
+globalCNdf %>% filter(seg.type != 'arms') %>% dplyr::select(Patient, Status, Pathology, variable, chr, start, end, value) %>% 
+  dplyr::rename_all(list(~str_to_title(.))) %>% dplyr::rename('Chromosome' = 'Chr', 'Sample' = 'Variable', 'CN Value' = 'Value') %>%
+  write_tsv('plots/global_cn_values.tsv')
+  
+
+
 globalCN.plot = cn.mtn.plot(globalCNdf %>% filter(seg.type != 'arms'), labeller(Status=n.status, chr=label_value))
 
 cnLegend = get.legend(globalCN.plot)
@@ -639,9 +645,6 @@ pout %>% dplyr::select(-Endoscopy.Year, -PID) %>% dplyr::rename('Probability' = 
   dplyr::mutate(Status = recode_factor(Status, 'NP'='Non-Progressor', 'P'='Progressor')) %>% 
   write_tsv('plots/aggregate_rocs.tsv')
 
-  
-
-
 pendo = pg.samp %>% dplyr::group_by(Patient, Status, Hospital.Research.ID, PID ) %>% 
   dplyr::summarise( 'max'=max(Prediction), 'avg'=mean(Prediction), 'n'=length(PID) )
 
@@ -939,7 +942,7 @@ pg.samp %>% dplyr::select(Samplename,Prediction, RR, Risk) %>% arrange(RR) %>%
   dplyr::rename('Probability' = 'Prediction', 'log(Relative Risk)' = 'RR', 'Risk class' = 'Risk') %>%
   write_tsv('plots/unadjusted_RR.tsv')
 
-ggsave(filename='plots/unadj_relrisk.png', plot=unadjRR + ggtitle(''), width=6, height=5, units='in', dpi=300)
+ggsave(filename='plots/unadj_relrisk.png', plot=unadjRR + labs(title='', x='', y=''), width=6, height=5, units='in', dpi=300)
 rm(unadjRR, myPal)
 ```
 
@@ -1075,12 +1078,15 @@ rm(p20, p51)
 
 #### By pathology?
 ```{r, echo=F, warning=F, message=F, fig.height=10, fig.width=12}
+#tmp = pg.samp %>% dplyr::mutate(Pathology = recode(Pathology, 'HGD' = 'HGD/IMC', 'IMC' = 'HGD/IMC'))
 pg.samp %>% dplyr::group_by(Status, Pathology, Risk) %>% tally(name='Sample count') %>% ungroup %>% dplyr::rename('Risk class' = 'Risk') %>%
   write_tsv('plots/discovery_cohort_by_path.tsv')
 
-rp = plot.risk.by.path(pg.samp %>% ungroup) + labs(title='Discovery cohort samples', y='% samples classified', x='Sample pathology') + theme(strip.text = element_text(size=14))
-rp
-ggsave(filename='plots/pred_by_path.png', plot=(rp + theme(legend.position = 'none') + ggtitle('')), width=7.5, height=6.5, units='in', dpi=300)
+rp = plot.risk.by.path(pg.samp %>% ungroup, label_bars = F, ret_df = F)
+
+rp + labs(title='Discovery cohort samples', y='% samples classified', x='Sample pathology') + theme(strip.text = element_text(size=14))
+
+ggsave(filename='plots/pred_by_path.png', plot=(rp + theme(legend.position = 'none') + labs(title='', x='',y='')), width=7.5, height=6.5, units='in', dpi=300)
 rm(rp)
 ```
 
@@ -1139,13 +1145,13 @@ endos.m %>% set_names(c('Months', 'Ratio predicted endoscopies','Sample count', 
 rp = ggplot(endos.m, aes(x=brks, y=pred.r*100, ymin=(pred.r-`sem(P)`)*100, ymax=(pred.r+`sem(P)`)*100, group=brks)) +
   geom_bar(stat='identity', fill=BarrettsProgressionRisk:::riskColors()[['High']], show.legend = F) + 
   geom_errorbar(color='grey55', width=0.2) +
-  geom_text(aes(label=paste(round(pred.r*100), '%', sep=''), y=(pred.r-`sem(P)`)*100), color='white', nudge_y=-3) +
-  geom_text(aes(y=5, label=paste('n=',n.endo,'\ns=',n.samp,sep='')), color='white', nudge_y=2) + 
-  labs(x='Months prior to endpoint', y='Sensitivity for high risk samples', title='High risk classifications prior to final endoscopy', subtitle='n = #endoscopies, s = #samples') + coord_cartesian(ylim = c(0,100)) + 
+  labs(x='Months prior to endpoint', y='Sensitivity for high risk samples', title='High risk classifications prior to final endoscopy') + coord_cartesian(ylim = c(0,100)) + 
   plot.theme + theme( axis.text.x=element_text(angle=45,hjust=1), text=element_text(size=12) ) 
-rp
 
-ggsave(filename='plots/pred_endo.png', plot=rp + ggtitle(''), width=6, height=5, units='in', dpi=300)
+rp + geom_text(aes(label=paste(round(pred.r*100), '%', sep=''), y=(pred.r-`sem(P)`)*100), color='white', nudge_y=-3) +
+  geom_text(aes(y=5, label=paste('n=',n.endo,'\ns=',n.samp,sep='')), color='white', nudge_y=2) + labs(subtitle='n = #endoscopies, s = #samples')
+
+ggsave(filename='plots/pred_endo.png', plot=rp + labs(title='', x='', y=''), width=6, height=5, units='in', dpi=300)
 rm(endos,endos.m,rp)
 ```
 
@@ -1208,7 +1214,7 @@ risk.over.time %>% dplyr::select(Patient, Status, max.Prob,max.Risk, max.Path, m
   set_names(c('Patient', 'Status', 'max(Pr)', 'max(Risk class)', 'max(Pathology)', 'Months since initial endoscopy')) %>%
   write_tsv('plots/risk_over_time.tsv')
 
-p = ggplot(risk.over.time) + facet_wrap(~Status, scales='free', ncol = 1) +
+p = ggplot(risk.over.time) + facet_wrap(~Status, scales='free', ncol = 2) +
   geom_line(aes(x=months.since.initial, y=reorder(Patient, desc(ie.risk.diff)), color=ie.risk.diff)) + 
   scale_color_manual(values=unlist(riskColors()), name='Initial:Final Risk') + 
   geom_point(aes(x=months.since.initial, y=reorder(Patient, desc(ie.risk.diff)), fill=max.Risk, shape=max.Path), color='white', size=4 ) +  
@@ -1216,9 +1222,14 @@ p = ggplot(risk.over.time) + facet_wrap(~Status, scales='free', ncol = 1) +
   scale_fill_manual(values=unlist(riskColors()), name='Max Risk',guide=guide_legend(override.aes=list(fill=unlist(riskColors()), color=unlist(riskColors())))) + 
   scale_shape_manual(values=c(21,22,23,24,25), name='Max Pathology',guide=guide_legend(override.aes=list(fill='grey39', color='white'))) +
   labs(x='Months since initial endoscopy', y='Patient', title='Risks over time per endoscopy') + 
-  plot.theme + theme(text = element_text(size=16))
+  plot.theme + theme(text=element_text(size=16), panel.spacing.x=unit(1,'lines')  )
 p
-ggsave(filename='plots/risks_over_time.png', plot = p + ggtitle(''), height=12, width=7, units='in')
+
+legend = get.legend(p)
+
+ggsave(filename='plots/risks_over_time.png', plot = p + labs(title='',x='',y='') + theme(legend.position='none'), height=8, width=12, units='in')
+
+ggsave(filename='plots/risks_over_time_legend.png', plot = grid.arrange(legend), height=5, width=2, units='in')
 
 rm(p,sq,tb,pts,risk.over.time,time.pred)
 ```
@@ -1329,6 +1340,38 @@ rm(p1,p2, plist)
 #ggsave('plots/risk_legend.png', plot=grid.arrange(riskLegend), width=2,height=4, dpi=300)
 #ggsave('plots/risk_legend_long.png', plot=grid.arrange(riskLegendLong), width=8,height=2, dpi=300)
 ```
+
+# How predictive are the strongest coefs?
+```{r}
+features = features %>% arrange(desc(hazards)) 
+
+ftsamples = tibble(); ftpatients = tibble()
+for (i in 1:nrow(features)) {
+  ft = features %>% dplyr::slice(i)
+  ft_cn = globalCNdf %>% filter(chr == ft$chr & start >= ft$start & end <= ft$end & 
+                      seg.type == case_when((ft$end-ft$start) > 5e6 ~ 'arms', TRUE ~ '5MB') &
+                      as.character(cn) == as.character(ft$gl))
+
+  ftsamples = bind_rows(ftsamples, ft_cn %>% dplyr::group_by(Status) %>% tally() %>% spread(Status, n) %>% 
+    dplyr::mutate('Sample counts for:' = paste0(ft$gl, ' of ', ft$label)) %>% 
+    dplyr::select('Sample counts for:', everything()))
+
+  ftpatients = bind_rows(ftpatients, ft_cn %>% dplyr::select(Patient, Status) %>% distinct %>% 
+    group_by(Status) %>%  tally() %>% spread(Status, n) %>%
+    dplyr::mutate('Patient counts for:' = paste0(ft$gl, ' of ', ft$label)) %>% 
+    dplyr::select('Patient counts for:', everything()))
+}
+
+ftsamples = ftsamples %>% dplyr::mutate_all(list(~replace_na(.,0)))
+ftpatients = ftpatients %>% dplyr::mutate_all(list(~replace_na(.,0)))
+
+
+ftpatients %>% arrange(desc(Progressor))
+ftsamples %>% arrange(desc(Progressor))
+
+
+```
+
 
 # Chr17
 
@@ -1646,9 +1689,11 @@ rm(totals,val.counts)
 ```{r}
 val.preds %>% dplyr::group_by(Status, Pathology, Risk) %>% tally(name='Sample count') %>% dplyr::rename('Risk class' = 'Risk') %>% write_tsv('plots/val_cohort_by_path.tsv')
 
-rp = plot.risk.by.path(val.preds) + labs(title='Validation cohort samples', y='% samples classified', x='Sample pathology')  + theme(strip.text = element_text(size=12))
+plot.risk.by.path(val.preds, label_bars = T) + labs(title='Validation cohort samples', y='% samples classified', x='Sample pathology')  + theme(strip.text = element_text(size=12))
+
+rp = plot.risk.by.path(val.preds, label_bars = F) + labs(title='Validation cohort samples', y='% samples classified', x='Sample pathology')  + theme(strip.text = element_text(size=12))
 rp
-ggsave(filename='plots/validation/val_pred_by_path.png', plot=rp + theme(legend.position = 'none') + ggtitle(''), width=6, height=7, units='in', dpi=300)
+ggsave(filename='plots/validation/val_pred_by_path.png', plot=rp + theme(legend.position = 'none') + labs(title='',x='',y=''), width=6, height=7, units='in', dpi=300)
 rm(rp)
 
 get.year<-function(x) {
@@ -1967,10 +2012,13 @@ second %>% group_by(Status, Rx) %>% tally %>% spread(Status,n) %>%
 
 p = second %>% group_by(Status, Rule) %>% tally %>% spread(Rule,n) %>% dplyr::rename(RFA = `1`, `6-12 month recheck` = `2`, `12-24 month recheck` = `3`, `3-5 year surveillance` = `4`)  %>%
   melt(id.vars = 'Status') %>% mutate(Status = recode(Status, NP = 'Non-Progressor' ,P = 'Progressor')) %>%
-  ggplot(aes(variable, value, group = Status)) + 
-  geom_col(aes(fill=Status), position = position_dodge()) + geom_text(aes(label=paste0('n=',value)), position = position_dodge(width = 1)) + coord_flip() +
-  scale_fill_manual(values = c('#4575B4', '#A50026'), name='' ) + plot.theme + labs(x='', y='Number of Patients', title='Second Endoscopy Rx') + theme(legend.position = 'bottom')
-p
+  ggplot(aes(variable, value, group = Status)) + scale_y_continuous(expand=c(0,0), limits=c(0,25)) +
+  geom_col(aes(fill=Status), position = position_dodge()) + 
+  coord_flip() +
+  scale_fill_manual(values = c('#4575B4', '#A50026'), name='' ) + plot.theme + 
+  labs(x='', y='Number of Patients', title='Second Endoscopy Rx') + theme(legend.position = 'bottom')
+p + geom_text(aes(label=paste0('n=',value)), position = position_dodge(width = 1)) 
+
 ggsave('plots/second_endo_rx.png', plot=p, width=6, height=6, units='in', dpi=300)
 rm(p)
 

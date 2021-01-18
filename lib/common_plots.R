@@ -399,7 +399,7 @@ mtn.spatial<-function(df, b, limits, title='', pal=NULL, ylim=c(-5,5), axis.text
 }
 
 
-plot.risk.by.path<-function(preds) {
+plot.risk.by.path<-function(preds, label_bars=T, ret_df=F) {
   riskCols = BarrettsProgressionRisk:::riskColors()
   riskPath = preds %>% dplyr::group_by(Status, Pathology, Risk) %>% tally(name='Freq') %>% ungroup %>%
     mutate(Status = recode_factor(Status, NP = 'Non-Progressor', P = 'Progressor', .ordered = T))
@@ -414,12 +414,19 @@ plot.risk.by.path<-function(preds) {
   
   rp = ggplot(riskPath, aes(Pathology, ratio*100)) + geom_bar(aes(group=Risk, fill=Risk),stat='identity', position=position_stack()) + 
     scale_fill_manual(values=riskCols) + scale_color_manual(values=c('white','black','white')) +
-    geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=102), position=position_stack(), size=4) +
-    geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), ), position=position_stack(vjust = 0.5), size=4, show.legend = F) +
-    #geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
-    facet_grid(~Status, scales = 'free_x', space = 'free_x') + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') + 
+    facet_grid(~Status, scales = 'free_x', space = 'free_x') + plot.theme + labs(title='Samples predicted by pathology', y='% Predicted', x='Pathology') +
     theme(legend.position = 'bottom', text=element_text(size=14))
   
+  if (label_bars) {
+    rp = rp + geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), ), position=position_stack(vjust = 0.5), size=4, show.legend = F) +
+      geom_text(data=pathTotal, aes(label=paste('n=',nPath,sep=''), x=Pathology, y=102), position=position_stack(), size=4) 
+      #geom_text(data=subset(riskPath, ratio>0), aes(group=Risk,label=paste(ratio*100,'%',sep=''), color=Risk), position=position_stack(vjust = 0.5), size=5, show.legend = F) +
+  }
+
+  if (ret_df) {
+    return( list(plot = rp, text = pathTotal, df = riskPath) )
+  }   
+
   return(rp)
 }
 

@@ -23,11 +23,18 @@ get_patient_id<-function(conn, id) {
   dbGetQuery(conn, query) %>% pull
 }
 
+last_inserted_rows<-function(conn, table, nRows) {
+  maxR = dbGetQuery(conn, paste0("SELECT seq FROM sqlite_sequence WHERE name ==", shQuote(table))) %>% pull
+  dbGetQuery(conn, paste0("SELECT * FROM ",table," WHERE ID > ", maxR-nRows, " AND  ID <=", maxR)) %>% as_tibble
+}
 
-tables = c('SequenceMetadata','EndoscopySample', 'Endoscopy','AlternatePatientID','Patient', 'sqlite_sequence')
+
+tables = c('HistoPathSlides', 'SequenceMetadata','EndoscopySample', 'Endoscopy','AlternatePatientID','Patient', 'sqlite_sequence')
 
 train = T
 val = T
+
+slides = readxl::read_xlsx('~/OneDrive - MRC Cancer Unit at University of Cambridge/slide_matching.xlsx')
 
 if (train) {
   ### Training Cohort
@@ -94,7 +101,7 @@ if (train) {
     did = pt %>% dplyr::select(`Hospital Research ID`) %>% distinct() %>% pull
     dem = demo %>% filter(`Study Number` == did | `Alternate Study Number` == did) %>% dplyr::select(matches('Study Number')) 
     
-    tmp = pt %>% filter(`Patient ID` == id) %>% dplyr::select(DBPatientID, `Patient ID`, `Path ID`, `PathCaseID`, `Endoscopy Year`, Block, Notes, Pathology, `Pathology notes`, `p53 status`) %>% 
+    tmp = pt %>% filter(`Patient ID` == id) %>% #dplyr::select(DBPatientID, `Patient ID`, `Path ID`, `PathCaseID`, `Endoscopy Year`, Block, Notes, Pathology, `Pathology notes`, `p53 status`,Samplename, matches('SLX'), `Plate Index`, `Technical Replicate`, Samplename) %>% 
       arrange(`Endoscopy Year`) %>%
       dplyr::mutate(`Endoscopy Year` = ISOdate(`Endoscopy Year`, 01, 01)) %>%
       group_by(`Patient ID`, PathCaseID, `Endoscopy Year`) %>% 
@@ -105,10 +112,10 @@ if (train) {
        distinct %>% dplyr::mutate( value = paste0('(',paste(`DBPatientID`, shQuote(`PathCaseID`), shQuote(as.character(`Endoscopy Year`)),shQuote(Notes), sep=','),')')) %>% dplyr::select(value) %>% pull
   
      statement = paste("INSERT INTO Endoscopy (PatientID, PathCaseID, EndoscopyDate, Notes) VALUES", paste(unique(values), collapse = ','))
-     dbExecute(conn, statement)
+     nRows = dbExecute(conn, statement)
      
-     select = paste0("SELECT * FROM Endoscopy WHERE PatientID == ", pid, " AND PathCaseID IN (", paste(shQuote(tmp$PathCaseID), collapse=','), ')')
-     rows = dbGetQuery(conn, select) %>% arrange(ID) %>% dplyr::rename(EndoscopyID = ID)
+     rows = last_inserted_rows(conn, 'Endoscopy', nRows) %>% dplyr::rename(EndoscopyID = ID)
+     
      if (nrow(rows) <= 0)
        stop(paste("No rows in 'Endoscopy' for PatientID", pid, 'and PathCaseID', paste(tmp$PathCaseID, collapse=',')))
   
@@ -121,21 +128,23 @@ if (train) {
        dplyr::select(value) %>% pull
      
      statement = paste0("INSERT INTO EndoscopySample (PatientID, EndoscopyID, Block, p53IHC, Pathology, PathNotes) VALUES ", paste(values, collapse=', ') )
-     dbExecute(conn, statement)
+     nRows = dbExecute(conn, statement)
      
+     tmp = bind_cols(tmp, last_inserted_rows(conn, 'EndoscopySample', nRows) %>% dplyr::rename(EndoscopySampleID = ID) %>% dplyr::select(EndoscopySampleID))
+
      # sWGS info 
-     statement = 'INSERT INTO SequenceMetadata (PatientID, SampleTable, SampleID,Samplename,SLX,PlateIndex,Replicate,TotalReads) VALUES'
-     
-     values = left_join(dplyr::select(rows, -Notes, -EndoscopyDate), dplyr::select(pt, PathCaseID, matches('DB|SLX|Index|Reads|Replicate|Samplename')), by='PathCaseID') %>% 
-       dplyr::group_by(EndoscopyID, Samplename) %>%
+     statement = 'INSERT INTO SequenceMetadata (PatientID, SampleTable, SampleID, Samplename, SLX, PlateIndex, Replicate, TotalReads) VALUES'
+
+    values = tmp %>% #left_join(dplyr::select(rows,-BlockLevel,-Block,-PathNotes), dplyr::select(tmp, EndoscopyID, matches('DB|SLX|Index|Reads|Replicate|Samplename')), by='EndoscopyID') %>% 
+       dplyr::group_by(EndoscopySampleID, Samplename) %>%
        dplyr::mutate(SLX = paste(na.omit(c(`SLX ID 1`, `SLX ID 2`)), collapse='; '), Replicate = !is.na(`Technical Replicate`)) %>% ungroup %>%
-       dplyr::mutate_all(list(~replace_na(.,'null'))) %>%
-       dplyr::mutate(value = paste0('(',paste(DBPatientID, shQuote('EndoscopySample'), EndoscopyID, shQuote(Samplename), shQuote(SLX), shQuote(`Plate Index`), shQuote(Replicate), `Number of reads`, sep=', '), ')') ) %>% ungroup %>%
+       dplyr::mutate_if(~(is.character(.) | is.numeric(.)),list(~replace_na(.,'null'))) %>%
+       dplyr::mutate(value = paste0('(',paste(DBPatientID, shQuote('EndoscopySample'), EndoscopySampleID, shQuote(Samplename), shQuote(SLX), shQuote(`Plate Index`), shQuote(Replicate), `Number of reads`, sep=', '), ')') ) %>% ungroup %>%
        dplyr::select(value) %>% pull
     
      statement = paste0(statement, paste(values,collapse=','))
      #print(statement)
-     dbExecute(conn, statement)
+     nRows = dbExecute(conn, statement)
   }
   
   rm(all_pt, demo)
@@ -200,7 +209,7 @@ if (val) {
     pt = all_pt %>% filter(`Patient ID` == id) %>% mutate(DBPatientID = pid)
     dem = demo %>% filter(Patient == id) %>% mutate(DBPatientID = pid)
     
-    tmp = pt %>% dplyr::select(DBPatientID, `Patient ID`, `Block ID`, `PathCaseID`, `Endoscopy`, Block, Notes, Pathology, `Path Notes`, `p53`) %>% 
+    tmp = pt %>% dplyr::select(-`Hospital Research ID`) %>% 
       arrange(`Endoscopy`) %>%
       #dplyr::mutate(`Endoscopy` = ISOdate(`Endoscopy Year`, 01, 01)) %>%
       group_by(`DBPatientID`, PathCaseID, `Endoscopy`) %>% 
@@ -211,10 +220,11 @@ if (val) {
       distinct %>% dplyr::mutate( value = paste0('(',paste(`DBPatientID`, shQuote(`PathCaseID`), shQuote(as.character(`Endoscopy`)),shQuote(Notes), sep=','),')')) %>% dplyr::select(value) %>% pull
     
     statement = paste("INSERT INTO Endoscopy (PatientID, PathCaseID, EndoscopyDate, Notes) VALUES", paste(unique(values), collapse = ','))
-    dbExecute(conn, statement)
-    
-    select = paste0("SELECT * FROM Endoscopy WHERE PatientID == ", pid, " AND PathCaseID IN (", paste(shQuote(tmp$PathCaseID), collapse=','), ')')
-    rows = dbGetQuery(conn, select) %>% arrange(ID) %>% dplyr::rename(EndoscopyID = ID)
+    nRows = dbExecute(conn, statement)
+
+    # last inserts    
+    rows = last_inserted_rows(conn,'Endoscopy',nRows) %>% dplyr::rename(EndoscopyID = ID)
+        
     if (nrow(rows) <= 0)
       stop(paste('No rows in Endoscopy table for patient',pid, "and PathCaseID ", paste(unique(tmp$PathCaseID),collapse=',')))
     
@@ -227,15 +237,16 @@ if (val) {
       dplyr::select(value) %>% pull
     
     statement = paste0("INSERT INTO EndoscopySample (PatientID, EndoscopyID, Block, Pathology, PathNotes) VALUES ", paste(values, collapse=', ') )
-    dbExecute(conn, statement)
+    nRows = dbExecute(conn, statement)
     
+    tmp = bind_cols(tmp, (last_inserted_rows(conn,table='EndoscopySample', nRows) %>% dplyr::rename(EndoscopySampleID = ID) %>% dplyr::select(EndoscopySampleID)) )
+
     # sWGS 
     statement = 'INSERT INTO SequenceMetadata (PatientID, SampleTable, SampleID,Samplename,SLX,PlateIndex) VALUES'
-    
-    values = left_join(dplyr::select(rows, -Notes, -EndoscopyDate), dplyr::select(pt, PathCaseID, matches('DB|SLX|Index|Reads|Replicate|Samplename')), by='PathCaseID') %>% 
-      dplyr::mutate_all(list(~replace_na(.,'null'))) %>%
-      dplyr::group_by(EndoscopyID, Samplename) %>%
-      dplyr::mutate(value = paste0('(',paste(DBPatientID, shQuote('EndoscopySample'), EndoscopyID, shQuote(Samplename), shQuote(`SLX-ID`), shQuote(`Index Sequence`), sep=', '), ')') ) %>% ungroup %>%
+    values = tmp %>% #left_join(dplyr::select(rows, -PathNotes), dplyr::select(tmp, EndoscopyID, matches('SLX|Index|Reads|Replicate|Samplename')), by=c('EndoscopyID')) %>% 
+      dplyr::mutate_if(~(is.character(.) | is.numeric(.)), list(~replace_na(.,'null'))) %>%
+      dplyr::group_by(EndoscopySampleID, Samplename) %>%
+      dplyr::mutate(value = paste0('(',paste(DBPatientID, shQuote('EndoscopySample'), EndoscopySampleID, shQuote(Samplename), shQuote(`SLX-ID`), shQuote(`Index Sequence`), sep=', '), ')') ) %>% ungroup %>%
       dplyr::select(value) %>% pull
     
     statement = paste(statement, paste(values,collapse=','))
@@ -245,6 +256,24 @@ if (val) {
   
   rm(all_pt, demo)
 }
-
 row_counts(conn,rev(tables)[-1])
+
+histo = F
+if (histo) {
+  statement = 'INSERT INTO HistoPathSlides (EndoscopyID, EndoscopySampleID, PatientID, DigitalFileName, Notes) VALUES '
+  
+  values = slides %>% filter(!is.na(EndoscopyID), !is.na(Matched)) %>% 
+  dplyr::mutate(DigitalFileName = case_when(
+    Matched ~ shQuote(`Slide file`), 
+    !Matched ~ shQuote(`Correct file`)
+  ), 
+  `Slide Notes` = case_when(is.na(`Slide Notes`) ~ 'null', TRUE ~ shQuote(`Slide Notes`)) ) %>% 
+    dplyr::select( EndoscopyID, EndoscopySampleID, PatientID, DigitalFileName, `Slide Notes`) %>% 
+    mutate(value = paste0('(', paste(EndoscopyID, EndoscopySampleID, PatientID, DigitalFileName, `Slide Notes`, sep=','), ')')) %>% 
+    dplyr::select(value) %>% pull %>%
+    paste(collapse=',') 
+  
+  nRows = dbExecute(conn, paste0(statement, values))
+}
+ 
 
