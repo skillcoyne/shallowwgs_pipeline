@@ -44,7 +44,7 @@ if ( length(patient.file) != 1 | length(demo.file) != 1)
 all.patient.info = read.patient.info(patient.file, demo.file, set='All')$info %>% dplyr::arrange(Status, Patient, Endoscopy.Year, Pathology)
 
 if (set != 'All') {
-  patient.info = all.patient.info %>% filter(Set == set)
+  patient.info = all.patient.info %>% dplyr::filter(Set == set)
 } else {
   patient.info = all.patient.info
 }
@@ -103,6 +103,8 @@ mn.cx = sqrt(mean(cx.score^2))
 
 # Add complexity score
 allDf = cbind(allDf, 'cx'=BarrettsProgressionRisk:::unit.var(cx.score, mn.cx, sd.cx))
+
+
 
 ## labels: binomial: prog 1, np 0
 sampleStatus = patient.info %>% filter(Samplename %in% rownames(allDf)) %>% dplyr::select(Samplename,Status) %>% 
@@ -283,14 +285,15 @@ if (file.exists(file)) {
     
   #for (pt in names(pg.samp)) {
     print(pt)
-    samples = subset(pg.samp, Hospital.Research.ID != pt)$Samplename
-    
+    samples = pg.samp %>% dplyr::filter(Hospital.Research.ID != pt) %>% dplyr::select(Samplename) %>% pull
+
     train.rows = which(rownames(dysplasia.df) %in% samples)
     training = dysplasia.df[train.rows,,drop=F]
     test = as.matrix(dysplasia.df[-train.rows,,drop=F])
     if (ncol(test) <= 0) next # shouldn't be any but...
 
     patient.samples = pg.samp %>% filter(Hospital.Research.ID == pt) %>% dplyr::select(Samplename)
+    
     # Predict function giving me difficulty when I have only a single sample, this ensures the dimensions are the same
     sparsed_test_data <- Matrix(data=0, nrow=ifelse(nrow(patient.samples) > 1, nrow(test), 1),  ncol=ncol(training),
                                 dimnames=list(rownames(test),colnames(training)), sparse=T)

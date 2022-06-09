@@ -3,7 +3,8 @@ library(tidyverse)
 library(RSQLite)
 
 
-conn <- dbConnect(RSQLite::SQLite(), "~/OneDrive - MRC Cancer Unit at University of Cambridge/Progressor Study/Patient Database/BE_Progression_Project.db")
+#conn <- dbConnect(RSQLite::SQLite(), "~/OneDrive - MRC Cancer Unit at University of Cambridge/Progressor Study/Patient Database/BE_Progression_Project.db")
+conn <- dbConnect(RSQLite::SQLite(), "~/workspace/BE_Patient_SampleDB/BE_Progression_Project.db")
 
 delete_all<-function(conn) {
   tables = dbListTables(conn)
@@ -31,10 +32,12 @@ last_inserted_rows<-function(conn, table, nRows) {
 
 tables = c('HistoPathSlides', 'SequenceMetadata','EndoscopySample', 'Endoscopy','AlternatePatientID','Patient', 'sqlite_sequence')
 
+delete_all(conn)
+
 train = T
 val = T
 
-slides = readxl::read_xlsx('~/OneDrive - MRC Cancer Unit at University of Cambridge/slide_matching.xlsx')
+slides = readxl::read_xlsx('~/OneDrive - MRC Cancer Unit at University of Cambridge/slide_matching2.xlsx')
 
 if (train) {
   ### Training Cohort
@@ -50,7 +53,7 @@ if (train) {
   
   ## Patient table
   for (id in unique(all_pt$`Patient ID`)) {
-    print(id)  
+    #print(id)  
     pt = all_pt %>% filter(`Patient ID` == id) 
     did = pt %>% dplyr::select(`Hospital Research ID`) %>% distinct() %>% pull
     dem = demo %>% filter(`Study Number` == did | `Alternate Study Number` == did) %>% dplyr::select(`P/NP`, Sex, `Age at diagnosis`, `Smoking Status`,`further smoking info`, `Height (cm)`, `Weight (kg)`, `Year of 'Endpoint'`, `Date of First Endoscopy`, Circumference, Maximal)
@@ -92,8 +95,7 @@ if (train) {
   
   ## Endoscopy & EndoscopySample
   for (id in unique(all_pt$`Patient ID`)) {
-    print(id)  
-    
+    #print(id)  
     pid = get_patient_id(conn, id)
     
     pt = all_pt %>% filter(`Patient ID` == id) %>% mutate(DBPatientID = pid)
@@ -166,7 +168,7 @@ if (val) {
   
   ## Patient table
   for (id in unique(all_pt$`Patient ID`)) {
-    print(id)  
+    #print(id)  
     pt = all_pt %>% filter(`Patient ID` == id) 
     altids = t(unlist( sapply( pt %>% dplyr::select(`Hospital Research ID`) %>% distinct() %>% pull,  function(x) str_trim(str_split(x, pattern=',', simplify = T), 'both') ) ))
     
@@ -202,8 +204,7 @@ if (val) {
   
   ## Endoscopy & EndoscopySample
   for (id in unique(all_pt$`Patient ID`)) {
-    print(id)  
-    
+    #print(id)  
     pid = get_patient_id(conn,id)
     
     pt = all_pt %>% filter(`Patient ID` == id) %>% mutate(DBPatientID = pid)
@@ -258,22 +259,50 @@ if (val) {
 }
 row_counts(conn,rev(tables)[-1])
 
-histo = F
+histo = T
 if (histo) {
-  statement = 'INSERT INTO HistoPathSlides (EndoscopyID, EndoscopySampleID, PatientID, DigitalFileName, Notes) VALUES '
-  
-  values = slides %>% filter(!is.na(EndoscopyID), !is.na(Matched)) %>% 
-  dplyr::mutate(DigitalFileName = case_when(
-    Matched ~ shQuote(`Slide file`), 
-    !Matched ~ shQuote(`Correct file`)
-  ), 
-  `Slide Notes` = case_when(is.na(`Slide Notes`) ~ 'null', TRUE ~ shQuote(`Slide Notes`)) ) %>% 
-    dplyr::select( EndoscopyID, EndoscopySampleID, PatientID, DigitalFileName, `Slide Notes`) %>% 
-    mutate(value = paste0('(', paste(EndoscopyID, EndoscopySampleID, PatientID, DigitalFileName, `Slide Notes`, sep=','), ')')) %>% 
-    dplyr::select(value) %>% pull %>%
-    paste(collapse=',') 
-  
-  nRows = dbExecute(conn, paste0(statement, values))
-}
- 
+  values = slides %>% dplyr::filter(!is.na(AlternateID) & is.na(EndoscopyID)) %>% 
+    dplyr::mutate(AlternateID = shQuote(AlternateID), PathCaseID = shQuote(PathCaseID)) %>%
+    group_by(AlternateID) %>% 
+    dplyr::summarise( AID = paste0('(',paste(unique(AlternateID), collapse=', '),')'), PCID = paste0('(',paste(unique(PathCaseID), collapse=', '), ')') )
 
+  statement = paste0(
+"SELECT APID.PatientID, APID.AlternateID, ES.EndoscopyID, ES.ID, E.PathCaseID 
+  FROM AlternatePatientID AS APID
+  INNER JOIN Endoscopy AS E ON E.PatientID = APID.PatientID
+  INNER JOIN EndoscopySample AS ES ON E.ID = ES.EndoscopyID
+  WHERE APID.AlternateID IN ", values$AID, " AND E.PathCaseID IN ", values$PCID)
+  
+  newsample_ids = dbGetQuery(conn, statement) %>% as_tibble() %>% dplyr::rename(EndoscopySampleID = 'ID')
+  extra = slides %>% dplyr::filter(!is.na(AlternateID) & is.na(EndoscopyID)) %>% 
+    dplyr::select(-EndoscopySampleID, -EndoscopyID, -PatientID, -BlockLevel, -p53IHC, -matches('Notes'), -SampleType) %>%
+    left_join(newsample_ids, by=c('AlternateID', 'PathCaseID')) %>% dplyr::select(-EndoscopySampleID, -`New Name (Nov 2020)`) %>%
+    rowwise %>% dplyr::mutate(value = paste0('(', paste( c(PatientID, EndoscopyID, shQuote(Block), shQuote(Pathology)), collapse=', ' ),')') )
+  statementB = paste0("INSERT INTO EndoscopySample (PatientID, EndoscopyID, Block, Pathology) VALUES ", paste(extra$value, collapse=', ') )
+  nRows = dbExecute(conn, statementB)
+  
+  stmt = "SELECT ES.EndoscopyID, ES.ID, E.PatientID, ES.Block, ES.Pathology, E.PathCaseID, APID.AlternateID, APID.AltIDStudy
+FROM Endoscopy AS E
+INNER JOIN EndoscopySample AS ES ON E.ID = ES.EndoscopyID
+INNER JOIN AlternatePatientID AS APID ON APID.PatientID = E.PatientID"
+  all_samples = dbGetQuery(conn, stmt) %>% as_tibble() %>% dplyr::rename(EndoscopySampleID = 'ID') %>% dplyr::filter(is.na(AltIDStudy)) %>% dplyr::select(-AltIDStudy) %>% distinct
+
+  slide_values = slides %>% dplyr::select(AlternateID, PathCaseID, Block, `Slide file`, Notes) %>% 
+    inner_join(dplyr::select(all_samples, -Pathology), by=c('AlternateID', 'PathCaseID', 'Block')) %>% rowwise() %>%
+    dplyr::mutate(value = paste0('(', paste( c(EndoscopyID, EndoscopySampleID, PatientID, shQuote(`Slide file`), shQuote(Notes)), collapse=','), ')') )
+
+  missing = slide_values %>% dplyr::filter(is.na(EndoscopyID) | is.na(AlternateID) | is.na(EndoscopySampleID))
+  noslide = slide_values %>% dplyr::filter(!grepl('\\.ndpi', `Slide file`))
+
+  slide_values = slide_values %>% dplyr::filter( !is.na(EndoscopyID) & !is.na(AlternateID) & !is.na(EndoscopySampleID) & grepl('\\.ndpi', `Slide file`) )
+    
+  statement = paste0('INSERT INTO HistoPathSlides (EndoscopyID, EndoscopySampleID, PatientID, DigitalFileName, Notes) VALUES ', paste(slide_values$value, collapse=','))
+  nRows = dbExecute(conn, statement)
+}
+row_counts(conn,rev(tables)[-1])
+
+## TODO: Add sequence information to the SequenceMetadata table
+
+dbDisconnect(conn)
+
+message("\n\nFinished")

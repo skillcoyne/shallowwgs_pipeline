@@ -413,9 +413,9 @@ cvRR %>% mutate(`Gain/Loss` = ifelse(coef > 0 ,'Gain', 'Loss')) %>%
 ```{r, echo=F, warning=F, message=F, fig.height=10, fig.width=12}
 features = features %>% filter(label != 'cx') %>% separate(label, c('chr','start','end'), sep=':|-', remove=F) %>% 
   dplyr::mutate_at(vars(start, end), list(as.numeric)) %>% 
-  mutate(chr = factor(chr,levels=c(1:22))) %>% 
+  mutate(chr = factor(chr, levels=c(1:22), ordered=T)) %>% 
   dplyr::mutate(ymax = ifelse(coef > 0, max(globalCN.plot$data$mean.value), min(globalCN.plot$data$mean.value)), gl = factor(ifelse(coef > 0, 'gain','loss'))) %>%
-  left_join(chr.lengths %>% dplyr::select(chr, chr.length), by=c('chr')) %>% mutate(chr = factor(chr, levels=c(1:22), ordered=T))
+  left_join(chr.lengths %>% dplyr::select(chrom, chr.length), by=c('chr'='chrom')) %>% mutate(chr = factor(chr, levels=c(1:22), ordered=T))
 
 custom.max<-function(cf, hazards, ymax) {
   if (cf > 0) {
@@ -578,7 +578,7 @@ df = do.call(rbind, lapply(insilico.rocs, function(r)
 )))
 
 i.thresholds = do.call(bind_rows, purrr::map(insilico.rocs, function(r) pROC::coords(r, 'best') %>% as_tibble %>% 
-                                               mutate(AUC = r$auc, model=r$model, is=as.character(r$is)))) %>%
+                                               mutate(AUC = as.numeric(r$auc), model=r$model, is=as.character(r$is))) ) %>%
   rename_at(vars(matches('thresh|spec|sens')), funs(str_to_title)) 
 
 blues = RColorBrewer::brewer.pal(5,'Greys')
@@ -589,7 +589,7 @@ p = ggplot(df, aes(Specificity, Sensitivity)) +
     geom_line(data=df %>% filter( (AUC == min(AUC) ) & is != 'discovery'), color=blues[4], linetype = 'dotted', size=0.75) +
     scale_x_reverse() +
     geom_label_repel(data=filter(i.thresholds, AUC %in% range(AUC) | is == 'discovery'), aes(label=paste0('FPR ', round(1-Specificity,2), ' TPR ', round(Sensitivity,2), '\nAUC ',round(AUC,2))), color='black') +
-    #scale_color_brewer(palette='Blues') +
+    scale_color_brewer(palette='Blues') +
     labs(title='Discovery cohort: 50 models', subtitle='18:70 random patient splits', x='Specificity (1-FPR)', y='Sensitivity (TPR)')  + plot.theme +
     theme(legend.position = 'none', text = element_text(size=14))
 p
@@ -632,7 +632,6 @@ grid.arrange(roc.plot(pathroc, 'Pathology (LGD,HGD,IMC)'), roc.plot(hgdpathroc, 
 
 ### Per Endoscopy ROCs
 ```{r, echo=F, warning=F, message=F,fig.height=4, fig.width=4}
-
 tmp = pg.samp %>% dplyr::select(Patient, Status, Endoscopy.Year, PID, Prediction) %>%
   arrange(Patient, Endoscopy.Year, PID) 
 
@@ -763,7 +762,7 @@ rocNOLGD$model = 'Excluding LGD/HGD/IMC'
 
 m = bind_rows(
       get.roc.stat(roc,0.3),
-      get.roc.stat(rocNOHGD,0.3)
+#      get.roc.stat(rocNOHGD,0.3)
 #      get.roc.stat(rocNOLGD)
       ) %>% dplyr::mutate(model = factor(model)) %>% dplyr::mutate_if(is.numeric, list(~round(.,2))) 
 
@@ -812,7 +811,7 @@ p
 ggsave('plots/auc/multi_auc.png', plot=p+theme(legend.position = 'none'), height=6, width=8, units='in',dpi=300)
 ggsave('plots/auc/roc_leg.png', plot=grid.arrange(auc.leg), height=1, width=4, unit='in', dpi=300)
 
-rm(rocEndoM, rocEndoA, rocLastEndo, rocFirstEndo, rocRandEndo, rocNOHGD, rocNOLGD, rocPtM, rocPtA)
+rm(rocEndoM, rocEndoA, rocLastEndo, rocFirstEndo, rocRandEndo, rocPtM, rocPtA)
 ```
 
 
@@ -2189,11 +2188,12 @@ ggsave(filename='plots/performance/training_snpdv.png', plot=dv.snp.p, width=6, 
 
 # discovery + validation
 model.dir = '~/Data/BarrettsProgressionRisk/Analysis/models_5e6_all/50kb/'
-load(list.files(model.dir, 'loo_0.9.Rdata',recursive = T, full.names = T))
+load(list.files(model.dir, 'loo_0.9.Rdata',recursive = T, full.names = T)[2], verbose=T)
+#load(list.files(model.dir, 'loo_0.9.Rdata',recursive = T, full.names = T))
 d.n.patient = length(unique(pg.samp$Patient))
 d.roc = pROC::roc(Status ~ Prediction, data = pg.samp, ci=T, of='thresholds')
 
-load(list.files(model.dir, 'all.pt.alpha',recursive = T, full.names = T))
+load(list.files(model.dir, 'all.pt.alpha',recursive = T, full.names = T), verbose=T)
 d.coefs = coefs[['0.9']]
 d.perf = performance.at.1se[['0.9']]$mean
 rm(dysplasia.df, plots, pg.samp, models, nzcoefs, fits, performance.at.1se)
@@ -2257,27 +2257,33 @@ sem<-function(x) {
   sd(x)/sqrt(10)
 }
 # 
-# est = info  %>% dplyr::filter(!grepl('SNP', Cohort)) %>% 
-#   dplyr::mutate(n.patients = as.numeric(n.patients)) %>%
-#   group_by(n.patients, Cohort, Type) %>% 
-#   dplyr::summarise_at(vars(-n.samples,-threshold), list(~mean(.,na.rm=T))) %>% 
-#   arrange(n.patients) 
+est = info  %>% dplyr::filter(!grepl('SNP', Cohort)) %>%
+  dplyr::mutate(n.patients = as.numeric(n.patients)) %>%
+  group_by(n.patients, Cohort, Type) %>%
+  dplyr::summarise_at(vars(-n.samples,-threshold), list(~mean(.,na.rm=T))) %>%
+  arrange(n.patients) %>% ungroup %>%
+  dplyr::mutate(idx = row_number())
 # 
 # ggplot(est, aes(n.patients, auc)) + geom_point() + geom_smooth(method = 'lm') + xlim(20, 300) + ylim(0.6,1)
-# ggplot(est, aes(n.patients, specificity)) + geom_point() + geom_smooth(method = 'lm') + xlim(20, 300) + ylim(0.6,1)
+# ggplot(est, aes(n.patients, specificity)) + geom_point() + geom_smooth(method = 'lm')  + ylim(0.6,1)
 # ggplot(est, aes(n.patients, sensitivity)) + geom_point() + geom_smooth(method = 'lm') + xlim(20, 300) + ylim(0.6,1)
 # 
-# fit = lm(sensitivity~n.patients, data=est)
-# predict(fit, data.frame(n.patients = c(164, 190, 200, 250, 300)), interval = 'confidence' )
+fit = lm(sensitivity~n.patients, data=est)
+predict(fit, data.frame(n.patients = c(180, 190, 200, 220, 250, 275, 300)), interval = 'confidence', type = 'response' )
 # 
-# fit = lm((1-specificity)~n.patients, data=est)
-# predict(fit, data.frame(n.patients = c(190, 200, 250, 300)), interval = 'confidence' )
+fit = lm((specificity)~n.patients, data=est)
+predict(fit, data.frame(n.patients = c(180, 190, 200, 220, 250, 275, 300)), interval = 'confidence', type = 'response' )
 # 
-# fit = lm(auc~n.patients, data=est)
-# predict(fit, data.frame(n.patients = c(190, 200, 250, 300, 325)), interval = 'confidence' )
+fit = lm(auc~n.patients, data=est)
+predict(fit, data.frame(n.patients = c(180, 190, 200, 220, 250, 275, 300)), interval = 'confidence', type = 'response' )
+
+fit = lm(n.coefs~n.patients, data=est)
+autoplot(fit)
+predict(fit, data.frame(n.patients = c(180, 190, 200, 220, 250, 275, 300)), interval = 'confidence', type = 'response' )
+
 # 
-# fit = lm(n.patients~auc, data=est)
-# predict(fit, data.frame(auc = c(0.7, 0.89, 0.92, 0.95)), interval = 'confidence' )
+#fit = lm(n.patients~auc, data=est)
+#predict(fit, data.frame(auc = c(0.7, 0.89, 0.92, 0.95, 0.97)), interval = 'confidence' )
 
 
 
